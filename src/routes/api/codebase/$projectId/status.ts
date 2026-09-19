@@ -1,0 +1,194 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+	codebaseAnalyses,
+	codebaseSnapshots,
+	codebaseSyncSessions,
+	projects,
+	subscriptions,
+} from "@/db/schema";
+import {
+	CODEBASE_SYNC_RATE_LIMIT_ACTION,
+	type CodebaseSyncStatus,
+	canAccessSyncSession,
+	getSessionUsability,
+	isSyncCapableProject,
+	type SyncStatusResponse,
+	sanitizeSyncErrorCode,
+	syncStatusResponseSchema,
+} from "@/lib/codebase-sync";
+import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/session";
+import type { Plan } from "@/types/database";
+
+export const Route = createFileRoute("/api/codebase/$projectId/status")({
+	server: {
+		handlers: {
+			// Browser polling (2000ms, no SSE in MVP): persisted status plus
+			// timestamps, counts, safe error, and analysis linkage. Errors and
+			// payloads never carry tokens or source data.
+			GET: async ({
+				request,
+				params,
+			}: {
+				request: Request;
+				params: { projectId: string };
+			}) => {
+				let user: { id: string };
+				try {
+					user = await requireUser(request.headers);
+				} catch {
+					return Response.json({ error: "Unauthorized" }, { status: 401 });
+				}
+				const { projectId } = params;
+
+				const [sub] = await db
+					.select({ plan: subscriptions.plan })
+					.from(subscriptions)
+					.where(eq(subscriptions.userId, user.id))
+					.orderBy(desc(subscriptions.createdAt))
+					.limit(1);
+				const rawPlan = sub?.plan || "free";
+				const plan: Plan = ["free", "pro", "hengker"].includes(rawPlan)
+					? (rawPlan as Plan)
+					: "free";
+
+				const rateCheck = await checkRateLimit(
+					user.id,
+					plan,
+					CODEBASE_SYNC_RATE_LIMIT_ACTION,
+				);
+				if (!rateCheck.allowed)
+					return Response.json(
+						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
+						{ status: 429 },
+					);
+				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
+
+				const [project] = await db
+					.select({ id: projects.id, projectMode: projects.projectMode })
+					.from(projects)
+					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.limit(1);
+				if (!project)
+					return Response.json(
+						{ error: "Project tidak ditemukan" },
+						{ status: 404 },
+					);
+				if (!isSyncCapableProject(project))
+					return Response.json(
+						{
+							error: "Project ini bukan project existing-codebase",
+							code: "PROJECT_MODE_MISMATCH",
+						},
+						{ status: 400 },
+					);
+
+				const url = new URL(request.url);
+				const requestedSessionId = url.searchParams.get("sessionId");
+
+				let session = null;
+				if (requestedSessionId) {
+					const [row] = await db
+						.select()
+						.from(codebaseSyncSessions)
+						.where(eq(codebaseSyncSessions.id, requestedSessionId))
+						.limit(1);
+					if (row && canAccessSyncSession(row, user.id, projectId)) {
+						session = row;
+					}
+				} else {
+					const [row] = await db
+						.select()
+						.from(codebaseSyncSessions)
+						.where(
+							and(
+								eq(codebaseSyncSessions.projectId, projectId),
+								eq(codebaseSyncSessions.userId, user.id),
+							),
+						)
+						.orderBy(desc(codebaseSyncSessions.createdAt))
+						.limit(1);
+					session = row ?? null;
+				}
+				if (!session)
+					return Response.json(
+						{ error: "Belum ada sync session", code: "NO_SYNC_SESSION" },
+						{ status: 404 },
+					);
+
+				// Lazy expiry so polling converges on the terminal state.
+				let status = session.status as CodebaseSyncStatus;
+				const usability = getSessionUsability(session);
+				if (!usability.usable && usability.code === "SYNC_SESSION_EXPIRED") {
+					status = "expired";
+					await db
+						.update(codebaseSyncSessions)
+						.set({ status: "expired", updatedAt: new Date() })
+						.where(eq(codebaseSyncSessions.id, session.id));
+				}
+
+				const [snapshot] = await db
+					.select({
+						id: codebaseSnapshots.id,
+						fileCount: codebaseSnapshots.fileCount,
+						excludedCount: codebaseSnapshots.excludedCount,
+					})
+					.from(codebaseSnapshots)
+					.where(eq(codebaseSnapshots.syncSessionId, session.id))
+					.orderBy(desc(codebaseSnapshots.createdAt))
+					.limit(1);
+
+				let analysisId: string | null = null;
+				let errorCode: string | null = null;
+				let errorMessage: string | null = null;
+				if (snapshot) {
+					const [analysis] = await db
+						.select({
+							id: codebaseAnalyses.id,
+							status: codebaseAnalyses.status,
+							errorCode: codebaseAnalyses.errorCode,
+							errorMessage: codebaseAnalyses.errorMessage,
+						})
+						.from(codebaseAnalyses)
+						.where(eq(codebaseAnalyses.snapshotId, snapshot.id))
+						.orderBy(desc(codebaseAnalyses.createdAt))
+						.limit(1);
+					if (analysis) {
+						analysisId = analysis.id;
+						// Server-written codes only; unknown values collapse so
+						// analysis internals never leak through status polling.
+						if (analysis.errorCode) {
+							errorCode = sanitizeSyncErrorCode(analysis.errorCode);
+						}
+						errorMessage = analysis.errorMessage;
+					}
+				}
+
+				const toIso = (value: Date | null | undefined): string | undefined =>
+					value ? value.toISOString() : undefined;
+				const response: SyncStatusResponse = {
+					projectId,
+					sessionId: session.id,
+					status,
+					fileCount: snapshot?.fileCount ?? undefined,
+					excludedCount: snapshot?.excludedCount ?? undefined,
+					errorCode,
+					errorMessage,
+					analysisId,
+					createdAt: toIso(session.createdAt),
+					updatedAt: toIso(session.updatedAt),
+					expiresAt: toIso(session.expiresAt),
+				};
+				const parsed = syncStatusResponseSchema.safeParse(response);
+				if (!parsed.success)
+					return Response.json(
+						{ error: "Gagal membaca status sync", code: "SYNC_FAILED" },
+						{ status: 500 },
+					);
+				return Response.json(parsed.data);
+			},
+		},
+	},
+});

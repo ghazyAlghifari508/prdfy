@@ -1,20 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
+	applySessionRevocation,
 	assertSyncTransition,
+	buildSyncCommand,
 	CODEBASE_ANALYSIS_STATUSES,
 	CODEBASE_SNAPSHOT_STATUSES,
+	CODEBASE_SYNC_RATE_LIMIT_ACTION,
+	CODEBASE_SYNC_SCOPE,
 	type CodebaseSyncStatus,
+	canAccessSyncSession,
 	canTransitionSyncStatus,
+	cliHandshakeRequestSchema,
+	cliHandshakeResponseSchema,
+	getSessionUsability,
+	hasSyncCapability,
 	isSafeRelativePath,
+	isSupportedCliVersion,
+	isSyncCapableProject,
 	isTerminalSyncStatus,
 	manifestEntrySchema,
+	type SyncSessionLike,
 	SyncTransitionError,
+	sanitizeSyncErrorCode,
 	selectActiveSnapshot,
+	shouldCreateSyncSession,
 	snapshotContextSchema,
 	syncPromptPayloadSchema,
 	syncStatusResponseSchema,
+	toSessionMetadata,
 } from "./codebase-sync";
-import { hashSyncToken } from "./codebase-sync.server";
+import { generateSyncToken, hashSyncToken } from "./codebase-sync.server";
 import {
 	CODEBASE_CLI_MIN_VERSION,
 	CODEBASE_MAX_CHUNK_BYTES,
@@ -312,5 +327,259 @@ describe("snapshot and analysis status vocabularies", () => {
 		expect(
 			(CODEBASE_ANALYSIS_STATUSES as readonly string[]).includes("pending"),
 		).toBe(true);
+	});
+});
+
+describe("sync capability scope (Task 4)", () => {
+	it("defines a dedicated narrow scope distinct from auto-key scopes", () => {
+		expect(CODEBASE_SYNC_SCOPE).toBe("codebase:sync");
+		expect(CODEBASE_SYNC_SCOPE).not.toBe("read:project");
+		expect(CODEBASE_SYNC_SCOPE).not.toBe("write:task:status");
+	});
+
+	it("grants sync capability only to the dedicated scope, admin, or wildcard", () => {
+		expect(hasSyncCapability([CODEBASE_SYNC_SCOPE])).toBe(true);
+		expect(hasSyncCapability(["admin"])).toBe(true);
+		expect(hasSyncCapability(["*"])).toBe(true);
+	});
+
+	it("rejects ordinary auto-key scopes and empty scope sets", () => {
+		expect(hasSyncCapability(["read:project"])).toBe(false);
+		expect(hasSyncCapability(["read:project", "write:task:status"])).toBe(
+			false,
+		);
+		expect(hasSyncCapability([])).toBe(false);
+		expect(hasSyncCapability(null)).toBe(false);
+		expect(hasSyncCapability(undefined)).toBe(false);
+	});
+
+	it("rate-limits sync endpoints with the neighboring api_call convention", () => {
+		expect(CODEBASE_SYNC_RATE_LIMIT_ACTION).toBe("api_call");
+	});
+});
+
+describe("sync session usability (Task 4)", () => {
+	const base: SyncSessionLike = {
+		id: "sess_1",
+		projectId: "proj_1",
+		userId: "user_1",
+		status: "waiting_for_cli",
+		expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+		consumedAt: null,
+	};
+
+	it("treats a fresh active session as usable", () => {
+		expect(getSessionUsability(base, new Date()).usable).toBe(true);
+	});
+
+	it("rejects an expired session without echoing credentials", () => {
+		const expired = {
+			...base,
+			expiresAt: new Date(Date.now() - 1000).toISOString(),
+		};
+		const result = getSessionUsability(expired, new Date());
+		expect(result.usable).toBe(false);
+		if (!result.usable) {
+			expect(result.code).toBe("SYNC_SESSION_EXPIRED");
+			expect(result.httpStatus).toBe(410);
+		}
+		expect(JSON.stringify(result)).not.toContain("placeholder");
+	});
+
+	it("rejects a consumed session after completion or revocation", () => {
+		const consumed = { ...base, consumedAt: new Date().toISOString() };
+		const result = getSessionUsability(consumed, new Date());
+		expect(result.usable).toBe(false);
+		if (!result.usable) {
+			expect(result.code).toBe("SYNC_CREDENTIAL_REVOKED");
+			expect(result.httpStatus).toBe(401);
+		}
+	});
+
+	it("rejects terminal sessions even before expiry", () => {
+		for (const status of ["ready", "failed", "expired"] as const) {
+			const result = getSessionUsability({ ...base, status }, new Date());
+			expect(result.usable).toBe(false);
+		}
+	});
+});
+
+describe("sync session ownership and project binding (Task 4)", () => {
+	const session: SyncSessionLike = {
+		id: "sess_1",
+		projectId: "proj_1",
+		userId: "user_1",
+		status: "waiting_for_cli",
+		expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+		consumedAt: null,
+	};
+
+	it("allows the owning user on the bound project", () => {
+		expect(canAccessSyncSession(session, "user_1", "proj_1")).toBe(true);
+	});
+
+	it("rejects a different user on the same project", () => {
+		expect(canAccessSyncSession(session, "user_2", "proj_1")).toBe(false);
+	});
+
+	it("rejects the owner presenting a different project (wrong-project binding)", () => {
+		expect(canAccessSyncSession(session, "user_1", "proj_2")).toBe(false);
+	});
+
+	it("requires an existing_codebase project mode", () => {
+		expect(isSyncCapableProject({ projectMode: "existing_codebase" })).toBe(
+			true,
+		);
+		expect(isSyncCapableProject({ projectMode: "greenfield" })).toBe(false);
+		expect(isSyncCapableProject({ projectMode: null })).toBe(false);
+		expect(isSyncCapableProject({})).toBe(false);
+	});
+});
+
+describe("one-active-session and retry semantics (Task 4)", () => {
+	const active: SyncSessionLike = {
+		id: "sess_active",
+		projectId: "proj_1",
+		userId: "user_1",
+		status: "waiting_for_cli",
+		expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+		consumedAt: null,
+	};
+	const expired: SyncSessionLike = {
+		...active,
+		id: "sess_old",
+		status: "expired",
+		expiresAt: new Date(Date.now() - 1000).toISOString(),
+	};
+
+	it("creates when no session exists", () => {
+		expect(shouldCreateSyncSession([], new Date())).toBe(true);
+	});
+
+	it("refuses a second credential while one is still usable", () => {
+		expect(shouldCreateSyncSession([expired, active], new Date())).toBe(false);
+	});
+
+	it("allows a retry credential once prior sessions are terminal or expired", () => {
+		expect(shouldCreateSyncSession([expired], new Date())).toBe(true);
+	});
+
+	it("revocation expires the credential and stamps consumption", () => {
+		const revoked = applySessionRevocation(
+			active,
+			new Date("2026-09-19T00:00:00.000Z"),
+		);
+		expect(revoked.status).toBe("expired");
+		expect(revoked.consumedAt).toEqual(new Date("2026-09-19T00:00:00.000Z"));
+		expect(revoked.id).toBe(active.id);
+		expect(revoked.projectId).toBe(active.projectId);
+		expect(getSessionUsability(revoked, new Date()).usable).toBe(false);
+	});
+
+	it("exposes session metadata without any credential material", () => {
+		const metadata = toSessionMetadata({
+			...active,
+			credentialHash: "hash-value",
+		});
+		expect(metadata.sessionId).toBe(active.id);
+		expect(metadata.status).toBe(active.status);
+		expect("credentialHash" in metadata).toBe(false);
+		expect("syncToken" in metadata).toBe(false);
+		expect(JSON.stringify(metadata)).not.toContain("hash-value");
+	});
+});
+
+describe("sync credential generation and hash-only persistence (Task 4)", () => {
+	it("generates a 64-char hex credential", () => {
+		const token = generateSyncToken();
+		expect(token).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	it("generates unique credentials", () => {
+		const seen = new Set(Array.from({ length: 50 }, () => generateSyncToken()));
+		expect(seen.size).toBe(50);
+	});
+
+	it("never stores the raw credential alongside its hash", () => {
+		const raw = generateSyncToken();
+		const stored = hashSyncToken(raw);
+		expect(stored).not.toContain(raw);
+		expect(stored).toMatch(/^[0-9a-f]{64}$/);
+	});
+});
+
+describe("safe sync errors and CLI version gate (Task 4)", () => {
+	it("passes through known safe error codes", () => {
+		expect(sanitizeSyncErrorCode("SYNC_SESSION_EXPIRED")).toBe(
+			"SYNC_SESSION_EXPIRED",
+		);
+		expect(sanitizeSyncErrorCode("INVALID_SYNC_CREDENTIAL")).toBe(
+			"INVALID_SYNC_CREDENTIAL",
+		);
+	});
+
+	it("collapses unknown codes to a generic failure without payload echo", () => {
+		expect(sanitizeSyncErrorCode("E_CONN_RESET db password=hunter2")).toBe(
+			"SYNC_FAILED",
+		);
+		expect(sanitizeSyncErrorCode("")).toBe("SYNC_FAILED");
+		expect(sanitizeSyncErrorCode(null)).toBe("SYNC_FAILED");
+		expect(sanitizeSyncErrorCode(undefined)).toBe("SYNC_FAILED");
+	});
+
+	it("gates CLI versions against the locked minimum", () => {
+		expect(isSupportedCliVersion("2.0.0", "2.0.0")).toBe(true);
+		expect(isSupportedCliVersion("2.1.0", "2.0.0")).toBe(true);
+		expect(isSupportedCliVersion("1.9.9", "2.0.0")).toBe(false);
+		expect(isSupportedCliVersion("2.0.0", "2.0.1")).toBe(false);
+		expect(isSupportedCliVersion("not-a-version", "2.0.0")).toBe(false);
+	});
+
+	it("builds the locked sync command with a placeholder, never a raw token", () => {
+		const raw = generateSyncToken();
+		const command = buildSyncCommand("proj_123");
+		expect(command).toBe(
+			"prdfy codebase sync --project-id proj_123 --sync-token <token>",
+		);
+		expect(command).not.toContain(raw);
+	});
+});
+
+describe("CLI handshake DTOs (Task 4)", () => {
+	it("accepts a handshake body carrying only the CLI version", () => {
+		const result = cliHandshakeRequestSchema.safeParse({
+			cliVersion: "2.0.0",
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects a handshake body without a CLI version", () => {
+		expect(cliHandshakeRequestSchema.safeParse({}).success).toBe(false);
+		expect(
+			cliHandshakeRequestSchema.safeParse({ cliVersion: "" }).success,
+		).toBe(false);
+	});
+
+	it("accepts the bound attempt/snapshot handshake response", () => {
+		const result = cliHandshakeResponseSchema.safeParse({
+			sessionId: "sess_1",
+			attemptId: "sess_1",
+			snapshotId: "snap_1",
+			status: "connected",
+			cliMinVersion: "2.0.0",
+			expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects a handshake response missing snapshot identity", () => {
+		const result = cliHandshakeResponseSchema.safeParse({
+			sessionId: "sess_1",
+			attemptId: "sess_1",
+			status: "connected",
+			cliMinVersion: "2.0.0",
+			expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+		});
+		expect(result.success).toBe(false);
 	});
 });

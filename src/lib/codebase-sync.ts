@@ -227,3 +227,240 @@ export function selectActiveSnapshot<T extends SelectableSnapshot>(
 	}
 	return ready[0];
 }
+
+// === Sync capability scope (Task 4) ===
+// Dedicated narrow scope for codebase sync uploads. A sync credential must
+// not grant task mutation or unrelated project access, and ordinary auto-CLI
+// keys (`read:project`, `write:task:status`, …) must never satisfy a sync
+// capability check. Auto-key scopes in
+// `src/routes/api/settings/api-keys/auto.ts` stay unchanged.
+
+export const CODEBASE_SYNC_SCOPE = "codebase:sync" as const;
+
+export function hasSyncCapability(
+	scopes: readonly string[] | null | undefined,
+): boolean {
+	if (!scopes) return false;
+	return (
+		scopes.includes(CODEBASE_SYNC_SCOPE) ||
+		scopes.includes("admin") ||
+		scopes.includes("*")
+	);
+}
+
+// === Sync rate-limit convention (Task 4) ===
+// Sync endpoints reuse the neighboring `api_call` action from
+// `src/lib/rate-limit.ts` (same convention as `/api/ask/options`).
+
+export const CODEBASE_SYNC_RATE_LIMIT_ACTION = "api_call" as const;
+
+// === Sync session lifecycle (Task 4; pure, DB-agnostic) ===
+// Row shapes are structural so these helpers stay unit-testable without a
+// database and importable from isomorphic code (no node:crypto here —
+// credential generation/hashing lives in `codebase-sync.server.ts`).
+
+export interface SyncSessionLike {
+	id: string;
+	projectId: string;
+	userId: string;
+	status: string;
+	expiresAt: Date | string;
+	consumedAt?: Date | string | null;
+	updatedAt?: Date | string | null;
+}
+
+export type SessionUsability =
+	| { usable: true }
+	| {
+			usable: false;
+			code:
+				| "SYNC_SESSION_EXPIRED"
+				| "SYNC_CREDENTIAL_REVOKED"
+				| "SYNC_SESSION_TERMINAL";
+			httpStatus: 401 | 410;
+	  };
+
+export function getSessionUsability(
+	session: SyncSessionLike,
+	now: Date = new Date(),
+): SessionUsability {
+	if (session.consumedAt) {
+		return {
+			usable: false,
+			code: "SYNC_CREDENTIAL_REVOKED",
+			httpStatus: 401,
+		};
+	}
+	if (new Date(session.expiresAt).getTime() <= now.getTime()) {
+		return {
+			usable: false,
+			code: "SYNC_SESSION_EXPIRED",
+			httpStatus: 410,
+		};
+	}
+	if (
+		(CODEBASE_SYNC_TERMINAL_STATUSES as readonly string[]).includes(
+			session.status,
+		)
+	) {
+		return {
+			usable: false,
+			code: "SYNC_SESSION_TERMINAL",
+			httpStatus: 401,
+		};
+	}
+	return { usable: true };
+}
+
+export function canAccessSyncSession(
+	session: Pick<SyncSessionLike, "projectId" | "userId">,
+	userId: string,
+	projectId: string,
+): boolean {
+	return session.userId === userId && session.projectId === projectId;
+}
+
+export function isSyncCapableProject(project: {
+	projectMode?: string | null;
+}): boolean {
+	return project?.projectMode === "existing_codebase";
+}
+
+// One usable credential per project: a create/retry request is honored only
+// when no usable session remains. Terminal or expired rows never block a
+// retry — the retry mints a new session instead of mutating them.
+export function shouldCreateSyncSession(
+	existing: readonly SyncSessionLike[],
+	now: Date = new Date(),
+): boolean {
+	return !existing.some((session) => getSessionUsability(session, now).usable);
+}
+
+// Revocation is explicit: the row moves to `expired` and records consumption
+// so the credential is rejected after completion, expiry, or manual revoke.
+// The credential hash is preserved (audit); no raw credential is introduced.
+export function applySessionRevocation<T extends SyncSessionLike>(
+	session: T,
+	now: Date = new Date(),
+): T {
+	return { ...session, status: "expired", consumedAt: now, updatedAt: now };
+}
+
+export interface SyncSessionMetadata {
+	sessionId: string;
+	projectId: string;
+	status: string;
+	expiresAt: string;
+	createdAt?: string;
+	updatedAt?: string;
+}
+
+// Browser reads (session GET, status polling) expose metadata only — never
+// the credential hash or a raw credential after initial creation.
+export function toSessionMetadata(
+	session: SyncSessionLike & {
+		credentialHash?: string;
+		createdAt?: Date | string | null;
+	},
+): SyncSessionMetadata {
+	const toIso = (
+		value: Date | string | null | undefined,
+	): string | undefined => {
+		if (!value) return undefined;
+		return value instanceof Date ? value.toISOString() : value;
+	};
+	return {
+		sessionId: session.id,
+		projectId: session.projectId,
+		status: session.status,
+		expiresAt: toIso(session.expiresAt) ?? "",
+		createdAt: toIso(session.createdAt),
+		updatedAt: toIso(session.updatedAt),
+	};
+}
+
+// === Safe sync errors (Task 4) ===
+// Only whitelisted codes reach clients. Unknown/detail errors collapse to
+// SYNC_FAILED so tokens, source data, and internals never leak into errors.
+
+export const SYNC_SAFE_ERROR_CODES = [
+	"SYNC_FAILED",
+	"SYNC_SESSION_ACTIVE",
+	"SYNC_SESSION_EXPIRED",
+	"SYNC_SESSION_TERMINAL",
+	"SYNC_CREDENTIAL_REVOKED",
+	"INVALID_SYNC_CREDENTIAL",
+	"NO_SYNC_SESSION",
+	"CLI_UPDATE_REQUIRED",
+	"PROJECT_MODE_MISMATCH",
+	"SNAPSHOT_TOO_LARGE",
+	"ANALYSIS_FAILED",
+] as const;
+
+export type SyncSafeErrorCode = (typeof SYNC_SAFE_ERROR_CODES)[number];
+
+export function sanitizeSyncErrorCode(code: unknown): SyncSafeErrorCode {
+	if (
+		typeof code === "string" &&
+		(SYNC_SAFE_ERROR_CODES as readonly string[]).includes(code)
+	) {
+		return code as SyncSafeErrorCode;
+	}
+	return "SYNC_FAILED";
+}
+
+// === CLI handshake DTOs (Task 4) ===
+// Mirrors `packages/cli/src/lib/sync-client.ts`: the CLI POSTs `{cliVersion}`
+// with the sync token as Bearer auth and expects the bound session/attempt/
+// snapshot identity plus the minimum CLI version (the CLI enforces the gate
+// client-side via `CLI_UPDATE_REQUIRED`).
+
+export const cliHandshakeRequestSchema = z.object({
+	cliVersion: z.string().min(1).max(64),
+});
+
+export type CliHandshakeRequest = z.infer<typeof cliHandshakeRequestSchema>;
+
+export const cliHandshakeResponseSchema = z.object({
+	sessionId: z.string().min(1),
+	attemptId: z.string().min(1),
+	snapshotId: z.string().min(1),
+	status: codebaseSyncStatusSchema,
+	cliMinVersion: z.string().min(1),
+	expiresAt: z.string().datetime(),
+});
+
+export type CliHandshakeResponse = z.infer<typeof cliHandshakeResponseSchema>;
+
+// Numeric semver comparison for the server-side version hint. Malformed
+// input is treated as unsupported (fail closed).
+export function isSupportedCliVersion(
+	cliVersion: string,
+	minVersion: string = CODEBASE_CLI_MIN_VERSION,
+): boolean {
+	const parse = (value: string): number[] | null => {
+		const parts = value.split(".");
+		if (parts.length === 0) return null;
+		const numbers: number[] = [];
+		for (const part of parts) {
+			if (!/^\d+$/.test(part)) return null;
+			numbers.push(Number(part));
+		}
+		return numbers;
+	};
+	const current = parse(cliVersion);
+	const minimum = parse(minVersion);
+	if (!current || !minimum) return false;
+	for (let i = 0; i < Math.max(current.length, minimum.length); i += 1) {
+		const diff = (current[i] ?? 0) - (minimum[i] ?? 0);
+		if (diff !== 0) return diff > 0;
+	}
+	return true;
+}
+
+// Locked CLI invocation. The raw credential travels in `SyncPromptPayload`
+// (`syncToken` field, exposed once); the command embeds only a placeholder so
+// the credential never appears in a copyable string by accident.
+export function buildSyncCommand(projectId: string): string {
+	return `prdfy codebase sync --project-id ${projectId} --sync-token <token>`;
+}
