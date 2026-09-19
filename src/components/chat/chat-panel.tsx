@@ -1,6 +1,7 @@
 "use client";
 
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
+import { Lock } from "lucide-react";
 import {
 	memo,
 	startTransition,
@@ -10,13 +11,10 @@ import {
 	useState,
 } from "react";
 import { syncPaymentStatus } from "@/app/actions/payment";
-import { BRIEF_MAX_CHARS } from "@/lib/constants";
 import {
-	clearBriefContext,
 	clearPrdDraft,
 	consumePendingPrdPrompt,
 	consumeResumeIntent,
-	getBriefContext,
 	getPrdDraft,
 	savePendingPrdPrompt,
 	savePrdDraft,
@@ -163,6 +161,7 @@ interface ChatPanelProps {
 	onPrdRevised?: (content: string) => void;
 	enableAutoSubmit?: boolean;
 	inputDisabled?: boolean;
+	isReadOnly?: boolean;
 	currentPrdContent?: string;
 	selectedVersionNum?: number; // Version number currently viewed (for revision context)
 	userPlan?: Plan; // Pass from server to avoid client fetch
@@ -182,6 +181,7 @@ export const ChatPanel = memo(function ChatPanel({
 	onPrdRevised,
 	enableAutoSubmit = true,
 	inputDisabled = false,
+	isReadOnly = false,
 	currentPrdContent = "",
 	selectedVersionNum,
 	userPlan: initialUserPlan = "free",
@@ -309,15 +309,6 @@ export const ChatPanel = memo(function ChatPanel({
 			/** If this is a resume call, the previous partial content */
 			existingPartialContent: string = "",
 		) => {
-			// ponytail: attach brief context for grounding AI (Task 8) — read from
-			// sessionStorage where ContextUpload saved it via ask flow.
-			if (
-				(chatMode === "generate" || chatMode === "resume") &&
-				!body.briefContext
-			) {
-				const brief = getBriefContext();
-				if (brief) body.briefContext = brief.slice(0, BRIEF_MAX_CHARS);
-			}
 			const abortController = new AbortController();
 			abortControllerRef.current = abortController;
 
@@ -512,7 +503,6 @@ export const ChatPanel = memo(function ChatPanel({
 									if (typeof parsed.content === "string" && parsed.content) {
 										onPrdRevised?.(parsed.content);
 									}
-									clearBriefContext();
 									startTransition(() => {
 										router.invalidate();
 									});
@@ -640,13 +630,9 @@ export const ChatPanel = memo(function ChatPanel({
 					if (finalDisplayContent.trim()) {
 						if (chatMode === "resume") {
 							setGeneratingPRD(false);
-							clearBriefContext();
 							startTransition(() => {
 								router.invalidate();
 							});
-						}
-						if (chatMode === "generate" || chatMode === "resume") {
-							clearBriefContext();
 						}
 						// revise - not reached if done event handled it, but keep
 						// state clean in case the stream ended without a done event.
@@ -880,7 +866,8 @@ export const ChatPanel = memo(function ChatPanel({
 		// Reset auto-submit guard when re-mounting project (ChatPanel stays mounted
 		// with CSS display:none, so ref persists across navigations otherwise).
 		autoSubmitAttemptedRef.current = false;
-		if (!enableAutoSubmit || isStreaming || messages.length > 0) return;
+		if (isReadOnly || !enableAutoSubmit || isStreaming || messages.length > 0)
+			return;
 
 		const pending = consumePendingPrdPrompt();
 		if (!pending) return;
@@ -1066,81 +1053,101 @@ export const ChatPanel = memo(function ChatPanel({
 
 			{/* Input Area */}
 			<div className="border-t border-graphite p-4">
-				<div className="relative flex flex-col rounded-md bg-charcoal shadow-[var(--shadow-inset)] transition-shadow duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:shadow-[inset_0_0_0_1px_rgba(94,106,210,0.85)]">
-					<textarea
-						ref={inputRef}
-						value={input}
-						onChange={(e) => setInput(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								handleSend();
-							}
-						}}
-						placeholder={
-							isEffectivelyDisabled
-								? "Pilih proyek dari daftar atau buat baru dari beranda"
-								: projectId
-									? "Ketik pesan atau instruksi revisi PRD..."
-									: "Ceritakan ide produkmu..."
-						}
-						className={cn(
-							"w-full resize-none border-none bg-transparent px-3 pb-2 pt-3 text-[14px] text-snow outline-none placeholder:text-slate",
-							isEffectivelyDisabled && "cursor-not-allowed opacity-70",
-						)}
-						style={{
-							color: "var(--text-primary)",
-							caretColor: "var(--text-primary)",
-						}}
-						rows={2}
-						disabled={isStreaming || isEffectivelyDisabled}
-					/>
-					<div className="flex items-center justify-between px-3 pb-3 pt-1">
-						<button
-							onClick={isStreaming ? handleCancel : () => handleSend()}
-							disabled={
-								!isStreaming &&
-								(!input.trim() ||
-									isSubmittingRef.current ||
-									isEffectivelyDisabled)
+				{isReadOnly ? (
+					<div
+						role="status"
+						aria-label="PRD dikunci"
+						className="flex items-start gap-3 rounded-md border border-graphite/60 bg-charcoal/80 p-3.5 text-xs text-fog"
+					>
+						<Lock size={16} className="mt-0.5 shrink-0 text-amber-400" />
+						<div className="flex flex-col gap-1">
+							<span className="font-[510] text-snow">
+								Dokumen PRD Dikunci (Read-Only)
+							</span>
+							<span className="leading-relaxed text-fog/80">
+								Proyek telah mencapai tahap Acceptance Criteria / Task. Dokumen
+								PRD tetap dapat dibaca dan diekspor sebagai referensi, namun
+								revisi dinonaktifkan untuk menjaga konsistensi alur proyek.
+							</span>
+						</div>
+					</div>
+				) : (
+					<div className="relative flex flex-col rounded-md bg-charcoal shadow-[var(--shadow-inset)] transition-shadow duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:shadow-[inset_0_0_0_1px_rgba(94,106,210,0.85)]">
+						<textarea
+							ref={inputRef}
+							value={input}
+							onChange={(e) => setInput(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" && !e.shiftKey) {
+									e.preventDefault();
+									handleSend();
+								}
+							}}
+							placeholder={
+								isEffectivelyDisabled
+									? "Pilih proyek dari daftar atau buat baru dari beranda"
+									: projectId
+										? "Ketik pesan atau instruksi revisi PRD..."
+										: "Ceritakan ide produkmu..."
 							}
 							className={cn(
-								"flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] disabled:opacity-30 active:scale-[0.98]",
-								isStreaming
-									? "bg-crimson text-white hover:bg-crimson/90"
-									: "btn-primary hover:brightness-105",
+								"w-full resize-none border-none bg-transparent px-3 pb-2 pt-3 text-[14px] text-snow outline-none placeholder:text-slate",
+								isEffectivelyDisabled && "cursor-not-allowed opacity-70",
 							)}
-							title={
-								isStreaming
-									? "Hentikan Proses"
-									: projectId
-										? "Update PRD"
-										: "Generate PRD"
-							}
-						>
-							{isStreaming ? (
-								<svg
-									width="12"
-									height="12"
-									viewBox="0 0 16 16"
-									fill="currentColor"
-								>
-									<rect x="3" y="3" width="10" height="10" rx="1" />
-								</svg>
-							) : (
-								<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-									<path
-										d="M2 8L14 8M10 4L14 8L10 12"
-										stroke="currentColor"
-										strokeWidth="2"
-										strokeLinecap="round"
-										strokeLinejoin="round"
-									/>
-								</svg>
-							)}
-						</button>
+							style={{
+								color: "var(--text-primary)",
+								caretColor: "var(--text-primary)",
+							}}
+							rows={2}
+							disabled={isStreaming || isEffectivelyDisabled}
+						/>
+						<div className="flex items-center justify-between px-3 pb-3 pt-1">
+							<button
+								onClick={isStreaming ? handleCancel : () => handleSend()}
+								disabled={
+									!isStreaming &&
+									(!input.trim() ||
+										isSubmittingRef.current ||
+										isEffectivelyDisabled)
+								}
+								className={cn(
+									"flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] disabled:opacity-30 active:scale-[0.98]",
+									isStreaming
+										? "bg-crimson text-white hover:bg-crimson/90"
+										: "btn-primary hover:brightness-105",
+								)}
+								title={
+									isStreaming
+										? "Hentikan Proses"
+										: projectId
+											? "Update PRD"
+											: "Generate PRD"
+								}
+							>
+								{isStreaming ? (
+									<svg
+										width="12"
+										height="12"
+										viewBox="0 0 16 16"
+										fill="currentColor"
+									>
+										<rect x="3" y="3" width="10" height="10" rx="1" />
+									</svg>
+								) : (
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+										<path
+											d="M2 8L14 8M10 4L14 8L10 12"
+											stroke="currentColor"
+											strokeWidth="2"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+										/>
+									</svg>
+								)}
+							</button>
+						</div>
 					</div>
-				</div>
+				)}
 			</div>
 
 			{/* Credit Exhausted Modal */}

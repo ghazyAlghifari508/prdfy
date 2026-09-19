@@ -91,6 +91,7 @@ export const Route = createFileRoute("/api/ask/options")({
 				const [project] = await db
 					.select({
 						id: projects.id,
+						name: projects.name,
 						language: projects.language,
 						projectMode: projects.projectMode,
 					})
@@ -100,17 +101,10 @@ export const Route = createFileRoute("/api/ask/options")({
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
-				// Task 8 Ask handoff (existing-codebase only): authoritative
-				// server-side copy of answers/compiled prompt so refresh and
-				// multi-device access keep them. sessionStorage stays for UI
-				// continuity. Greenfield never takes this branch and consumes
-				// no credits here (ask actions are credit-free).
+				// Ask handoff: authoritative server-side copy of answers, prompt,
+				// and questions so refresh, History navigation, and multi-device
+				// access keep state. Survives tab close. Greenfield & existing modes.
 				if (action === "save-handoff") {
-					if (project.projectMode !== "existing_codebase")
-						return Response.json(
-							{ error: "Handoff hanya untuk proyek existing codebase" },
-							{ status: 400 },
-						);
 					const parsed = askHandoffSchema.safeParse({
 						...(typeof handoff === "object" && handoff !== null ? handoff : {}),
 						projectId,
@@ -121,14 +115,13 @@ export const Route = createFileRoute("/api/ask/options")({
 							{ status: 400 },
 						);
 					try {
-						// Snapshot write-through (Task 9): stamp the handoff with
-						// the snapshot that is active at submit time for traceability.
-						// No ready snapshot saves unstamped; a database failure fails
-						// the save rather than silently losing identity. Generation
-						// still resolves the active snapshot at call time.
+						// Snapshot write-through: stamp the handoff with the snapshot
+						// that is active at submit time for existing-codebase traceability.
 						const activeSnapshotId =
-							parsed.data.snapshotId ??
-							(await resolveActiveSnapshotId(projectId));
+							project.projectMode === "existing_codebase"
+								? (parsed.data.snapshotId ??
+									(await resolveActiveSnapshotId(projectId)))
+								: null;
 						await saveAskHandoff(user.id, {
 							...parsed.data,
 							...(activeSnapshotId ? { snapshotId: activeSnapshotId } : {}),
@@ -143,17 +136,21 @@ export const Route = createFileRoute("/api/ask/options")({
 					return Response.json({ saved: true });
 				}
 				if (action === "get-handoff") {
-					if (project.projectMode !== "existing_codebase")
-						return Response.json(
-							{ error: "Handoff hanya untuk proyek existing codebase" },
-							{ status: 400 },
-						);
-					const saved = await getAskHandoff(projectId, user.id);
-					if (!saved)
-						return Response.json(
-							{ error: "Handoff tidak ditemukan" },
-							{ status: 404 },
-						);
+					let saved = await getAskHandoff(projectId, user.id);
+					if (!saved) {
+						// Fallback for projects pre-dating handoff persistence:
+						// synthesize minimal state using project name so Ask flow does not bounce.
+						saved = {
+							projectId,
+							answers: [],
+							state: {
+								prompt: project.name,
+								platform: "web",
+								session: 1,
+								questions: [],
+							},
+						};
+					}
 					return Response.json({ handoff: saved });
 				}
 

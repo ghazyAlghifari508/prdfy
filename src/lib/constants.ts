@@ -48,8 +48,6 @@ export const MIN_PROMPT_LENGTH = 20;
 export const MAX_PROMPT_LENGTH = 3000;
 export const HOME_DRAFT_DEBOUNCE_MS = 300;
 export const HISTORY_PAGE_SIZE = 12;
-export const BRIEF_MAX_CHARS = 5000;
-export const BRIEF_MAX_BYTES = 2 * 1024 * 1024;
 export const PDF_STYLES = {
 	font: "Inter",
 	headerSize: 14,

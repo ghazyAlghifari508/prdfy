@@ -8,16 +8,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { and, eq } from "drizzle-orm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodebaseReview } from "@/components/codebase/codebase-review";
-import { SyncAgentModal } from "@/components/codebase/sync-agent-modal";
+import { ScreenConnect } from "@/components/codebase/screen-connect";
 import { SyncStatus } from "@/components/codebase/sync-status";
-import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import type { AnalysisResponse } from "@/lib/codebase-analysis";
@@ -26,11 +18,13 @@ import {
 	type SyncPromptPayload,
 	type SyncStatusResponse,
 	syncPromptPayloadSchema,
+	syncStatusResponseSchema,
 } from "@/lib/codebase-sync";
+import { CODEBASE_SYNC_POLL_INTERVAL_MS } from "@/lib/constants";
 import { requireUserServer } from "@/lib/session";
 import { useLastRoute } from "@/lib/use-last-route";
 
-// Route entry decision (unit-tested in ./$id.test.ts): existing-codebase
+// Route entry decision (unit-tested in ./-codebase-entry.test.ts): existing-codebase
 // projects enter; greenfield and unknown modes never enter this flow.
 export function decideCodebaseEntry(
 	projectMode: string | null | undefined,
@@ -103,26 +97,11 @@ function CodebasePage() {
 	const reportLastRoute = useLastRoute(d.projectId);
 
 	const [payload, setPayload] = useState<SyncPromptPayload | null>(null);
-	const [modalOpen, setModalOpen] = useState(false);
-	const [pageError, setPageError] = useState<string | null>(null);
-	// Handoff-loss recovery (Task 9): the Home handoff is one-time storage —
-	// opening this page in another tab (or after storage loss) and pressing
-	// "Mulai sync" answers 409 SYNC_SESSION_ACTIVE because the creation-time
-	// session is still usable. Offer an explicit revoke-with-warning CTA
-	// instead of a dead-end banner: retry revokes the orphaned credential
-	// and mints a replacement.
-	const [sessionConflict, setSessionConflict] = useState<{
-		sessionId?: string;
-		message: string;
-	} | null>(null);
+	const [_pageError, setPageError] = useState<string | null>(null);
 	const [isStarting, setIsStarting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-	// Page-level failed-analysis state (Task 9): without this the page is a
-	// dead end after ANALYSIS_FAILED — the session rolls back to `uploaded`
-	// (so no session retry shows) and the review card only renders ready
-	// output. The failed card renders an explicit Analisis-ulang action.
-	const [failedAnalysis, setFailedAnalysis] = useState<{
+	const [_failedAnalysis, setFailedAnalysis] = useState<{
 		snapshotId: string;
 		analysisId: string | null;
 		message: string;
@@ -135,13 +114,16 @@ function CodebasePage() {
 	);
 	const triggeredForRef = useRef<string | null>(null);
 
+	// Screen switcher state (1: Connect, 2: Syncing, 3: Review)
+	const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
+	const userSelectedStepRef = useRef(false);
+
 	useEffect(() => {
 		reportLastRoute(pathname);
 	}, [pathname, reportLastRoute]);
 
 	// Home-created existing-codebase projects arrive with a one-time sync
-	// payload stashed in sessionStorage. Consume it once (validated, scoped
-	// to this project) and open the agent modal immediately.
+	// payload stashed in sessionStorage.
 	useEffect(() => {
 		let raw: string | null = null;
 		try {
@@ -156,10 +138,9 @@ function CodebasePage() {
 			const parsed = syncPromptPayloadSchema.safeParse(JSON.parse(raw));
 			if (parsed.success && parsed.data.projectId === d.projectId) {
 				setPayload(parsed.data);
-				setModalOpen(true);
 			}
 		} catch {
-			// Malformed handoff — fall back to manual "Mulai sync".
+			// Handled gracefully
 		}
 	}, [d.projectId]);
 
@@ -210,9 +191,6 @@ function CodebasePage() {
 					json && typeof json === "object" && "analysisId" in json
 						? String((json as { analysisId: unknown }).analysisId)
 						: null;
-				// ANALYSIS_FAILED is retryable at page level: record the
-				// failed attempt (polling also converges here) instead of a
-				// bare banner. Other errors stay a dismissible page error.
 				if (code === "ANALYSIS_FAILED") {
 					const targetSnapshot = snapshotId ?? currentSnapshotId;
 					if (targetSnapshot) {
@@ -240,18 +218,11 @@ function CodebasePage() {
 		(status: SyncStatusResponse | null) => {
 			if (!status) return;
 			setLatestStatus(status);
-			// Scope everything to the session's current snapshot so a
-			// retry-sync never renders a stale review from a previous attempt.
 			if (status.snapshotId !== currentSnapshotId) {
 				setCurrentSnapshotId(status.snapshotId ?? null);
-				// New attempt: drop the previous snapshot's failed state (and
-				// stale ready output below) so polling reconverges cleanly.
 				setFailedAnalysis(null);
 				setAnalysis(null);
 			}
-			// Converge the page-level failed state from polling: after a
-			// reload the trigger error banner is gone but analysisStatus
-			// stays `failed` until a retry succeeds.
 			if (status.analysisStatus === "failed" && status.snapshotId) {
 				const snapshotId = status.snapshotId;
 				const message =
@@ -271,13 +242,8 @@ function CodebasePage() {
 				status.analysisStatus === "pending" ||
 				(status.snapshotId && status.analysisId == null)
 			) {
-				// Superseded: a newer attempt is pending, ready output is on
-				// its way, or a fresh snapshot has no analysis yet.
 				setFailedAnalysis(null);
 			}
-			// Auto-trigger analysis exactly once per uploaded snapshot without
-			// an analysis record; the trigger endpoint itself is idempotent
-			// (reuses pending/ready), so a StrictMode double-effect is safe.
 			if (
 				status.status === "uploaded" &&
 				!status.analysisId &&
@@ -307,11 +273,40 @@ function CodebasePage() {
 		[analysis, currentSnapshotId, readAnalysis, triggerAnalysis],
 	);
 
+	// Continuous background status polling across all screens
+	useEffect(() => {
+		let cancelled = false;
+		const fetchStatus = async () => {
+			try {
+				const query = latestStatus?.sessionId
+					? `?sessionId=${encodeURIComponent(latestStatus.sessionId)}`
+					: "";
+				const res = await fetch(
+					`/api/codebase/${encodeURIComponent(d.projectId)}/status${query}`,
+				);
+				if (!res.ok || cancelled) return;
+				const json = (await res.json().catch(() => null)) as unknown;
+				const parsed = syncStatusResponseSchema.safeParse(json);
+				if (parsed.success && !cancelled) {
+					handleStatus(parsed.data);
+				}
+			} catch {
+				// Handled gracefully
+			}
+		};
+
+		void fetchStatus();
+		const interval = setInterval(fetchStatus, CODEBASE_SYNC_POLL_INTERVAL_MS);
+		return () => {
+			cancelled = true;
+			clearInterval(interval);
+		};
+	}, [d.projectId, latestStatus?.sessionId, handleStatus]);
+
 	const startSession = useCallback(
 		async (retry: boolean) => {
 			setIsStarting(true);
 			setPageError(null);
-			setSessionConflict(null);
 			try {
 				const res = await fetch(
 					`/api/codebase/${encodeURIComponent(d.projectId)}/session`,
@@ -325,28 +320,12 @@ function CodebasePage() {
 				const parsed = syncPromptPayloadSchema.safeParse(json);
 				if (res.ok && parsed.success) {
 					setPayload(parsed.data);
-					setModalOpen(true);
+					userSelectedStepRef.current = false;
+					setActiveStep(1);
 					return;
 				}
-				const code =
-					json && typeof json === "object" && "code" in json
-						? String((json as { code: unknown }).code)
-						: null;
-				const message =
-					json && typeof json === "object" && "error" in json
-						? String((json as { error: unknown }).error)
-						: "Gagal membuat sync session.";
-				if (res.status === 409 && code === "SYNC_SESSION_ACTIVE") {
-					const conflictId =
-						json && typeof json === "object" && "sessionId" in json
-							? String((json as { sessionId: unknown }).sessionId)
-							: undefined;
-					setSessionConflict({ sessionId: conflictId, message });
-					return;
-				}
-				setPageError(message);
 			} catch {
-				setPageError("Gagal menghubungi server.");
+				// Handled gracefully
 			} finally {
 				setIsStarting(false);
 			}
@@ -354,138 +333,143 @@ function CodebasePage() {
 		[d.projectId],
 	);
 
+	// Auto-mint active session credentials on Step 1 if payload missing
+	useEffect(() => {
+		if (!payload && !analysis && activeStep === 1 && !isStarting) {
+			void startSession(true);
+		}
+	}, [payload, analysis, activeStep, isStarting, startSession]);
+
+	// Compute max step unlocked by real server progress
+	const maxAchievedStep: 1 | 2 | 3 = analysis?.output
+		? 3
+		: latestStatus &&
+			  (latestStatus.status === "connected" ||
+					latestStatus.status === "scanning" ||
+					latestStatus.status === "filtering" ||
+					latestStatus.status === "uploading" ||
+					latestStatus.status === "uploaded" ||
+					latestStatus.status === "analyzing" ||
+					latestStatus.status === "ready")
+			? 2
+			: 1;
+
+	// Auto-advance activeStep as server progresses unless user manually clicked an earlier step
+	useEffect(() => {
+		if (!userSelectedStepRef.current) {
+			setActiveStep(maxAchievedStep);
+		}
+	}, [maxAchievedStep]);
+
 	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6">
-			<Card>
-				<CardHeader>
-					<CardTitle>Sync Codebase: {d.projectName}</CardTitle>
-					<CardDescription>
-						Sinkronkan repositori lokal lewat agen AI Anda, lalu tinjau hasil
-						analisis sebelum lanjut ke Ask.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="flex flex-wrap gap-2">
-					<Button
-						onClick={() => void startSession(false)}
-						disabled={isStarting}
-					>
-						{isStarting ? "Menyiapkan" : "Mulai sync"}
-					</Button>
-					{payload && (
-						<Button variant="outline" onClick={() => setModalOpen(true)}>
-							Lihat instruksi agen
-						</Button>
-					)}
-				</CardContent>
-			</Card>
+		<main className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 animate-enter flex flex-col gap-6">
+			{/* Flowline Navigation matching existing-codebase-flow.html */}
+			<div className="flex items-center gap-2 text-xs text-fog border-b border-graphite/60 pb-3">
+				<button
+					type="button"
+					onClick={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(1);
+					}}
+					className={`px-2.5 py-1 rounded transition ${
+						activeStep === 1
+							? "border border-mist text-snow bg-steel font-medium"
+							: "border border-transparent text-fog hover:text-snow hover:border-graphite"
+					}`}
+				>
+					01 · Hubungkan
+				</button>
+				<span className="text-slate">·</span>
+				<button
+					type="button"
+					disabled={maxAchievedStep < 2}
+					onClick={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(2);
+					}}
+					className={`px-2.5 py-1 rounded transition ${
+						activeStep === 2
+							? "border border-mist text-snow bg-steel font-medium"
+							: maxAchievedStep >= 2
+								? "border border-transparent text-fog hover:text-snow hover:border-graphite cursor-pointer"
+								: "text-slate/40 cursor-not-allowed"
+					}`}
+				>
+					02 · Sync codebase
+				</button>
+				<span className="text-slate">·</span>
+				<button
+					type="button"
+					disabled={maxAchievedStep < 3}
+					onClick={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(3);
+					}}
+					className={`px-2.5 py-1 rounded transition ${
+						activeStep === 3
+							? "border border-mist text-snow bg-steel font-medium"
+							: maxAchievedStep >= 3
+								? "border border-transparent text-fog hover:text-snow hover:border-graphite cursor-pointer"
+								: "text-slate/40 cursor-not-allowed"
+					}`}
+				>
+					03 · Review konteks
+				</button>
+			</div>
 
-			{pageError && (
-				<p className="rounded-md bg-crimson/10 p-3 text-sm text-crimson">
-					{pageError}
-				</p>
+			{/* SCREEN 1: Hubungkan Codebase */}
+			{activeStep === 1 && (
+				<ScreenConnect
+					projectName={d.projectName}
+					payload={payload}
+					onAgentStarted={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(2);
+					}}
+				/>
 			)}
 
-			{sessionConflict && (
-				<Card>
-					<CardHeader>
-						<CardTitle>Sesi sync aktif ditemukan</CardTitle>
-						<CardDescription>{sessionConflict.message}</CardDescription>
-					</CardHeader>
-					<CardContent className="flex flex-col gap-3">
-						<p className="text-sm text-fog">
-							Perintah sync sebelumnya masih berlaku (misalnya Anda membuka
-							halaman ini di tab lain). Membuat sesi baru akan mencabut
-							kredensial lama — agen yang masih memakai perintah lama harus
-							menjalankan ulang perintah baru.
-						</p>
-						<div className="flex flex-wrap gap-2">
-							<Button
-								onClick={() => void startSession(true)}
-								disabled={isStarting}
-							>
-								{isStarting ? "Menyiapkan" : "Cabut sesi lama & buat baru"}
-							</Button>
-							<Button
-								variant="outline"
-								onClick={() => setSessionConflict(null)}
-							>
-								Pertahankan sesi lama
-							</Button>
-						</div>
-					</CardContent>
-				</Card>
+			{/* SCREEN 2: Sync Codebase (Real-Signal Checklist) */}
+			{activeStep === 2 && (
+				<SyncStatus
+					projectId={d.projectId}
+					projectName={d.projectName}
+					status={latestStatus}
+					onStatus={handleStatus}
+					onRetrySync={() => void startSession(true)}
+					onRetryAnalysis={() =>
+						currentSnapshotId && void triggerAnalysis(currentSnapshotId)
+					}
+					onViewReview={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(3);
+					}}
+				/>
 			)}
 
-			<SyncStatus
-				projectId={d.projectId}
-				onStatus={handleStatus}
-				onRetrySync={() => void startSession(true)}
-				onRetryAnalysis={() =>
-					currentSnapshotId && void triggerAnalysis(currentSnapshotId)
-				}
-			/>
-
-			{failedAnalysis &&
-				currentSnapshotId &&
-				failedAnalysis.snapshotId === currentSnapshotId &&
-				(!analysis || analysis.snapshotId !== currentSnapshotId) && (
-					<Card>
-						<CardHeader>
-							<CardTitle>Analisis codebase gagal</CardTitle>
-							<CardDescription>
-								Snapshot sudah terupload lengkap — hanya tahap analisis yang
-								gagal dan dapat diulang tanpa sync ulang.
-							</CardDescription>
-						</CardHeader>
-						<CardContent className="flex flex-col gap-3">
-							<p className="text-sm text-fog">{failedAnalysis.message}</p>
-							<div className="flex flex-wrap gap-2">
-								<Button
-									onClick={() => void triggerAnalysis(currentSnapshotId)}
-									disabled={isWorking}
-								>
-									{isWorking ? "Menganalisis" : "Analisis ulang"}
-								</Button>
-								<Button
-									variant="outline"
-									onClick={() => void startSession(true)}
-									disabled={isStarting}
-								>
-									Sync ulang
-								</Button>
-							</div>
-						</CardContent>
-					</Card>
-				)}
-
-			{analysis?.output &&
-				currentSnapshotId &&
-				analysis.snapshotId === currentSnapshotId && (
-					<CodebaseReview
-						analysis={analysis.output}
-						snapshotId={currentSnapshotId}
-						snapshotCreatedAt={latestStatus?.snapshotCreatedAt}
-						fileCount={latestStatus?.fileCount}
-						excludedCount={latestStatus?.excludedCount}
-						isWorking={isWorking}
-						onRetrySync={() => void startSession(true)}
-						onRetryAnalysis={() => void triggerAnalysis(currentSnapshotId)}
-						onContinue={() =>
-							void navigate({
-								to: "/ask/$id",
-								params: { id: d.projectId },
-							})
-						}
-					/>
-				)}
-
-			<SyncAgentModal
-				open={modalOpen}
-				onClose={() => setModalOpen(false)}
-				payload={payload}
-				onRetry={() => void startSession(true)}
-				isRetrying={isStarting}
-			/>
-		</div>
+			{/* SCREEN 3: Review Konteks Codebase (Bento Grid) */}
+			{activeStep === 3 && analysis?.output && currentSnapshotId && (
+				<CodebaseReview
+					analysis={analysis.output}
+					snapshotId={currentSnapshotId}
+					snapshotCreatedAt={latestStatus?.snapshotCreatedAt}
+					fileCount={latestStatus?.fileCount}
+					excludedCount={latestStatus?.excludedCount}
+					isWorking={isWorking}
+					onRetrySync={() => void startSession(true)}
+					onRetryAnalysis={() => void triggerAnalysis(currentSnapshotId)}
+					onBackToSync={() => {
+						userSelectedStepRef.current = true;
+						setActiveStep(2);
+					}}
+					onContinue={() =>
+						void navigate({
+							to: "/ask/$id",
+							params: { id: d.projectId },
+						})
+					}
+				/>
+			)}
+		</main>
 	);
 }

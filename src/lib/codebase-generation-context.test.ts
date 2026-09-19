@@ -307,7 +307,7 @@ describe("task 8 generation-context bounds", () => {
 		expect(sanitized.answers.length).toBeLessThanOrEqual(
 			CODEBASE_ASK_HANDOFF_MAX_ANSWERS,
 		);
-		expect(sanitized.compiledPrompt.length).toBeLessThanOrEqual(
+		expect(sanitized.compiledPrompt?.length).toBeLessThanOrEqual(
 			CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS,
 		);
 		expect(sanitized.projectId).toBe("proj_123");
@@ -350,7 +350,9 @@ describe("task 8 generation-context bounds", () => {
 					options: Array.from({ length: 20 }, (_, i) => `Opsi ${i}`),
 				},
 			],
-			nonTechAnswers: { q1: { value: "x" } },
+			nonTechAnswers: {
+				q1: { value: "x", isCustom: false, skipped: false },
+			},
 			techAnswers: {},
 			skippedTech: ["frontend"],
 		});
@@ -376,6 +378,37 @@ describe("task 8 generation-context bounds", () => {
 			},
 		});
 		expect(parsed.success).toBe(true);
+	});
+
+	it("askHandoffSchema accepts an in-flight handoff without compiledPrompt", () => {
+		const parsed = askHandoffSchema.safeParse({
+			projectId: "proj_456",
+			state: {
+				prompt: "proyek baru",
+				platform: "mobile",
+				session: 1,
+				questions: [],
+			},
+		});
+		expect(parsed.success).toBe(true);
+		if (parsed.success) {
+			expect(parsed.data.answers).toEqual([]);
+			expect(parsed.data.compiledPrompt).toBeUndefined();
+		}
+	});
+
+	it("sanitizeAskHandoff preserves undefined compiledPrompt for in-flight handoffs", () => {
+		const clean = sanitizeAskHandoff({
+			projectId: "proj_456",
+			answers: [],
+			state: {
+				prompt: "proyek baru",
+				platform: "mobile",
+			},
+		});
+		expect(clean.compiledPrompt).toBeUndefined();
+		expect(clean.answers).toEqual([]);
+		expect(clean.state?.prompt).toBe("proyek baru");
 	});
 });
 

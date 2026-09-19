@@ -132,6 +132,7 @@ function PrdPage() {
 		<PrdDetail
 			projectId={d.projectId}
 			projectName={d.projectName}
+			step={d.step}
 			latestVersion={d.latestVersion as never}
 			allVersions={d.allVersions as never}
 			conversationId={d.conversationId}

@@ -148,6 +148,12 @@ Available resources di opencode ini: **superpowers skills**, **personal skills**
 | **Bug fix** | `systematic-debugging` (superpowers) + `explore` agent | Systematic debugging skill first, then explore codebase |
 | **UI/UX change** | `ui-design-system`, `ui-ux-pro-max`, `shadcn-component-discovery` skills | A11y + component patterns untuk UI changes |
 | **Frontend visual design** | `frontend-design`, `high-end-visual-design`, `ui-ux-pro-max` skills | Use only when creating or substantially reshaping UI; preserve existing PRDFY design language when modifying existing screens |
+| **Anti-AI-Slop Filter (Core)** | `antislop` skill | Core filter: 38 rules (R-01–R-38), Hard Gate, Liveliness Toolkit, Delivery Gate PASS/FAIL audit report |
+| **Anti-Slop UI / Visual** | `antislop-ui` skill | UI layout, color, components, decoration, motion, structure without generic AI slop |
+| **Anti-Slop Copywriting** | `antislop-copywriting` skill | Headlines, CTAs, tone, anti-AI-writing patterns, markdown hygiene, no fake numbers/stats |
+| **Anti-Slop Human / A11y** | `antislop-human` skill | Contrast checker, keyboard navigation, focus rings, interactive states |
+| **Anti-Slop Responsive / Mobile** | `antislop-layoutmobile` skill | Responsive reflow (320px mobile to 1440px desktop), breakpoints, grids, tap targets, no horizontal overflow |
+| **Anti-Slop Code Cleanliness** | `antislop-code` skill | Remove generic AI comments & box banners, preserve valuable invariant explanations, no code tampering |
 | **Database/schema/query change** | `drizzle` skill + `supabase-postgres-best-practices` skill + context7 MCP | PostgreSQL 17 lokal + Drizzle (`drizzle-kit`), BUKAN Supabase — jangan pakai tool/pattern Supabase |
 | **Security** | `better-auth-security-best-practices` skill | MUST USE after auth/API endpoint changes |
 | **Performance** | `vercel-react-best-practices` skill | Bundle size, render perf |

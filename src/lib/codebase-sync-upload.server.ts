@@ -111,6 +111,7 @@ export async function guardSyncUpload(
 	request: Request,
 	projectId: string,
 	body: { sessionId: string; attemptId: string },
+	options: { rateLimit?: boolean } = {},
 ): Promise<GuardResult> {
 	const rawToken = bearerToken(request);
 	if (!rawToken)
@@ -194,24 +195,26 @@ export async function guardSyncUpload(
 	const plan: Plan = ["free", "pro", "hengker"].includes(rawPlan)
 		? (rawPlan as Plan)
 		: "free";
-	const rateCheck = await checkRateLimit(
-		session.userId,
-		plan,
-		CODEBASE_SYNC_RATE_LIMIT_ACTION,
-	);
-	if (!rateCheck.allowed)
-		return {
-			ok: false,
-			failure: {
-				status: 429,
-				body: {
-					error: "Too many requests",
-					code: "SYNC_FAILED",
-					retryAfter: 60,
+	if (options.rateLimit !== false) {
+		const rateCheck = await checkRateLimit(
+			session.userId,
+			plan,
+			CODEBASE_SYNC_RATE_LIMIT_ACTION,
+		);
+		if (!rateCheck.allowed)
+			return {
+				ok: false,
+				failure: {
+					status: 429,
+					body: {
+						error: "Too many requests",
+						code: "SYNC_FAILED",
+						retryAfter: 60,
+					},
 				},
-			},
-		};
-	await recordRequest(session.userId, CODEBASE_SYNC_RATE_LIMIT_ACTION);
+			};
+		await recordRequest(session.userId, CODEBASE_SYNC_RATE_LIMIT_ACTION);
+	}
 
 	// Fail-closed CLI version gate: the minimum version is enforced
 	// server-side from the version recorded at handshake. Sessions without a

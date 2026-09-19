@@ -121,6 +121,25 @@ describe("buildManifest", () => {
 		expect(serialized).not.toContain(marker);
 	});
 
+	it("does not flag environment variable assignments as secrets", async () => {
+		const root = await makeTempRoot();
+		await writeRepoFile(
+			root,
+			"src/api.ts",
+			[
+				"const apiKey = import.meta.env.VITE_TMDB_API_KEY;",
+				"const serverKey = process.env.API_KEY;",
+				"const config = { api_key: import.meta.env.VITE_KEY };",
+			].join("\n"),
+		);
+		const rules = await readPrdfyIgnore(root);
+		const scan = await scanRepository(root, rules);
+		const manifest = await buildManifest(scan);
+		expect(manifest.entries).toHaveLength(1);
+		expect(manifest.entries[0].contentEligible).toBe(true);
+		expect(manifest.entries[0].exclusionReason).toBeUndefined();
+	});
+
 	it("builds purely from the scan object without directory traversal", async () => {
 		const scan = {
 			root: "/synthetic/root",

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
 	AI_MODELS,
-	BRIEF_MAX_BYTES,
-	BRIEF_MAX_CHARS,
 	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
 	CODEBASE_GENERATION_MAX_CONSTRAINTS,
 	CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
@@ -54,10 +52,8 @@ describe("no-hardcode constants (Task 1)", () => {
 		expect(HISTORY_PAGE_SIZE).toBe(12);
 	});
 
-	it("has debounce and brief limits", () => {
+	it("has debounce limit", () => {
 		expect(HOME_DRAFT_DEBOUNCE_MS).toBe(300);
-		expect(BRIEF_MAX_CHARS).toBe(5000);
-		expect(BRIEF_MAX_BYTES).toBe(2 * 1024 * 1024);
 	});
 
 	it("has PDF_STYLES", () => {

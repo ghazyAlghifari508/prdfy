@@ -19,6 +19,15 @@ export function stepRank(step: string | null | undefined): number {
 }
 
 /**
+ * True when the project has progressed past the PRD stage (e.g. AC or Task).
+ * At this point, PRD content is finalized and locked to prevent downstream
+ * desynchronization of AC and tasks.
+ */
+export function isPrdLocked(step: string | null | undefined): boolean {
+	return stepRank(step) > stepRank("prd");
+}
+
+/**
  * Furthest of current (DB) and next (what a writer wants to set).
  * Returns null when no write is needed - caller skips the step UPDATE.
  */
@@ -57,7 +66,7 @@ export function isTruncatedGeneration(
  * Rejects non-project routes and `javascript:`/malformed URLs outright.
  */
 const HISTORY_URL_RE =
-	/^\/(?:ask|prd|ac|task|kanban)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/;
+	/^\/(?:codebase|ask|prd|ac|task|kanban)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/;
 
 export function isValidHistoryUrl(url: string, projectId: string): boolean {
 	const m = HISTORY_URL_RE.exec(url);

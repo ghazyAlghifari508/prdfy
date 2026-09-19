@@ -8,6 +8,7 @@ import {
 	type CodebaseAnalysis,
 	codebaseAnalysisSchema,
 	decideAnalysisRequest,
+	inferTechAnswersFromCodebase,
 	parseAnalysisOutput,
 	parseCodebaseAnalysis,
 	selectSourceExcerpts,
@@ -318,22 +319,59 @@ describe("toSafeAnalysisErrorMessage", () => {
 	});
 });
 
-describe("AnalysisServiceError attempt identity (Task 9)", () => {
-	it("carries the failed attempt id for the route to attach", () => {
-		const error = new AnalysisServiceError(
-			"ANALYSIS_FAILED",
-			"Analisis codebase gagal. Coba analisis ulang.",
-			"analysis_123",
+describe("inferTechAnswersFromCodebase", () => {
+	it("infers React + Vite frontend and Vercel deployment correctly", () => {
+		const inferred = inferTechAnswersFromCodebase(
+			{
+				projectId: "p1",
+				snapshotId: "s1",
+				framework: "React 19 (Vite, Tailwind CSS, React Router)",
+				language: "JavaScript",
+				dependencies: [
+					"react",
+					"react-dom",
+					"react-router-dom",
+					"axios",
+					"tailwind-merge",
+				],
+				relevantFiles: ["vercel.json", "src/App.jsx"],
+			},
+			"web",
 		);
-		expect(error.code).toBe("ANALYSIS_FAILED");
-		expect(error.analysisId).toBe("analysis_123");
+
+		expect(inferred.frontend).toBe("React (Vite)");
+		expect(inferred.deployment).toBe("Vercel");
 	});
 
-	it("leaves the attempt id undefined for pre-attempt failures", () => {
-		const error = new AnalysisServiceError(
-			"SNAPSHOT_NOT_UPLOADED",
-			"Snapshot belum siap",
+	it("infers TanStack Start fullstack framework and PostgreSQL database", () => {
+		const inferred = inferTechAnswersFromCodebase(
+			{
+				projectId: "p1",
+				snapshotId: "s1",
+				framework: "TanStack Start",
+				language: "TypeScript",
+				dependencies: ["@tanstack/react-start", "drizzle-orm", "pg"],
+				database: "PostgreSQL · Drizzle ORM",
+			},
+			"web",
 		);
-		expect(error.analysisId).toBeUndefined();
+
+		expect(inferred.fullstackFramework).toBe("TanStack Start (FE+BE)");
+		expect(inferred.database).toBe("PostgreSQL");
+		expect(inferred.deployment).toBe("Vercel");
+	});
+
+	it("infers mobile frameworks when platform is mobile", () => {
+		const inferred = inferTechAnswersFromCodebase(
+			{
+				projectId: "p1",
+				snapshotId: "s1",
+				framework: "Expo React Native",
+				dependencies: ["expo", "react-native"],
+			},
+			"mobile",
+		);
+
+		expect(inferred.frontend).toBe("Expo");
 	});
 });

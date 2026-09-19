@@ -1,10 +1,11 @@
 import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { useEffect } from "react";
 import { AskFlow } from "@/app/ask/ask-flow";
 import { db } from "@/db";
 import { codebaseAnalyses, projects } from "@/db/schema";
+import type { CodebaseAnalysis } from "@/lib/codebase-analysis";
 import { requireUserServer } from "@/lib/session";
 import { useLastRoute } from "@/lib/use-last-route";
 
@@ -43,9 +44,13 @@ const loadAsk = createServerFn({ method: "GET" })
 		if (!project) throw new Error("NOT_FOUND");
 
 		let hasReadyAnalysis = false;
+		let readyAnalysis: CodebaseAnalysis | null = null;
 		if (project.projectMode === "existing_codebase") {
 			const [analysis] = await db
-				.select({ id: codebaseAnalyses.id })
+				.select({
+					id: codebaseAnalyses.id,
+					output: codebaseAnalyses.output,
+				})
 				.from(codebaseAnalyses)
 				.where(
 					and(
@@ -53,8 +58,34 @@ const loadAsk = createServerFn({ method: "GET" })
 						eq(codebaseAnalyses.status, "ready"),
 					),
 				)
+				.orderBy(desc(codebaseAnalyses.createdAt))
 				.limit(1);
 			hasReadyAnalysis = !!analysis;
+			if (analysis?.output) {
+				readyAnalysis = analysis.output as CodebaseAnalysis;
+			}
+		}
+
+		let savedHandoff = null;
+		try {
+			const { getAskHandoff } = await import(
+				"@/lib/codebase-generation-context"
+			);
+			savedHandoff = await getAskHandoff(id, user.id);
+		} catch (e) {
+			console.error("Failed to load ask handoff in loadAsk:", e);
+		}
+		if (!savedHandoff) {
+			savedHandoff = {
+				projectId: project.id,
+				answers: [],
+				state: {
+					prompt: project.name,
+					platform: "web" as const,
+					session: 1 as const,
+					questions: [],
+				},
+			};
 		}
 
 		return {
@@ -63,6 +94,8 @@ const loadAsk = createServerFn({ method: "GET" })
 			step: (project as { step?: string | null }).step ?? null,
 			projectMode: project.projectMode,
 			hasReadyAnalysis,
+			readyAnalysis,
+			savedHandoff,
 		};
 	});
 
@@ -114,6 +147,8 @@ function AskPage() {
 				projectId={d.projectId}
 				projectName={d.projectName}
 				projectMode={d.projectMode}
+				initialHandoff={d.savedHandoff}
+				analysis={d.readyAnalysis}
 			/>
 		</div>
 	);
