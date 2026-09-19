@@ -16,6 +16,7 @@ import {
 	isSyncCapableProject,
 	type SyncStatusResponse,
 	sanitizeSyncErrorCode,
+	sanitizeSyncErrorMessage,
 	syncStatusResponseSchema,
 } from "@/lib/codebase-sync";
 import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
@@ -162,7 +163,10 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 						if (analysis.errorCode) {
 							errorCode = sanitizeSyncErrorCode(analysis.errorCode);
 						}
-						errorMessage = analysis.errorMessage;
+						// Analysis writers must store only safe user-facing
+						// strings; this sanitizer is defense-in-depth so
+						// tokens or source content can never pass through.
+						errorMessage = sanitizeSyncErrorMessage(analysis.errorMessage);
 					}
 				}
 

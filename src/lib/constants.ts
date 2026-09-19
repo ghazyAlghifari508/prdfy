@@ -70,6 +70,9 @@ export const CODEBASE_MAX_FILE_BYTES = 1024 * 1024;
 export const CODEBASE_MAX_CHUNK_BYTES = 256 * 1024;
 // Minimum supported CLI version for `prdfy codebase sync`.
 export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
+// Maximum user-facing sync error message length served to browsers. Longer
+// server-written messages are truncated so status polling stays bounded.
+export const CODEBASE_MAX_ERROR_MESSAGE_CHARS = 500;
 
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.

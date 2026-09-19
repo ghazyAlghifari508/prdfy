@@ -4,6 +4,7 @@ import {
 	integer,
 	jsonb,
 	pgTable,
+	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -418,6 +419,61 @@ export const codebaseSnapshots = pgTable(
 	(t) => [
 		index("codebase_snapshots_project_id_idx").on(t.projectId),
 		index("codebase_snapshots_sync_session_id_idx").on(t.syncSessionId),
+	],
+);
+
+// Snapshot file chunks: bounded base64 text slices keyed by
+// (snapshot, path, chunk index). One row per uploaded chunk; completion
+// reassembles per path and verifies hashes before the snapshot becomes
+// `uploaded`. Raw filtered source is retained for the project lifetime so
+// analysis can be regenerated; project deletion cascades everything.
+export const codebaseSnapshotFiles = pgTable(
+	"codebase_snapshot_files",
+	{
+		snapshotId: text("snapshot_id")
+			.notNull()
+			.references(() => codebaseSnapshots.id, { onDelete: "cascade" }),
+		path: text("path").notNull(),
+		chunkIndex: integer("chunk_index").notNull(),
+		chunkTotal: integer("chunk_total").notNull(),
+		contentHash: text("content_hash").notNull(),
+		encoding: text("encoding").notNull().default("base64"),
+		// Base64 text slice as sent by the CLI (binaries never uploaded).
+		data: text("data").notNull(),
+		// Decoded byte length of `data` for bound accounting without decoding.
+		size: integer("size").notNull().default(0),
+		createdAt: timestamp("created_at").defaultNow(),
+	},
+	(t) => [
+		primaryKey({
+			columns: [t.snapshotId, t.path, t.chunkIndex],
+			name: "codebase_snapshot_files_pkey",
+		}),
+		index("codebase_snapshot_files_snapshot_id_idx").on(t.snapshotId),
+	],
+);
+
+// Sync idempotency keys: small stored responses for idempotent replay.
+// Keys embed only the attempt identity (`${attemptId}:${kind}:${index}`)
+// and carry no credentials; stored responses are status payloads only
+// (never tokens or source content).
+export const codebaseSyncIdempotencyKeys = pgTable(
+	"codebase_sync_idempotency_keys",
+	{
+		key: text("key").primaryKey(),
+		sessionId: text("session_id")
+			.notNull()
+			.references(() => codebaseSyncSessions.id, { onDelete: "cascade" }),
+		snapshotId: text("snapshot_id")
+			.notNull()
+			.references(() => codebaseSnapshots.id, { onDelete: "cascade" }),
+		kind: text("kind").notNull(),
+		statusCode: integer("status_code").notNull(),
+		response: jsonb("response").notNull(),
+		createdAt: timestamp("created_at").defaultNow(),
+	},
+	(t) => [
+		index("codebase_sync_idempotency_keys_session_id_idx").on(t.sessionId),
 	],
 );
 

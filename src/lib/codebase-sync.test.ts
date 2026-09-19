@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
 	applySessionRevocation,
+	assertAttemptBinding,
 	assertSyncTransition,
+	buildIdempotencyKey,
 	buildSyncCommand,
+	CliVersionError,
 	CODEBASE_ANALYSIS_STATUSES,
 	CODEBASE_SNAPSHOT_STATUSES,
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
@@ -10,26 +14,41 @@ import {
 	type CodebaseSyncStatus,
 	canAccessSyncSession,
 	canTransitionSyncStatus,
+	checkSnapshotCompletion,
 	cliHandshakeRequestSchema,
 	cliHandshakeResponseSchema,
+	fileChunkRequestSchema,
 	getSessionUsability,
 	hasSyncCapability,
+	isExpectedIdempotencyKey,
 	isSafeRelativePath,
+	isSlotIdempotencyKey,
 	isSupportedCliVersion,
 	isSyncCapableProject,
 	isTerminalSyncStatus,
+	manifestBatchRequestSchema,
 	manifestEntrySchema,
+	requireSupportedCliVersion,
+	SnapshotCompletionError,
+	SyncBindingError,
 	type SyncSessionLike,
 	SyncTransitionError,
 	sanitizeSyncErrorCode,
+	sanitizeSyncErrorMessage,
 	selectActiveSnapshot,
 	shouldCreateSyncSession,
+	snapshotCompleteRequestSchema,
 	snapshotContextSchema,
 	syncPromptPayloadSchema,
 	syncStatusResponseSchema,
 	toSessionMetadata,
+	uploadTransitionSteps,
 } from "./codebase-sync";
-import { generateSyncToken, hashSyncToken } from "./codebase-sync.server";
+import {
+	generateSyncToken,
+	hashSyncToken,
+	verifyFileContentHash,
+} from "./codebase-sync.server";
 import {
 	CODEBASE_CLI_MIN_VERSION,
 	CODEBASE_MAX_CHUNK_BYTES,
@@ -581,5 +600,484 @@ describe("CLI handshake DTOs (Task 4)", () => {
 			expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
 		});
 		expect(result.success).toBe(false);
+	});
+});
+
+describe("manifest batch upload DTO (Task 5)", () => {
+	const entry = {
+		path: "src/lib/a.ts",
+		size: 10,
+		hash: "a".repeat(64),
+		language: "typescript",
+	};
+	const base = {
+		sessionId: "sess_1",
+		attemptId: "sess_1",
+		batchIndex: 0,
+		batchTotal: 1,
+		entries: [entry],
+		idempotencyKey: "sess_1:manifest:0",
+	};
+
+	it("accepts the exact CLI manifest batch shape", () => {
+		expect(manifestBatchRequestSchema.safeParse(base).success).toBe(true);
+	});
+
+	it("accepts an empty entries batch for a zero-file repository", () => {
+		const result = manifestBatchRequestSchema.safeParse({
+			...base,
+			entries: [],
+			batchTotal: 1,
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects batchIndex at or beyond batchTotal", () => {
+		expect(
+			manifestBatchRequestSchema.safeParse({ ...base, batchIndex: 1 }).success,
+		).toBe(false);
+		expect(
+			manifestBatchRequestSchema.safeParse({ ...base, batchTotal: 0 }).success,
+		).toBe(false);
+	});
+
+	it("rejects entries with unsafe paths, oversized files, or bad hashes", () => {
+		expect(
+			manifestBatchRequestSchema.safeParse({
+				...base,
+				entries: [{ ...entry, path: "../escape.ts" }],
+			}).success,
+		).toBe(false);
+		expect(
+			manifestBatchRequestSchema.safeParse({
+				...base,
+				entries: [{ ...entry, size: CODEBASE_MAX_FILE_BYTES + 1 }],
+			}).success,
+		).toBe(false);
+		expect(
+			manifestBatchRequestSchema.safeParse({
+				...base,
+				entries: [{ ...entry, hash: "not-a-hash" }],
+			}).success,
+		).toBe(false);
+	});
+
+	it("rejects a batch without an idempotency key", () => {
+		const { idempotencyKey: _dropped, ...withoutKey } = base;
+		expect(manifestBatchRequestSchema.safeParse(withoutKey).success).toBe(
+			false,
+		);
+	});
+});
+
+describe("file chunk upload DTO (Task 5)", () => {
+	const base64 = Buffer.from("console.log('a');").toString("base64");
+	const base = {
+		sessionId: "sess_1",
+		attemptId: "sess_1",
+		path: "src/lib/a.ts",
+		chunkIndex: 0,
+		chunkTotal: 1,
+		encoding: "base64" as const,
+		data: base64,
+		contentHash: "a".repeat(64),
+		idempotencyKey: "sess_1:file:0",
+	};
+
+	it("accepts the exact CLI file chunk shape", () => {
+		expect(fileChunkRequestSchema.safeParse(base).success).toBe(true);
+	});
+
+	it("rejects non-base64 encodings and empty payloads", () => {
+		expect(
+			fileChunkRequestSchema.safeParse({ ...base, encoding: "utf8" }).success,
+		).toBe(false);
+		expect(
+			fileChunkRequestSchema.safeParse({ ...base, data: "" }).success,
+		).toBe(false);
+	});
+
+	it("rejects chunk payloads beyond the 256 KiB transport bound", () => {
+		expect(
+			fileChunkRequestSchema.safeParse({
+				...base,
+				data: "a".repeat(CODEBASE_MAX_CHUNK_BYTES + 1),
+			}).success,
+		).toBe(false);
+	});
+
+	it("rejects chunkIndex at or beyond chunkTotal", () => {
+		expect(
+			fileChunkRequestSchema.safeParse({ ...base, chunkIndex: 1 }).success,
+		).toBe(false);
+		expect(
+			fileChunkRequestSchema.safeParse({ ...base, chunkTotal: 0 }).success,
+		).toBe(false);
+	});
+
+	it("rejects unsafe paths and malformed content hashes", () => {
+		expect(
+			fileChunkRequestSchema.safeParse({ ...base, path: "/abs/evil.ts" })
+				.success,
+		).toBe(false);
+		expect(
+			fileChunkRequestSchema.safeParse({
+				...base,
+				contentHash: "short",
+			}).success,
+		).toBe(false);
+	});
+});
+
+describe("snapshot completion DTO (Task 5)", () => {
+	const base = {
+		sessionId: "sess_1",
+		attemptId: "sess_1",
+		fileCount: 2,
+		excludedCount: 5,
+		idempotencyKey: "sess_1:complete:0",
+	};
+
+	it("accepts the exact CLI completion shape", () => {
+		expect(snapshotCompleteRequestSchema.safeParse(base).success).toBe(true);
+	});
+
+	it("rejects negative counts and missing keys", () => {
+		expect(
+			snapshotCompleteRequestSchema.safeParse({ ...base, fileCount: -1 })
+				.success,
+		).toBe(false);
+		expect(
+			snapshotCompleteRequestSchema.safeParse({ ...base, excludedCount: -1 })
+				.success,
+		).toBe(false);
+		const { idempotencyKey: _dropped, ...withoutKey } = base;
+		expect(snapshotCompleteRequestSchema.safeParse(withoutKey).success).toBe(
+			false,
+		);
+	});
+});
+
+describe("idempotency key binding (Task 5)", () => {
+	it("builds keys in the CLI attemptId-kind-index format", () => {
+		expect(buildIdempotencyKey("sess_1", "manifest", 0)).toBe(
+			"sess_1:manifest:0",
+		);
+		expect(buildIdempotencyKey("sess_1", "file", 3)).toBe("sess_1:file:3");
+		expect(buildIdempotencyKey("sess_1", "complete", 0)).toBe(
+			"sess_1:complete:0",
+		);
+	});
+
+	it("accepts file keys by slot format (CLI flat sequence is client-side)", () => {
+		// The CLI numbers file keys by its own flat chunk sequence, which the
+		// server cannot reconstruct — so the files endpoint binds the
+		// `${attemptId}:file:<n>` shape instead of an exact index. Exact
+		// replay still matches the stored key byte-for-byte.
+		expect(isSlotIdempotencyKey("sess_1:file:0", "sess_1", "file")).toBe(true);
+		expect(isSlotIdempotencyKey("sess_1:file:42", "sess_1", "file")).toBe(true);
+		expect(isSlotIdempotencyKey("sess_1:manifest:0", "sess_1", "file")).toBe(
+			false,
+		);
+		expect(isSlotIdempotencyKey("sess_2:file:0", "sess_1", "file")).toBe(false);
+		expect(isSlotIdempotencyKey("sess_1:file:x", "sess_1", "file")).toBe(false);
+		expect(isSlotIdempotencyKey("", "sess_1", "file")).toBe(false);
+	});
+
+	it("accepts only the exact key for its attempt slot", () => {
+		expect(
+			isExpectedIdempotencyKey("sess_1:manifest:0", "sess_1", "manifest", 0),
+		).toBe(true);
+		expect(
+			isExpectedIdempotencyKey("sess_1:manifest:1", "sess_1", "manifest", 0),
+		).toBe(false);
+		expect(
+			isExpectedIdempotencyKey("sess_1:file:0", "sess_1", "manifest", 0),
+		).toBe(false);
+		expect(
+			isExpectedIdempotencyKey("sess_2:manifest:0", "sess_1", "manifest", 0),
+		).toBe(false);
+		expect(isExpectedIdempotencyKey("", "sess_1", "manifest", 0)).toBe(false);
+	});
+});
+
+describe("sync attempt binding (Task 5)", () => {
+	it("accepts the session-owned attempt identity", () => {
+		expect(() => assertAttemptBinding("sess_1", "sess_1")).not.toThrow();
+	});
+
+	it("rejects a foreign attempt with a credential-safe typed error", () => {
+		try {
+			assertAttemptBinding("sess_1", "sess_2");
+			expect.unreachable("expected SyncBindingError");
+		} catch (error) {
+			expect(error).toBeInstanceOf(SyncBindingError);
+			const typed = error as SyncBindingError;
+			expect(typed.code).toBe("INVALID_SYNC_CREDENTIAL");
+			expect(typed.message).not.toContain("sess_2");
+		}
+	});
+});
+
+describe("upload session advancement (Task 5)", () => {
+	it("walks connected through scanning/filtering to uploading", () => {
+		const steps = uploadTransitionSteps("connected");
+		expect(steps).toEqual([
+			["connected", "scanning"],
+			["scanning", "filtering"],
+			["filtering", "uploading"],
+		]);
+		for (const [from, to] of steps) {
+			expect(canTransitionSyncStatus(from, to)).toBe(true);
+		}
+	});
+
+	it("shortens the walk for sessions already mid-chain", () => {
+		expect(uploadTransitionSteps("scanning")).toEqual([
+			["scanning", "filtering"],
+			["filtering", "uploading"],
+		]);
+		expect(uploadTransitionSteps("filtering")).toEqual([
+			["filtering", "uploading"],
+		]);
+		expect(uploadTransitionSteps("uploading")).toEqual([]);
+	});
+
+	it("refuses uploads before handshake or after upload completion", () => {
+		for (const status of [
+			"waiting_for_cli",
+			"uploaded",
+			"analyzing",
+			"ready",
+			"failed",
+			"expired",
+		] as const) {
+			expect(() => uploadTransitionSteps(status)).toThrow(SyncTransitionError);
+		}
+	});
+});
+
+describe("snapshot completion verification (Task 5)", () => {
+	const hashFor = (text: string): string =>
+		createHash("sha256").update(text, "utf8").digest("hex");
+
+	const fileA = "console.log('a');";
+	const fileB = "export const b = 1;";
+	const manifest = [
+		{ path: "src/a.ts", size: fileA.length, hash: hashFor(fileA) },
+		{ path: "src/b.ts", size: fileB.length, hash: hashFor(fileB) },
+	];
+	const chunks = [
+		{
+			path: "src/a.ts",
+			chunkIndex: 0,
+			chunkTotal: 1,
+			dataBase64Length: 24,
+			decodedBytes: fileA.length,
+		},
+		{
+			path: "src/b.ts",
+			chunkIndex: 0,
+			chunkTotal: 1,
+			dataBase64Length: 28,
+			decodedBytes: fileB.length,
+		},
+	];
+
+	it("accepts a complete snapshot and reports measured content size", () => {
+		const result = checkSnapshotCompletion({
+			manifest,
+			chunks,
+			fileCount: 2,
+			excludedCount: 5,
+		});
+		expect(result.files).toHaveLength(2);
+		expect(result.contentSize).toBe(fileA.length + fileB.length);
+	});
+
+	it("enforces the locked count definition (fileCount = eligible entries)", () => {
+		try {
+			checkSnapshotCompletion({
+				manifest,
+				chunks,
+				fileCount: 1,
+				excludedCount: 5,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect(error).toBeInstanceOf(SnapshotCompletionError);
+			expect((error as SnapshotCompletionError).code).toBe(
+				"SNAPSHOT_INCOMPLETE",
+			);
+		}
+	});
+
+	it("rejects snapshots with missing or gapped chunks", () => {
+		expect(() =>
+			checkSnapshotCompletion({
+				manifest,
+				chunks: chunks.slice(0, 1),
+				fileCount: 2,
+				excludedCount: 0,
+			}),
+		).toThrow(SnapshotCompletionError);
+		const gapped = [
+			{
+				path: "src/a.ts",
+				chunkIndex: 0,
+				chunkTotal: 2,
+				dataBase64Length: 12,
+				decodedBytes: 9,
+			},
+		];
+		try {
+			checkSnapshotCompletion({
+				manifest: [manifest[0]],
+				chunks: gapped,
+				fileCount: 1,
+				excludedCount: 0,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect((error as SnapshotCompletionError).code).toBe(
+				"SNAPSHOT_INCOMPLETE",
+			);
+		}
+	});
+
+	it("rejects orphan chunks for paths absent from the manifest", () => {
+		try {
+			checkSnapshotCompletion({
+				manifest,
+				chunks: [
+					...chunks,
+					{
+						path: "src/evil.ts",
+						chunkIndex: 0,
+						chunkTotal: 1,
+						dataBase64Length: 8,
+						decodedBytes: 6,
+					},
+				],
+				fileCount: 2,
+				excludedCount: 0,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect((error as SnapshotCompletionError).code).toBe("SNAPSHOT_CONFLICT");
+		}
+	});
+
+	it("rejects files beyond 1 MiB and snapshots beyond 50 MiB", () => {
+		expect(() =>
+			checkSnapshotCompletion({
+				manifest: [
+					{
+						path: "src/big.ts",
+						size: CODEBASE_MAX_FILE_BYTES + 1,
+						hash: "a".repeat(64),
+					},
+				],
+				chunks: [],
+				fileCount: 1,
+				excludedCount: 0,
+			}),
+		).toThrow(SnapshotCompletionError);
+		try {
+			checkSnapshotCompletion({
+				manifest,
+				chunks: chunks.map((chunk) => ({
+					...chunk,
+					decodedBytes: CODEBASE_MAX_SNAPSHOT_BYTES,
+				})),
+				fileCount: 2,
+				excludedCount: 0,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect((error as SnapshotCompletionError).code).toBe(
+				"SNAPSHOT_TOO_LARGE",
+			);
+		}
+	});
+});
+
+describe("server-side CLI version gate (Task 5 carry-over)", () => {
+	it("accepts CLI versions at or above the locked minimum", () => {
+		expect(() => requireSupportedCliVersion("2.0.0")).not.toThrow();
+		expect(() => requireSupportedCliVersion("2.1.0")).not.toThrow();
+	});
+
+	it("rejects older or malformed versions fail-closed with update guidance", () => {
+		for (const version of ["1.9.9", "not-a-version", "", null, undefined]) {
+			try {
+				requireSupportedCliVersion(version as string);
+				expect.unreachable(`expected CliVersionError for ${version}`);
+			} catch (error) {
+				expect(error).toBeInstanceOf(CliVersionError);
+				expect((error as CliVersionError).code).toBe("CLI_UPDATE_REQUIRED");
+			}
+		}
+	});
+
+	it("whitelists the new completion error codes as safe", () => {
+		expect(sanitizeSyncErrorCode("SNAPSHOT_INCOMPLETE")).toBe(
+			"SNAPSHOT_INCOMPLETE",
+		);
+		expect(sanitizeSyncErrorCode("SNAPSHOT_CONFLICT")).toBe(
+			"SNAPSHOT_CONFLICT",
+		);
+		expect(sanitizeSyncErrorCode("SNAPSHOT_HASH_MISMATCH")).toBe(
+			"SNAPSHOT_HASH_MISMATCH",
+		);
+		expect(sanitizeSyncErrorCode("CLI_UPDATE_REQUIRED")).toBe(
+			"CLI_UPDATE_REQUIRED",
+		);
+	});
+});
+
+describe("safe sync error messages (Task 5 carry-over)", () => {
+	it("passes through short safe user-facing strings", () => {
+		expect(sanitizeSyncErrorMessage("Analysis failed")).toBe("Analysis failed");
+	});
+
+	it("collapses missing or empty messages to null", () => {
+		expect(sanitizeSyncErrorMessage(null)).toBeNull();
+		expect(sanitizeSyncErrorMessage(undefined)).toBeNull();
+		expect(sanitizeSyncErrorMessage("   ")).toBeNull();
+		expect(sanitizeSyncErrorMessage(42)).toBeNull();
+	});
+
+	it("strips control characters and caps message length", () => {
+		expect(sanitizeSyncErrorMessage("a\0b\x1Bc")).toBe("abc");
+		const long = "x".repeat(600);
+		const sanitized = sanitizeSyncErrorMessage(long);
+		expect(sanitized?.length).toBeLessThanOrEqual(500);
+		expect(sanitized).not.toContain("\0");
+	});
+});
+
+describe("verifyFileContentHash (Task 5)", () => {
+	const text = "console.log('hello');";
+	const base64 = Buffer.from(text, "utf8").toString("base64");
+	const hash = createHash("sha256").update(text, "utf8").digest("hex");
+
+	it("accepts content whose hash matches the manifest", () => {
+		expect(verifyFileContentHash(base64, hash)).toBe(true);
+	});
+
+	it("rejects tampered content or mismatched hashes fail-closed", () => {
+		expect(
+			verifyFileContentHash(
+				Buffer.from("tampered", "utf8").toString("base64"),
+				hash,
+			),
+		).toBe(false);
+		expect(verifyFileContentHash(base64, "0".repeat(64))).toBe(false);
+	});
+
+	it("rejects malformed base64 without throwing", () => {
+		expect(verifyFileContentHash("!!!not-base64!!!", hash)).toBe(false);
+		expect(verifyFileContentHash("", hash)).toBe(false);
 	});
 });

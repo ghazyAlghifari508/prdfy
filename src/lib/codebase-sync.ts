@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { CODEBASE_CLI_MIN_VERSION, CODEBASE_MAX_FILE_BYTES } from "./constants";
+import {
+	CODEBASE_CLI_MIN_VERSION,
+	CODEBASE_MAX_CHUNK_BYTES,
+	CODEBASE_MAX_ERROR_MESSAGE_CHARS,
+	CODEBASE_MAX_FILE_BYTES,
+	CODEBASE_MAX_SNAPSHOT_BYTES,
+} from "./constants";
 
 // === Project mode ===
 // NOTE: `projects.mode` ("ai_auto" | "manual") is the generation mode and is
@@ -394,6 +400,9 @@ export const SYNC_SAFE_ERROR_CODES = [
 	"CLI_UPDATE_REQUIRED",
 	"PROJECT_MODE_MISMATCH",
 	"SNAPSHOT_TOO_LARGE",
+	"SNAPSHOT_INCOMPLETE",
+	"SNAPSHOT_CONFLICT",
+	"SNAPSHOT_HASH_MISMATCH",
 	"ANALYSIS_FAILED",
 ] as const;
 
@@ -463,4 +472,370 @@ export function isSupportedCliVersion(
 // the credential never appears in a copyable string by accident.
 export function buildSyncCommand(projectId: string): string {
 	return `prdfy codebase sync --project-id ${projectId} --sync-token <token>`;
+}
+
+// === Upload transport DTOs (Task 5) ===
+// These schemas mirror `packages/cli/src/lib/sync-client.ts` request shapes
+// EXACTLY. The CLI POSTs manifest batches as
+// `{ sessionId, attemptId, batchIndex, batchTotal, entries, idempotencyKey }`,
+// file chunks as
+// `{ sessionId, attemptId, path, chunkIndex, chunkTotal, encoding, data,
+// contentHash, idempotencyKey }`, and completion as
+// `{ sessionId, attemptId, fileCount, excludedCount, idempotencyKey }`.
+// Unknown extra fields are stripped (never rejected) so a newer CLI that
+// attaches advisory metadata keeps working against this server.
+
+const idempotencyKeySchema = z.string().min(1).max(128);
+
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/i, {
+	message: "Hash must be SHA-256 hex",
+});
+
+export const manifestBatchRequestSchema = z
+	.object({
+		sessionId: z.string().min(1),
+		attemptId: z.string().min(1),
+		batchIndex: z.number().int().nonnegative(),
+		batchTotal: z.number().int().positive(),
+		// Empty batches are legal: the CLI sends one empty batch when the
+		// repository has zero eligible files.
+		entries: z.array(manifestEntrySchema),
+		idempotencyKey: idempotencyKeySchema,
+	})
+	.refine((body) => body.batchIndex < body.batchTotal, {
+		message: "batchIndex must be within batchTotal",
+	});
+
+export type ManifestBatchRequest = z.infer<typeof manifestBatchRequestSchema>;
+
+// Strict base64 shape (canonical alphabet, correct padding). Full byte-level
+// verification happens server-side in `verifyFileContentHash`.
+export function isStrictBase64(value: string): boolean {
+	if (!value || value.length % 4 !== 0) return false;
+	return /^[A-Za-z0-9+/]*={0,2}$/.test(value);
+}
+
+export const fileChunkRequestSchema = z
+	.object({
+		sessionId: z.string().min(1),
+		attemptId: z.string().min(1),
+		path: z.string().refine(isSafeRelativePath, {
+			message: "Chunk path must be a safe repository-relative path",
+		}),
+		chunkIndex: z.number().int().nonnegative(),
+		chunkTotal: z.number().int().positive(),
+		encoding: z.literal("base64"),
+		// Base64 text only (binaries are excluded client-side, never uploaded).
+		// Char length is capped at the transport bound; decoded bytes are
+		// strictly smaller, so this conservatively enforces the 256 KiB limit.
+		data: z
+			.string()
+			.min(1)
+			.max(CODEBASE_MAX_CHUNK_BYTES)
+			.refine(isStrictBase64, { message: "Chunk data must be base64" }),
+		contentHash: sha256HexSchema,
+		idempotencyKey: idempotencyKeySchema,
+	})
+	.refine((body) => body.chunkIndex < body.chunkTotal, {
+		message: "chunkIndex must be within chunkTotal",
+	});
+
+export type FileChunkRequest = z.infer<typeof fileChunkRequestSchema>;
+
+export const snapshotCompleteRequestSchema = z.object({
+	sessionId: z.string().min(1),
+	attemptId: z.string().min(1),
+	// Locked count definition: fileCount = eligible manifest entries,
+	// excludedCount = ALL exclusions (built-in + secret + .prdfyignore +
+	// unreadable + binary). The server verifies fileCount against the stored
+	// manifest; excludedCount is CLI-reported and stored as-is.
+	fileCount: z.number().int().nonnegative(),
+	excludedCount: z.number().int().nonnegative(),
+	idempotencyKey: idempotencyKeySchema,
+});
+
+export type SnapshotCompleteRequest = z.infer<
+	typeof snapshotCompleteRequestSchema
+>;
+
+// === Idempotency key binding (Task 5) ===
+// Keys mirror the CLI `makeIdempotencyKey` format
+// (`${attemptId}:${kind}:${index}`) and carry no credentials. A retry reuses
+// the same key for the same slot, so replay returns the stored response
+// without duplicating records. Key reuse across slots is rejected fail-closed.
+
+export type SyncIdempotencyKind = "manifest" | "file" | "complete";
+
+export function buildIdempotencyKey(
+	attemptId: string,
+	kind: SyncIdempotencyKind,
+	index: number,
+): string {
+	return `${attemptId}:${kind}:${index}`;
+}
+
+export function isExpectedIdempotencyKey(
+	key: unknown,
+	attemptId: string,
+	kind: SyncIdempotencyKind,
+	index: number,
+): boolean {
+	return (
+		typeof key === "string" &&
+		key.length > 0 &&
+		key === buildIdempotencyKey(attemptId, kind, index)
+	);
+}
+
+// Slot-shape binding for file chunks. The CLI numbers file keys by its own
+// flat chunk sequence (`makeIdempotencyKey(attemptId, "file", i)` over the
+// whole chunk list), which the server cannot reconstruct — so the files
+// endpoint binds the `${attemptId}:file:<n>` shape: exact replay still hits
+// the stored key byte-for-byte, while cross-attempt and cross-kind key reuse
+// is rejected fail-closed.
+export function isSlotIdempotencyKey(
+	key: unknown,
+	attemptId: string,
+	kind: SyncIdempotencyKind,
+): boolean {
+	if (typeof key !== "string" || !attemptId) return false;
+	const prefix = `${attemptId}:${kind}:`;
+	if (!key.startsWith(prefix)) return false;
+	return /^\d+$/.test(key.slice(prefix.length));
+}
+
+// === Attempt binding (Task 5) ===
+// One session is one attempt: attemptId MUST equal the bound session id.
+// Anything else is a foreign/wrong-project credential use — rejected with the
+// uniform credential error (no oracle, no id echo).
+
+export class SyncBindingError extends Error {
+	readonly code = "INVALID_SYNC_CREDENTIAL" as const;
+
+	constructor() {
+		super("Invalid sync credential");
+		this.name = "SyncBindingError";
+	}
+}
+
+export function assertAttemptBinding(
+	sessionId: string,
+	attemptId: string,
+): void {
+	if (!sessionId || !attemptId || sessionId !== attemptId) {
+		throw new SyncBindingError();
+	}
+}
+
+// === Upload session advancement (Task 5) ===
+// The CLI reports no scanning/filtering states itself — it handshakes
+// (waiting_for_cli -> connected) then uploads. Upload endpoints walk the
+// session through the remaining valid chain steps so the persisted history
+// never skips a transition. Uploads before handshake or after completion are
+// rejected; completion has its own uploaded transition.
+
+export function uploadTransitionSteps(
+	from: CodebaseSyncStatus,
+): Array<[CodebaseSyncStatus, CodebaseSyncStatus]> {
+	switch (from) {
+		case "connected":
+			return [
+				["connected", "scanning"],
+				["scanning", "filtering"],
+				["filtering", "uploading"],
+			];
+		case "scanning":
+			return [
+				["scanning", "filtering"],
+				["filtering", "uploading"],
+			];
+		case "filtering":
+			return [["filtering", "uploading"]];
+		case "uploading":
+			return [];
+		default:
+			throw new SyncTransitionError(from, "uploading");
+	}
+}
+
+// === Snapshot completion verification (Task 5; pure, DB-agnostic) ===
+// Runs on stored manifest + chunk bookkeeping BEFORE any status transition.
+// Only a fully verified snapshot may become `uploaded`; partial/failed
+// snapshots stay unusable (analysis and generation context select `ready`
+// snapshots only, which are produced downstream from `uploaded`).
+
+export type SnapshotCompletionCode =
+	| "SNAPSHOT_INCOMPLETE"
+	| "SNAPSHOT_CONFLICT"
+	| "SNAPSHOT_TOO_LARGE";
+
+export class SnapshotCompletionError extends Error {
+	readonly code: SnapshotCompletionCode;
+
+	constructor(code: SnapshotCompletionCode, message: string) {
+		super(message);
+		this.name = "SnapshotCompletionError";
+		this.code = code;
+	}
+}
+
+export interface CompletionManifestEntry {
+	path: string;
+	size: number;
+	hash: string;
+}
+
+export interface CompletionChunkInfo {
+	path: string;
+	chunkIndex: number;
+	chunkTotal: number;
+	dataBase64Length: number;
+	decodedBytes: number;
+}
+
+export interface CompletionCheckResult {
+	files: Array<{ path: string; chunkTotal: number; totalBytes: number }>;
+	contentSize: number;
+}
+
+export function checkSnapshotCompletion(input: {
+	manifest: readonly CompletionManifestEntry[];
+	chunks: readonly CompletionChunkInfo[];
+	fileCount: number;
+	excludedCount: number;
+}): CompletionCheckResult {
+	const { manifest, chunks, fileCount } = input;
+	// Locked definition: fileCount MUST equal the eligible manifest entries.
+	if (fileCount !== manifest.length) {
+		throw new SnapshotCompletionError(
+			"SNAPSHOT_INCOMPLETE",
+			`fileCount ${fileCount} does not match ${manifest.length} manifest entries`,
+		);
+	}
+
+	const manifestByPath = new Map(manifest.map((entry) => [entry.path, entry]));
+	const chunksByPath = new Map<string, CompletionChunkInfo[]>();
+	for (const chunk of chunks) {
+		const group = chunksByPath.get(chunk.path) ?? [];
+		group.push(chunk);
+		chunksByPath.set(chunk.path, group);
+	}
+
+	// Orphan chunks (paths absent from the manifest) indicate a desynced
+	// client — fail closed rather than silently dropping or adopting them.
+	for (const path of chunksByPath.keys()) {
+		if (!manifestByPath.has(path)) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_CONFLICT",
+				"Uploaded chunks reference a path absent from the manifest",
+			);
+		}
+	}
+
+	const files: CompletionCheckResult["files"] = [];
+	let contentSize = 0;
+	for (const entry of manifest) {
+		if (entry.size > CODEBASE_MAX_FILE_BYTES) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_TOO_LARGE",
+				"Manifest entry exceeds the per-file limit",
+			);
+		}
+		const group = chunksByPath.get(entry.path) ?? [];
+		const totals = new Set(group.map((chunk) => chunk.chunkTotal));
+		if (
+			group.length === 0 ||
+			totals.size !== 1 ||
+			group.length !== (group[0]?.chunkTotal ?? 0)
+		) {
+			throw new SnapshotCompletionError(
+				group.length > 0 && totals.size !== 1
+					? "SNAPSHOT_CONFLICT"
+					: "SNAPSHOT_INCOMPLETE",
+				"Missing or inconsistent chunks for a manifest entry",
+			);
+		}
+		const indexes = new Set(group.map((chunk) => chunk.chunkIndex));
+		const total = group[0]?.chunkTotal ?? 0;
+		for (let index = 0; index < total; index += 1) {
+			if (!indexes.has(index)) {
+				throw new SnapshotCompletionError(
+					"SNAPSHOT_INCOMPLETE",
+					"Missing or inconsistent chunks for a manifest entry",
+				);
+			}
+		}
+		const totalBytes = group.reduce(
+			(sum, chunk) => sum + chunk.decodedBytes,
+			0,
+		);
+		if (totalBytes > CODEBASE_MAX_FILE_BYTES) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_TOO_LARGE",
+				"Uploaded file exceeds the per-file limit",
+			);
+		}
+		files.push({ path: entry.path, chunkTotal: total, totalBytes });
+		contentSize += totalBytes;
+		if (contentSize > CODEBASE_MAX_SNAPSHOT_BYTES) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_TOO_LARGE",
+				"Snapshot exceeds the maximum snapshot size",
+			);
+		}
+	}
+	return { files, contentSize };
+}
+
+// === Fail-closed CLI version gate (Task 5 carry-over) ===
+// Task 4 left the minimum-version check client-only. Upload and handshake
+// paths now reject unsupported CLIs server-side: the handshake validates the
+// reported version, and upload/complete endpoints validate the version stored
+// on the session at handshake time. Malformed versions are rejected (never
+// treated as new-enough). The CLI treats 426 as non-retryable and surfaces
+// the update guidance.
+
+export class CliVersionError extends Error {
+	readonly code = "CLI_UPDATE_REQUIRED" as const;
+
+	constructor() {
+		super(
+			`This CLI version is below the required minimum ${CODEBASE_CLI_MIN_VERSION}. Update with: npm i -g @ghazynabiel/prdfy`,
+		);
+		this.name = "CliVersionError";
+	}
+}
+
+export function requireSupportedCliVersion(
+	cliVersion: unknown,
+	minVersion: string = CODEBASE_CLI_MIN_VERSION,
+): void {
+	if (
+		typeof cliVersion !== "string" ||
+		!isSupportedCliVersion(cliVersion, minVersion)
+	) {
+		throw new CliVersionError();
+	}
+}
+
+// === Safe sync error messages (Task 5 carry-over) ===
+// Analysis writers (Task 6) must store only safe user-facing strings in
+// `errorMessage`. As defense-in-depth, the status read boundary passes stored
+// messages through this sanitizer: control characters are stripped, length is
+// capped, and empty/non-string values collapse to null. Tokens and source
+// content must never reach this field.
+
+export function sanitizeSyncErrorMessage(message: unknown): string | null {
+	if (typeof message !== "string") return null;
+	const stripped = [...message]
+		.filter((ch) => {
+			const code = ch.codePointAt(0) ?? 0;
+			return code >= 0x20 && code !== 0x7f;
+		})
+		.join("")
+		.trim();
+	if (!stripped) return null;
+	return stripped.length > CODEBASE_MAX_ERROR_MESSAGE_CHARS
+		? stripped.slice(0, CODEBASE_MAX_ERROR_MESSAGE_CHARS)
+		: stripped;
 }

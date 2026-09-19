@@ -74,6 +74,22 @@ describe("session handshake", () => {
 		expect(requestBody(init)).not.toContain("test-sync-token");
 	});
 
+	it("surfaces the server-bound snapshotId from the handshake response", async () => {
+		stubFetch(async () =>
+			jsonResponse(200, {
+				sessionId: "sess-1",
+				attemptId: "att-1",
+				snapshotId: "snap-1",
+				status: "connected",
+			}),
+		);
+		const client = createSyncClient(OPTIONS);
+
+		const res = await client.handshake("proj-1");
+
+		expect(res.snapshotId).toBe("snap-1");
+	});
+
 	it("rejects a CLI that is older than the server minimum with update guidance", async () => {
 		stubFetch(async () =>
 			jsonResponse(200, {

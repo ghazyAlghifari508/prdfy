@@ -287,6 +287,14 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ error: "Project tidak ditemukan" },
 						{ status: 404 },
 					);
+				if (!isSyncCapableProject(project))
+					return Response.json(
+						{
+							error: "Project ini bukan project existing-codebase",
+							code: "PROJECT_MODE_MISMATCH",
+						},
+						{ status: 400 },
+					);
 
 				const existing = await db
 					.select({

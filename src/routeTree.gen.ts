@@ -75,6 +75,9 @@ import { Route as ApiV1ProjectsIdPrdRouteImport } from './routes/api/v1/projects
 import { Route as ApiV1ProjectsIdTasksRouteImport } from './routes/api/v1/projects/$id/tasks'
 import { Route as ApiV1SubtasksIdStatusRouteImport } from './routes/api/v1/subtasks/$id/status'
 import { Route as ApiV1TasksIdStatusRouteImport } from './routes/api/v1/tasks/$id/status'
+import { Route as ApiV1ProjectsIdCodebaseCompleteRouteImport } from './routes/api/v1/projects/$id/codebase/complete'
+import { Route as ApiV1ProjectsIdCodebaseFilesRouteImport } from './routes/api/v1/projects/$id/codebase/files'
+import { Route as ApiV1ProjectsIdCodebaseManifestRouteImport } from './routes/api/v1/projects/$id/codebase/manifest'
 import { Route as ApiV1ProjectsIdCodebaseSyncRouteImport } from './routes/api/v1/projects/$id/codebase/sync'
 
 const IndexRoute = IndexRouteImport.update({
@@ -409,6 +412,24 @@ const ApiV1TasksIdStatusRoute = ApiV1TasksIdStatusRouteImport.update({
   path: '/api/v1/tasks/$id/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ProjectsIdCodebaseCompleteRoute =
+  ApiV1ProjectsIdCodebaseCompleteRouteImport.update({
+    id: '/codebase/complete',
+    path: '/codebase/complete',
+    getParentRoute: () => ApiV1ProjectsIdRoute,
+  } as any)
+const ApiV1ProjectsIdCodebaseFilesRoute =
+  ApiV1ProjectsIdCodebaseFilesRouteImport.update({
+    id: '/codebase/files',
+    path: '/codebase/files',
+    getParentRoute: () => ApiV1ProjectsIdRoute,
+  } as any)
+const ApiV1ProjectsIdCodebaseManifestRoute =
+  ApiV1ProjectsIdCodebaseManifestRouteImport.update({
+    id: '/codebase/manifest',
+    path: '/codebase/manifest',
+    getParentRoute: () => ApiV1ProjectsIdRoute,
+  } as any)
 const ApiV1ProjectsIdCodebaseSyncRoute =
   ApiV1ProjectsIdCodebaseSyncRouteImport.update({
     id: '/codebase/sync',
@@ -483,6 +504,9 @@ export interface FileRoutesByFullPath {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
+  '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
+  '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
   '/api/v1/projects/$id/codebase/sync': typeof ApiV1ProjectsIdCodebaseSyncRoute
 }
 export interface FileRoutesByTo {
@@ -550,6 +574,9 @@ export interface FileRoutesByTo {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
+  '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
+  '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
   '/api/v1/projects/$id/codebase/sync': typeof ApiV1ProjectsIdCodebaseSyncRoute
 }
 export interface FileRoutesById {
@@ -620,6 +647,9 @@ export interface FileRoutesById {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
+  '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
+  '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
   '/api/v1/projects/$id/codebase/sync': typeof ApiV1ProjectsIdCodebaseSyncRoute
 }
 export interface FileRouteTypes {
@@ -691,6 +721,9 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/complete'
+    | '/api/v1/projects/$id/codebase/files'
+    | '/api/v1/projects/$id/codebase/manifest'
     | '/api/v1/projects/$id/codebase/sync'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -758,6 +791,9 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/complete'
+    | '/api/v1/projects/$id/codebase/files'
+    | '/api/v1/projects/$id/codebase/manifest'
     | '/api/v1/projects/$id/codebase/sync'
   id:
     | '__root__'
@@ -827,6 +863,9 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/complete'
+    | '/api/v1/projects/$id/codebase/files'
+    | '/api/v1/projects/$id/codebase/manifest'
     | '/api/v1/projects/$id/codebase/sync'
   fileRoutesById: FileRoutesById
 }
@@ -1344,6 +1383,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1TasksIdStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/$id/codebase/complete': {
+      id: '/api/v1/projects/$id/codebase/complete'
+      path: '/codebase/complete'
+      fullPath: '/api/v1/projects/$id/codebase/complete'
+      preLoaderRoute: typeof ApiV1ProjectsIdCodebaseCompleteRouteImport
+      parentRoute: typeof ApiV1ProjectsIdRoute
+    }
+    '/api/v1/projects/$id/codebase/files': {
+      id: '/api/v1/projects/$id/codebase/files'
+      path: '/codebase/files'
+      fullPath: '/api/v1/projects/$id/codebase/files'
+      preLoaderRoute: typeof ApiV1ProjectsIdCodebaseFilesRouteImport
+      parentRoute: typeof ApiV1ProjectsIdRoute
+    }
+    '/api/v1/projects/$id/codebase/manifest': {
+      id: '/api/v1/projects/$id/codebase/manifest'
+      path: '/codebase/manifest'
+      fullPath: '/api/v1/projects/$id/codebase/manifest'
+      preLoaderRoute: typeof ApiV1ProjectsIdCodebaseManifestRouteImport
+      parentRoute: typeof ApiV1ProjectsIdRoute
+    }
     '/api/v1/projects/$id/codebase/sync': {
       id: '/api/v1/projects/$id/codebase/sync'
       path: '/codebase/sync'
@@ -1417,6 +1477,9 @@ interface ApiV1ProjectsIdRouteChildren {
   ApiV1ProjectsIdKanbanRoute: typeof ApiV1ProjectsIdKanbanRoute
   ApiV1ProjectsIdPrdRoute: typeof ApiV1ProjectsIdPrdRoute
   ApiV1ProjectsIdTasksRoute: typeof ApiV1ProjectsIdTasksRoute
+  ApiV1ProjectsIdCodebaseCompleteRoute: typeof ApiV1ProjectsIdCodebaseCompleteRoute
+  ApiV1ProjectsIdCodebaseFilesRoute: typeof ApiV1ProjectsIdCodebaseFilesRoute
+  ApiV1ProjectsIdCodebaseManifestRoute: typeof ApiV1ProjectsIdCodebaseManifestRoute
   ApiV1ProjectsIdCodebaseSyncRoute: typeof ApiV1ProjectsIdCodebaseSyncRoute
 }
 
@@ -1425,6 +1488,9 @@ const ApiV1ProjectsIdRouteChildren: ApiV1ProjectsIdRouteChildren = {
   ApiV1ProjectsIdKanbanRoute: ApiV1ProjectsIdKanbanRoute,
   ApiV1ProjectsIdPrdRoute: ApiV1ProjectsIdPrdRoute,
   ApiV1ProjectsIdTasksRoute: ApiV1ProjectsIdTasksRoute,
+  ApiV1ProjectsIdCodebaseCompleteRoute: ApiV1ProjectsIdCodebaseCompleteRoute,
+  ApiV1ProjectsIdCodebaseFilesRoute: ApiV1ProjectsIdCodebaseFilesRoute,
+  ApiV1ProjectsIdCodebaseManifestRoute: ApiV1ProjectsIdCodebaseManifestRoute,
   ApiV1ProjectsIdCodebaseSyncRoute: ApiV1ProjectsIdCodebaseSyncRoute,
 }
 

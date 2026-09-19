@@ -44,6 +44,8 @@ export interface SyncSession {
 
 export interface HandshakeResponse extends SyncSession {
 	status: string;
+	/** Snapshot bound by the server handshake (Task 4+); ignored when absent. */
+	snapshotId?: string;
 	cliMinVersion?: string;
 	expiresAt?: string;
 }

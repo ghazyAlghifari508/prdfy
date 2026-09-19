@@ -15,6 +15,7 @@ import {
 	cliHandshakeResponseSchema,
 	getSessionUsability,
 	isSyncCapableProject,
+	requireSupportedCliVersion,
 } from "@/lib/codebase-sync";
 import { hashSyncToken } from "@/lib/codebase-sync.server";
 import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
@@ -141,6 +142,26 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/sync")({
 						{ error: "cliVersion is required", code: "SYNC_FAILED" },
 						{ status: 400 },
 					);
+
+				// Fail-closed server-side version gate (was client-only): an
+				// outdated or malformed CLI is rejected here before any session
+				// state changes. The recorded version is re-checked on every
+				// upload/complete request. 426 is non-retryable for the CLI.
+				try {
+					requireSupportedCliVersion(
+						parsedBody.data.cliVersion,
+						session.cliMinVersion,
+					);
+				} catch (error) {
+					return Response.json(
+						{
+							error:
+								error instanceof Error ? error.message : "CLI update required",
+							code: "CLI_UPDATE_REQUIRED",
+						},
+						{ status: 426 },
+					);
+				}
 
 				const [sub] = await db
 					.select({ plan: subscriptions.plan })
