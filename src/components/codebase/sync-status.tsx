@@ -1,8 +1,7 @@
 "use client";
 
-import { AlertCircle, Check, Circle, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, Check, Circle, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
 	type CodebaseSyncStatus,
 	isTerminalSyncStatus,
@@ -24,144 +23,37 @@ const STATUS_LABEL: Record<CodebaseSyncStatus, string> = {
 	expired: "Sesi kedaluwarsa",
 };
 
-const STATUS_HINT: Partial<Record<CodebaseSyncStatus, string>> = {
-	waiting_for_cli: "Jalankan perintah sync di agen lokal Anda.",
-	connected: "CLI terhubung. Menunggu pemindaian repositori.",
-	scanning: "CLI sedang memindai file repositori.",
-	filtering: "Menerapkan filter keamanan dan .prdfyignore.",
-	uploading: "Snapshot sedang diupload dalam beberapa bagian.",
-	uploaded: "Snapshot lengkap. Analisis dapat dimulai.",
-	analyzing: "Model AI sedang menganalisis snapshot.",
-	ready: "Codebase siap dipakai sebagai konteks generasi.",
-	failed: "Terjadi kegagalan. Anda dapat mengulang sync.",
-	expired: "Sesi sync kedaluwarsa. Buat sesi baru untuk lanjut.",
-};
-
-function formatTimestamp(value?: string): string | null {
-	if (!value) return null;
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return null;
-	return date.toLocaleString("id-ID");
-}
-
-interface StepItem {
-	id: string;
-	title: string;
-	subtext?: string;
-	state: "done" | "live" | "pending" | "failed";
-}
-
-function deriveSyncSteps(status: SyncStatusResponse): StepItem[] {
-	const s = status.status;
-	const isFailed = s === "failed" || s === "expired";
-
-	// Step 1: Koneksi CLI
-	let step1State: StepItem["state"] = "done";
-	let step1Title = "Agen AI & PrdFy CLI terhubung";
-	let step1Subtext: string | undefined = "Koneksi handshake terverifikasi";
-
-	if (s === "waiting_for_cli") {
-		step1State = "live";
-		step1Title = "Menunggu CLI dijalankan di repositori lokal";
-		step1Subtext = "Salin dan jalankan perintah sync di terminal agen AI Anda";
-	} else if (isFailed && status.fileCount === undefined) {
-		step1State = "failed";
-		step1Title = STATUS_LABEL[s];
-		step1Subtext = status.errorMessage || "Terjadi kesalahan pada sesi sync";
-	}
-
-	// Step 2: Pemindaian & Filter Keamanan
-	let step2State: StepItem["state"] = "pending";
-	let step2Title = "Pemindaian struktur repositori & filter keamanan";
-	let step2Subtext: string | undefined = undefined;
-
-	if (status.excludedCount !== undefined) {
-		step2State = "done";
-		step2Title = "Struktur repositori dipindai & filter keamanan aktif";
-		step2Subtext = `${status.excludedCount.toLocaleString("id-ID")} file dependencies/build/secrets dikecualikan`;
-	} else if (s === "connected" || s === "scanning" || s === "filtering") {
-		step2State = "live";
-		step2Title = "Memindai repositori & mengecualikan file rahasia/build";
-		step2Subtext = "Membaca manifest proyek dan menerapkan aturan .prdfyignore";
-	} else if (s === "failed") {
-		step2State = "failed";
-		step2Title = "Pemindaian repositori gagal";
-		step2Subtext = status.errorMessage || undefined;
-	}
-
-	// Step 3: Pengunggahan Snapshot
-	let step3State: StepItem["state"] = "pending";
-	let step3Title = "Pengiriman snapshot source code ke server";
-	let step3Subtext: string | undefined = undefined;
-
-	if (status.fileCount !== undefined) {
-		step3State = "done";
-		step3Title = "Snapshot source code berhasil diunggah";
-		step3Subtext = `${status.fileCount.toLocaleString("id-ID")} file terpilih terverifikasi`;
-	} else if (s === "uploading") {
-		step3State = "live";
-		step3Title = "Mengupload snapshot source code ke PrdFy...";
-		step3Subtext = "Mengirim pecahan berkas terenkripsi secara bertahap";
-	} else if (s === "failed" && status.fileCount === undefined && status.excludedCount !== undefined) {
-		step3State = "failed";
-		step3Title = "Pengunggahan snapshot gagal";
-		step3Subtext = status.errorMessage || undefined;
-	}
-
-	// Step 4: Analisis AI
-	let step4State: StepItem["state"] = "pending";
-	let step4Title = "Analisis arsitektur & dependensi oleh AI";
-	let step4Subtext: string | undefined = undefined;
-
-	if (status.analysisStatus === "failed") {
-		step4State = "failed";
-		step4Title = "Analisis codebase gagal";
-		step4Subtext =
-			status.errorMessage ||
-			"Model AI gagal menyelesaikan analisis snapshot. Anda dapat mengulang analisis.";
-	} else if (status.analysisStatus === "ready" || s === "ready") {
-		step4State = "done";
-		step4Title = "Analisis arsitektur selesai & siap";
-		step4Subtext = "Konteks aplikasi siap ditinjau sebelum masuk ke tahap Ask";
-	} else if (
-		s === "uploaded" ||
-		s === "analyzing" ||
-		status.analysisStatus === "pending"
-	) {
-		step4State = "live";
-		step4Title = "Model AI sedang menganalisis arsitektur & modul...";
-		step4Subtext =
-			"Mendeteksi framework, pustaka utama, skema data, dan area dampak";
-	}
-
-	return [
-		{ id: "step-1", title: step1Title, subtext: step1Subtext, state: step1State },
-		{ id: "step-2", title: step2Title, subtext: step2Subtext, state: step2State },
-		{ id: "step-3", title: step3Title, subtext: step3Subtext, state: step3State },
-		{ id: "step-4", title: step4Title, subtext: step4Subtext, state: step4State },
-	];
-}
-
 interface SyncStatusProps {
 	projectId: string;
 	sessionId?: string;
+	projectName?: string;
+	status?: SyncStatusResponse | null;
 	pollIntervalMs?: number;
 	onStatus?: (status: SyncStatusResponse | null) => void;
 	onRetrySync?: () => void;
 	onRetryAnalysis?: () => void;
+	onViewReview?: () => void;
+	onBackToInstructions?: () => void;
 }
 
 export function SyncStatus({
 	projectId,
 	sessionId,
+	projectName = "Project",
+	status: propStatus,
 	pollIntervalMs = CODEBASE_SYNC_POLL_INTERVAL_MS,
 	onStatus,
 	onRetrySync,
 	onRetryAnalysis,
+	onViewReview,
+	onBackToInstructions: _onBackToInstructions,
 }: SyncStatusProps) {
-	const [status, setStatus] = useState<SyncStatusResponse | null>(null);
+	const [polledStatus, setPolledStatus] = useState<SyncStatusResponse | null>(
+		propStatus ?? null,
+	);
+	const status = propStatus !== undefined ? propStatus : polledStatus;
 	const [error, setError] = useState<string | null>(null);
-	const [isLoading, setIsLoading] = useState(true);
+	const [isLoading, setIsLoading] = useState(propStatus === undefined);
 	const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const onStatusRef = useRef(onStatus);
 	onStatusRef.current = onStatus;
@@ -196,7 +88,7 @@ export function SyncStatus({
 					onStatusRef.current?.(null);
 					return;
 				}
-				setStatus(parsed.data);
+				setPolledStatus(parsed.data);
 				setError(null);
 				setIsLoading(false);
 				onStatusRef.current?.(parsed.data);
@@ -225,211 +117,281 @@ export function SyncStatus({
 		};
 	}, [projectId, sessionId, pollIntervalMs]);
 
-	const isTerminal = status ? isTerminalSyncStatus(status.status) : false;
-	const showRetry = status?.status === "failed" || status?.status === "expired";
+	const s = status?.status ?? "waiting_for_cli";
+	const isFailed = s === "failed";
+	const isExpired = s === "expired";
+	const isReady = s === "ready" || status?.analysisStatus === "ready";
+	const isAnalyzing =
+		s === "analyzing" ||
+		status?.analysisStatus === "pending" ||
+		(s === "uploaded" && !isReady && !status?.analysisStatus);
+	const isUploading = s === "uploading";
+	const isConnected = s !== "waiting_for_cli" && !isFailed && !isExpired;
+
+	const showRetry = isFailed || isExpired;
 	const showAnalysisRetry = status?.analysisStatus === "failed";
-	const steps = status ? deriveSyncSteps(status) : [];
 
 	return (
-		<div className="rounded-xl border border-graphite bg-card p-5 shadow-md backdrop-blur-md transition-all sm:p-6 text-card-foreground">
-			{/* Panel Header */}
-			<div className="flex flex-wrap items-center justify-between gap-3 border-b border-graphite pb-4">
-				<div className="flex items-center gap-3">
-					<div className="flex h-8 w-8 items-center justify-center rounded-lg border border-iron bg-muted text-mist">
-						{status?.status === "ready" ? (
-							<Check size={16} className="text-emerald-600 dark:text-emerald-400" />
-						) : !isTerminal ? (
-							<Loader2 size={16} className="animate-spin text-blue-600 dark:text-blue-400" />
-						) : (
-							<AlertCircle size={16} className="text-crimson" />
-						)}
+		<div className="w-full animate-enter flex flex-col gap-6">
+			{/* Page Head matching existing-codebase-flow.html screen 03 */}
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+				<div>
+					<div className="text-[11px] font-mono tracking-widest uppercase text-fog mb-2">
+						PROJECT / {projectName.toUpperCase()}
 					</div>
-					<div>
-						<h3 className="font-inter text-base font-[550] text-snow">
-							Status Sinkronisasi & Analisis
-						</h3>
-						<p className="text-xs text-fog">
-							Status aktual dari server, diperbarui otomatis secara real-time.
-						</p>
-					</div>
+					<h1 className="font-inter text-2xl sm:text-3xl font-[620] tracking-tight text-snow leading-tight">
+						Sync codebase
+					</h1>
+					<p className="mt-2 text-xs sm:text-sm text-fog max-w-xl leading-relaxed">
+						AI agent sedang menjalankan PrdFy CLI. Kamu bisa tetap melihat
+						terminal agent untuk detail proses.
+					</p>
 				</div>
-
-				{status && (
-					<div className="flex items-center gap-2">
-						<span
-							className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-								status.status === "ready"
-									? "border border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300"
-									: !isTerminal
-										? "border border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"
-										: "border border-crimson/30 bg-crimson/10 text-crimson"
-							}`}
-						>
-							<span
-								className={`h-1.5 w-1.5 rounded-full ${
-									status.status === "ready"
-										? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"
-										: !isTerminal
-											? "animate-ping bg-blue-500"
-											: "bg-crimson"
-								}`}
-							/>
-							{STATUS_LABEL[status.status]}
-						</span>
-					</div>
-				)}
+				<span className="inline-flex items-center gap-2 rounded-full border border-iron bg-charcoal/80 px-3 py-1.5 text-xs text-fog backdrop-blur-md self-start sm:self-auto">
+					<span
+						className={`h-1.5 w-1.5 rounded-full ${
+							isReady
+								? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+								: isConnected
+									? "bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]"
+									: isFailed || isExpired
+										? "bg-crimson shadow-[0_0_8px_rgba(235,87,87,0.8)]"
+										: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"
+						}`}
+					/>
+					{isReady
+						? "Sync selesai"
+						: isConnected
+							? "Agent terhubung"
+							: isExpired
+								? "Sesi kedaluwarsa"
+								: isFailed
+									? "Sync gagal"
+									: "Menunggu koneksi"}
+				</span>
 			</div>
 
-			{/* Content Area */}
-			<div className="mt-5 flex flex-col gap-4">
-				{isLoading && !status ? (
-					<div className="flex items-center gap-3 py-6 text-center justify-center">
-						<Loader2 className="h-5 w-5 animate-spin text-blue-600 dark:text-blue-400" />
-						<p className="text-sm text-fog">Menghubungi server dan memuat status...</p>
+			{/* Main Status Panel */}
+			<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden">
+				{/* Panel Head */}
+				<div className="flex items-center justify-between border-b border-graphite p-5 sm:p-6">
+					<div>
+						<h3 className="font-inter text-sm sm:text-base font-[620] text-snow">
+							Analisis repository lokal
+						</h3>
+						<p className="mt-1 font-mono text-[11px] text-fog">
+							{status?.sessionId
+								? `Sync ID: ${status.sessionId.slice(0, 12)}...`
+								: "Menghubungi server..."}
+							{status?.updatedAt &&
+								` · ${new Date(status.updatedAt).toLocaleTimeString("id-ID")}`}
+						</p>
 					</div>
-				) : error && !status ? (
-					<div className="rounded-lg border border-crimson/30 bg-crimson/10 p-4 text-sm text-crimson">
-						{error}
-					</div>
-				) : status ? (
-					<>
-						{/* Real-Signal Status Checklist */}
-						<div className="flex flex-col gap-2.5">
-							{steps.map((step) => {
-								let rowStyles =
-									"border-graphite bg-muted/40 text-fog";
-								let icon = <Circle size={15} className="text-slate shrink-0" />;
+					<span className="font-mono text-xs text-fog">
+						{isReady
+							? "Siap"
+							: isAnalyzing
+								? "Menganalisis"
+								: isUploading
+									? "Mengupload"
+									: isConnected
+										? "Terhubung"
+										: "Menunggu"}
+					</span>
+				</div>
 
-								if (step.state === "done") {
-									rowStyles =
-										"border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-950/30 dark:text-emerald-200";
-									icon = (
-										<Check size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-									);
-								} else if (step.state === "live") {
-									rowStyles =
-										"border-blue-200 bg-blue-50/80 text-blue-950 dark:border-blue-500/30 dark:bg-blue-950/40 dark:text-blue-100 shadow-sm";
-									icon = (
-										<Loader2
-											size={15}
-											className="animate-spin text-blue-600 dark:text-blue-400 shrink-0"
-										/>
-									);
-								} else if (step.state === "failed") {
-									rowStyles =
-										"border-crimson/30 bg-crimson/10 text-crimson";
-									icon = (
-										<AlertCircle size={15} className="text-crimson shrink-0" />
-									);
-								}
-
-								return (
-									<div
-										key={step.id}
-										className={`flex items-start gap-3 rounded-lg border p-3 text-xs transition-colors duration-200 ${rowStyles}`}
-									>
-										<div className="mt-0.5">{icon}</div>
-										<div className="flex flex-1 flex-col gap-0.5">
-											<span className="font-semibold text-snow">{step.title}</span>
-											{step.subtext && (
-												<span className="text-[11px] text-fog">
-													{step.subtext}
-												</span>
-											)}
-										</div>
-									</div>
-								);
-							})}
+				{/* Panel Body */}
+				<div className="p-5 sm:p-6 flex flex-col gap-5">
+					{/* Status List */}
+					<div className="flex flex-col gap-2.5">
+						{/* Item 1: Root repository */}
+						<div
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
+								isConnected || isReady || isUploading || isAnalyzing
+									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+									: s === "waiting_for_cli"
+										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
+										: "border-graphite text-fog"
+							}`}
+						>
+							{isConnected || isReady || isUploading || isAnalyzing ? (
+								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+							) : (
+								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+							)}
+							<span className="font-medium">
+								{isConnected || isReady || isUploading || isAnalyzing
+									? "Repository root terdeteksi"
+									: "Menunggu koneksi CLI dari terminal lokal"}
+							</span>
 						</div>
 
-						{/* Real Server Metrics Grid */}
-						<div className="mt-3 grid grid-cols-2 gap-3 rounded-lg border border-graphite bg-muted/30 p-3 text-xs sm:grid-cols-4">
-							{status.fileCount !== undefined && (
-								<div className="flex flex-col gap-1">
-									<span className="text-[10px] uppercase font-mono text-slate">
-										File terupload
-									</span>
-									<span className="font-medium text-snow font-mono">
-										{status.fileCount}
-									</span>
-								</div>
+						{/* Item 2: Package manifest & framework */}
+						<div
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
+								status?.fileCount !== undefined ||
+								status?.excludedCount !== undefined ||
+								isReady
+									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+									: isConnected
+										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
+										: "border-graphite text-slate"
+							}`}
+						>
+							{status?.fileCount !== undefined ||
+							status?.excludedCount !== undefined ||
+							isReady ? (
+								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+							) : isConnected ? (
+								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+							) : (
+								<Circle size={14} className="text-slate shrink-0" />
 							)}
-							{status.excludedCount !== undefined && (
-								<div className="flex flex-col gap-1">
-									<span className="text-[10px] uppercase font-mono text-slate">
-										File dieksklusi
-									</span>
-									<span className="font-medium text-snow font-mono">
-										{status.excludedCount}
-									</span>
-								</div>
+							<span className="font-medium">
+								Package manifest dan framework dibaca
+							</span>
+						</div>
+
+						{/* Item 3: Secrets & generated files */}
+						<div
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
+								status?.excludedCount !== undefined
+									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+									: isConnected
+										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
+										: "border-graphite text-slate"
+							}`}
+						>
+							{status?.excludedCount !== undefined ? (
+								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+							) : isConnected ? (
+								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+							) : (
+								<Circle size={14} className="text-slate shrink-0" />
 							)}
-							{formatTimestamp(status.updatedAt) && (
-								<div className="flex flex-col gap-1">
-									<span className="text-[10px] uppercase font-mono text-slate">
-										Diperbarui
-									</span>
-									<span className="font-medium text-fog">
-										{formatTimestamp(status.updatedAt)}
-									</span>
-								</div>
-							)}
-							{formatTimestamp(status.expiresAt) && (
-								<div className="flex flex-col gap-1">
-									<span className="text-[10px] uppercase font-mono text-slate">
-										Sesi berakhir
-									</span>
-									<span className="font-medium text-fog">
-										{formatTimestamp(status.expiresAt)}
-									</span>
-								</div>
+							<span className="font-medium">
+								Secrets dan generated files dikecualikan
+							</span>
+							{status?.excludedCount !== undefined && (
+								<span className="ml-auto font-mono text-[11px] opacity-80">
+									{status.excludedCount} file
+								</span>
 							)}
 						</div>
 
-						{/* Hints & Errors */}
-						{STATUS_HINT[status.status] && (
-							<p className="text-xs text-fog italic px-1">
-								{STATUS_HINT[status.status]}
-							</p>
-						)}
+						{/* Item 4: Sending source context */}
+						<div
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
+								isReady ||
+								(status?.fileCount !== undefined &&
+									status?.status !== "uploading")
+									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+									: isUploading
+										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
+										: "border-graphite text-slate"
+							}`}
+						>
+							{isReady ||
+							(status?.fileCount !== undefined &&
+								status?.status !== "uploading") ? (
+								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+							) : isUploading ? (
+								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+							) : (
+								<Circle size={14} className="text-slate shrink-0" />
+							)}
+							<span className="font-medium">
+								Mengirim source context yang relevan ke PrdFy
+							</span>
+							{status?.fileCount !== undefined && (
+								<span className="ml-auto font-mono text-[11px] opacity-80">
+									{status.fileCount} file
+								</span>
+							)}
+						</div>
 
-						{status.errorMessage && (
-							<div className="rounded-md border border-crimson/30 bg-crimson/10 p-3 text-xs text-crimson flex items-center gap-2">
-								<AlertCircle size={14} className="shrink-0" />
-								<span>{status.errorMessage}</span>
-							</div>
-						)}
+						{/* Item 5: Codebase analysis */}
+						<div
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
+								isReady
+									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+									: isAnalyzing
+										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
+										: showAnalysisRetry
+											? "border-crimson/30 bg-crimson/10 text-crimson"
+											: "border-graphite text-slate"
+							}`}
+						>
+							{isReady ? (
+								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+							) : isAnalyzing ? (
+								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+							) : showAnalysisRetry ? (
+								<AlertCircle size={14} className="text-crimson shrink-0" />
+							) : (
+								<Circle size={14} className="text-slate shrink-0" />
+							)}
+							<span className="font-medium">
+								{isReady
+									? "Menyusun codebase analysis (selesai)"
+									: isAnalyzing
+										? "Menyusun codebase analysis..."
+										: showAnalysisRetry
+											? "Menyusun codebase analysis gagal"
+											: "Menyusun codebase analysis"}
+							</span>
+						</div>
+					</div>
 
-						{/* Retry Actions */}
-						{showRetry && (
-							<div className="flex justify-end pt-1">
-								<Button
-									variant="outline"
+					{/* Error Message if any */}
+					{status?.errorMessage && (
+						<div className="rounded-md border border-crimson/30 bg-crimson/10 p-3 text-xs text-crimson">
+							{status.errorMessage}
+						</div>
+					)}
+					{error && (
+						<div className="rounded-md border border-crimson/30 bg-crimson/10 p-3 text-xs text-crimson">
+							{error}
+						</div>
+					)}
+
+					{/* Footer Bar */}
+					<div className="flex flex-wrap items-center justify-between gap-3 border-t border-graphite pt-4 text-xs text-fog">
+						<p className="text-[11px]">Progress berasal dari event CLI yang nyata.</p>
+						<div className="flex items-center gap-2">
+							{showRetry && onRetrySync && (
+								<button
+									type="button"
 									onClick={onRetrySync}
-									className="border-iron bg-surface text-xs hover:bg-muted text-mist"
+									className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
 								>
-									<RefreshCw size={13} className="mr-1.5" />
-									{status.status === "expired"
-										? "Buat sesi baru"
-										: "Coba sync ulang"}
-								</Button>
-							</div>
-						)}
+									Coba sync ulang
+								</button>
+							)}
 
-						{showAnalysisRetry && (
-							<div className="flex justify-end pt-1">
-								<Button
-									variant="outline"
+							{showAnalysisRetry && onRetryAnalysis && (
+								<button
+									type="button"
 									onClick={onRetryAnalysis}
-									className="border-iron bg-surface text-xs hover:bg-muted text-mist"
+									className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
 								>
-									<RefreshCw size={13} className="mr-1.5" />
 									Analisis ulang
-								</Button>
-							</div>
-						)}
-					</>
-				) : null}
+								</button>
+							)}
+
+							{isReady && onViewReview && (
+								<button
+									type="button"
+									onClick={onViewReview}
+									className="inline-flex items-center gap-1.5 rounded bg-snow px-3.5 py-1.5 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition"
+								>
+									<span>Lihat hasil analisis</span>
+									<span className="font-mono text-xs">-&gt;</span>
+								</button>
+							)}
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	);
