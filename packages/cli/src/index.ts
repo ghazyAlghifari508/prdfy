@@ -15,6 +15,7 @@
 
 import { Command } from "commander";
 import { acCommand } from "./commands/ac.js";
+import { syncCodebase } from "./commands/codebase.js";
 import { exportRulesCommand } from "./commands/export.js";
 import { kanbanCommand } from "./commands/kanban.js";
 import { loginCommand } from "./commands/login.js";
@@ -109,6 +110,32 @@ program
 	.argument("<projectId>", "Project UUID")
 	.description("Show kanban board in terminal")
 	.action(kanbanCommand);
+
+// prdfy codebase
+const codebaseCmd = program
+	.command("codebase")
+	.description("Codebase commands");
+codebaseCmd
+	.command("sync")
+	.description("Sync a filtered local repository snapshot to PrdFy")
+	.requiredOption("--project-id <id>", "Project UUID")
+	.requiredOption(
+		"--sync-token <token>",
+		"Project-scoped sync token (passed in memory, never stored)",
+	)
+	.option("--root <path>", "Repository root (default: current directory)")
+	.option("--output <mode>", "Output mode (human|json)", "human")
+	.option("--api-url <url>", "API base URL")
+	.action(async (opts: Record<string, string>) => {
+		const result = await syncCodebase({
+			projectId: opts["project-id"],
+			syncToken: opts["sync-token"],
+			root: opts.root,
+			output: opts.output as "human" | "json",
+			apiUrl: opts["api-url"],
+		});
+		if (!result.ok) process.exit(1);
+	});
 
 // prdfy export
 const exportCmd = program

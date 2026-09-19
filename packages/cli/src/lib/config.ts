@@ -47,3 +47,13 @@ export function getApiKey(): string {
 export function getApiUrl(): string {
 	return getConfig().apiUrl || "http://localhost:3000";
 }
+
+/**
+ * Resolve the API base URL for a single command invocation without
+ * persisting anything: explicit flag wins, then `PRDFY_API_URL`, then the
+ * global config file. Sync tokens must never be stored — pass them
+ * in-memory to the sync client instead of `saveConfig`.
+ */
+export function resolveApiUrl(explicit?: string): string {
+	return explicit || process.env.PRDFY_API_URL || getApiUrl();
+}
