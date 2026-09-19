@@ -87,7 +87,7 @@ export function SyncAgentModal({
 			onClick={onClose}
 		>
 			<Card
-				className="my-4 w-full max-w-2xl"
+				className="my-4 w-full max-w-2xl rounded-xl border border-graphite bg-charcoal/95 shadow-2xl backdrop-blur-xl"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<CardHeader>

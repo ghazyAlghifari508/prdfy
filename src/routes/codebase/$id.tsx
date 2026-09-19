@@ -6,22 +6,25 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { and, eq } from "drizzle-orm";
+import {
+	AlertCircle,
+	Check,
+	Copy,
+	ExternalLink,
+	RefreshCw,
+	Sparkles,
+	Terminal,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodebaseReview } from "@/components/codebase/codebase-review";
 import { SyncAgentModal } from "@/components/codebase/sync-agent-modal";
 import { SyncStatus } from "@/components/codebase/sync-status";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import type { AnalysisResponse } from "@/lib/codebase-analysis";
 import {
+	buildSyncCommand,
 	getPendingSyncPayloadKey,
 	type SyncPromptPayload,
 	type SyncStatusResponse,
@@ -30,7 +33,7 @@ import {
 import { requireUserServer } from "@/lib/session";
 import { useLastRoute } from "@/lib/use-last-route";
 
-// Route entry decision (unit-tested in ./$id.test.ts): existing-codebase
+// Route entry decision (unit-tested in ./-codebase-entry.test.ts): existing-codebase
 // projects enter; greenfield and unknown modes never enter this flow.
 export function decideCodebaseEntry(
 	projectMode: string | null | undefined,
@@ -104,13 +107,8 @@ function CodebasePage() {
 
 	const [payload, setPayload] = useState<SyncPromptPayload | null>(null);
 	const [modalOpen, setModalOpen] = useState(false);
+	const [copiedCommand, setCopiedCommand] = useState(false);
 	const [pageError, setPageError] = useState<string | null>(null);
-	// Handoff-loss recovery (Task 9): the Home handoff is one-time storage —
-	// opening this page in another tab (or after storage loss) and pressing
-	// "Mulai sync" answers 409 SYNC_SESSION_ACTIVE because the creation-time
-	// session is still usable. Offer an explicit revoke-with-warning CTA
-	// instead of a dead-end banner: retry revokes the orphaned credential
-	// and mints a replacement.
 	const [sessionConflict, setSessionConflict] = useState<{
 		sessionId?: string;
 		message: string;
@@ -118,10 +116,6 @@ function CodebasePage() {
 	const [isStarting, setIsStarting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-	// Page-level failed-analysis state (Task 9): without this the page is a
-	// dead end after ANALYSIS_FAILED — the session rolls back to `uploaded`
-	// (so no session retry shows) and the review card only renders ready
-	// output. The failed card renders an explicit Analisis-ulang action.
 	const [failedAnalysis, setFailedAnalysis] = useState<{
 		snapshotId: string;
 		analysisId: string | null;
@@ -210,9 +204,6 @@ function CodebasePage() {
 					json && typeof json === "object" && "analysisId" in json
 						? String((json as { analysisId: unknown }).analysisId)
 						: null;
-				// ANALYSIS_FAILED is retryable at page level: record the
-				// failed attempt (polling also converges here) instead of a
-				// bare banner. Other errors stay a dismissible page error.
 				if (code === "ANALYSIS_FAILED") {
 					const targetSnapshot = snapshotId ?? currentSnapshotId;
 					if (targetSnapshot) {
@@ -240,18 +231,11 @@ function CodebasePage() {
 		(status: SyncStatusResponse | null) => {
 			if (!status) return;
 			setLatestStatus(status);
-			// Scope everything to the session's current snapshot so a
-			// retry-sync never renders a stale review from a previous attempt.
 			if (status.snapshotId !== currentSnapshotId) {
 				setCurrentSnapshotId(status.snapshotId ?? null);
-				// New attempt: drop the previous snapshot's failed state (and
-				// stale ready output below) so polling reconverges cleanly.
 				setFailedAnalysis(null);
 				setAnalysis(null);
 			}
-			// Converge the page-level failed state from polling: after a
-			// reload the trigger error banner is gone but analysisStatus
-			// stays `failed` until a retry succeeds.
 			if (status.analysisStatus === "failed" && status.snapshotId) {
 				const snapshotId = status.snapshotId;
 				const message =
@@ -271,13 +255,8 @@ function CodebasePage() {
 				status.analysisStatus === "pending" ||
 				(status.snapshotId && status.analysisId == null)
 			) {
-				// Superseded: a newer attempt is pending, ready output is on
-				// its way, or a fresh snapshot has no analysis yet.
 				setFailedAnalysis(null);
 			}
-			// Auto-trigger analysis exactly once per uploaded snapshot without
-			// an analysis record; the trigger endpoint itself is idempotent
-			// (reuses pending/ready), so a StrictMode double-effect is safe.
 			if (
 				status.status === "uploaded" &&
 				!status.analysisId &&
@@ -354,68 +333,218 @@ function CodebasePage() {
 		[d.projectId],
 	);
 
-	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6">
-			<Card>
-				<CardHeader>
-					<CardTitle>Sync Codebase: {d.projectName}</CardTitle>
-					<CardDescription>
-						Sinkronkan repositori lokal lewat agen AI Anda, lalu tinjau hasil
-						analisis sebelum lanjut ke Ask.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="flex flex-wrap gap-2">
-					<Button
-						onClick={() => void startSession(false)}
-						disabled={isStarting}
-					>
-						{isStarting ? "Menyiapkan" : "Mulai sync"}
-					</Button>
-					{payload && (
-						<Button variant="outline" onClick={() => setModalOpen(true)}>
-							Lihat instruksi agen
-						</Button>
-					)}
-				</CardContent>
-			</Card>
+	const handleCopyCommand = async () => {
+		if (!payload) return;
+		const cmd = `prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`;
+		try {
+			await navigator.clipboard.writeText(cmd);
+			setCopiedCommand(true);
+			setTimeout(() => setCopiedCommand(false), 2000);
+		} catch {
+			setCopiedCommand(false);
+		}
+	};
 
+	return (
+		<div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10 animate-fade-in">
+			{/* Page Header matching PrdFy design language */}
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between border-b border-graphite pb-6">
+				<div className="flex flex-col gap-1.5">
+					<div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-fog">
+						<Sparkles size={13} className="text-blue-600 dark:text-blue-400" />
+						<span>Project · Existing Codebase</span>
+					</div>
+					<h1 className="font-inter text-2xl sm:text-3xl font-[550] tracking-tight text-snow">
+						Sinkronisasi Codebase: {d.projectName}
+					</h1>
+					<p className="text-xs sm:text-sm text-fog max-w-2xl leading-relaxed">
+						PrdFy tidak meminta upload ZIP. Jalankan sinkronisasi langsung dari
+						repositori lokal Anda melalui agen AI (Cursor, Claude Code,
+						Windsurf, dll.) untuk memindai struktur kode secara otomatis.
+					</p>
+				</div>
+
+				<div className="flex items-center gap-2 self-start sm:self-auto">
+					<span className="inline-flex items-center gap-2 rounded-full border border-graphite bg-muted/60 px-3 py-1 text-xs font-medium text-fog backdrop-blur-md">
+						<span
+							className={`h-2 w-2 rounded-full ${
+								analysis?.output
+									? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"
+									: latestStatus?.status === "waiting_for_cli"
+										? "bg-amber-400"
+										: "bg-blue-500 animate-pulse"
+							}`}
+						/>
+						{analysis?.output
+							? "Analisis Siap"
+							: latestStatus?.status === "waiting_for_cli"
+								? "Menunggu CLI"
+								: "Sinkronisasi Aktif"}
+					</span>
+				</div>
+			</div>
+
+			{/* Page-level Alert/Error */}
 			{pageError && (
-				<p className="rounded-md bg-crimson/10 p-3 text-sm text-crimson">
-					{pageError}
-				</p>
+				<div className="flex items-center gap-3 rounded-xl border border-crimson/30 bg-crimson/10 p-4 text-xs text-crimson">
+					<AlertCircle size={16} className="shrink-0" />
+					<span>{pageError}</span>
+				</div>
 			)}
 
+			{/* Session Conflict Recovery */}
 			{sessionConflict && (
-				<Card>
-					<CardHeader>
-						<CardTitle>Sesi sync aktif ditemukan</CardTitle>
-						<CardDescription>{sessionConflict.message}</CardDescription>
-					</CardHeader>
-					<CardContent className="flex flex-col gap-3">
-						<p className="text-sm text-fog">
-							Perintah sync sebelumnya masih berlaku (misalnya Anda membuka
-							halaman ini di tab lain). Membuat sesi baru akan mencabut
-							kredensial lama — agen yang masih memakai perintah lama harus
-							menjalankan ulang perintah baru.
-						</p>
-						<div className="flex flex-wrap gap-2">
-							<Button
-								onClick={() => void startSession(true)}
-								disabled={isStarting}
-							>
-								{isStarting ? "Menyiapkan" : "Cabut sesi lama & buat baru"}
-							</Button>
+				<div className="rounded-xl border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-5 shadow-sm sm:p-6">
+					<div className="flex items-start gap-3">
+						<AlertCircle size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+						<div className="flex flex-1 flex-col gap-2">
+							<h3 className="font-inter text-sm font-[550] text-amber-900 dark:text-amber-200">
+								Sesi sync aktif ditemukan
+							</h3>
+							<p className="text-xs text-fog leading-relaxed">
+								{sessionConflict.message}. Perintah sync sebelumnya masih
+								berlaku di terminal lain. Membuat sesi baru akan mencabut
+								kredensial lama.
+							</p>
+							<div className="mt-2 flex flex-wrap gap-2.5">
+								<Button
+									onClick={() => void startSession(true)}
+									disabled={isStarting}
+									className="btn-primary px-4 py-2 text-xs"
+								>
+									{isStarting ? "Menyiapkan..." : "Cabut sesi lama & buat baru"}
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() => setSessionConflict(null)}
+									className="border-iron bg-surface text-xs hover:bg-muted text-mist"
+								>
+									Pertahankan sesi lama
+								</Button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Quick Instruction & Terminal Command Box (When waiting or active) */}
+			<div className="rounded-xl border border-graphite bg-card p-5 shadow-sm sm:p-6 text-card-foreground">
+				<div className="flex flex-wrap items-center justify-between gap-3 border-b border-graphite pb-4">
+					<div className="flex items-center gap-2.5">
+						<div className="flex h-8 w-8 items-center justify-center rounded-lg border border-iron bg-muted text-mist">
+							<Terminal size={16} className="text-blue-600 dark:text-blue-400" />
+						</div>
+						<div>
+							<h2 className="font-inter text-base font-[550] text-snow">
+								Hubungkan Agen Coding Lokal
+							</h2>
+							<p className="text-xs text-fog">
+								Gunakan PrdFy CLI resmi untuk sinkronisasi snapshot repository
+								tanpa upload file ZIP manual.
+							</p>
+						</div>
+					</div>
+
+					<div className="flex items-center gap-2">
+						{payload ? (
 							<Button
 								variant="outline"
-								onClick={() => setSessionConflict(null)}
+								onClick={() => setModalOpen(true)}
+								className="border-iron bg-surface text-xs hover:bg-muted text-mist"
 							>
-								Pertahankan sesi lama
+								<ExternalLink size={13} className="mr-1.5" />
+								Lihat instruksi lengkap
 							</Button>
-						</div>
-					</CardContent>
-				</Card>
-			)}
+						) : (
+							<Button
+								onClick={() => void startSession(false)}
+								disabled={isStarting}
+								className="btn-primary px-4 py-2 text-xs"
+							>
+								{isStarting ? "Menyiapkan sesi..." : "Mulai sync"}
+							</Button>
+						)}
+					</div>
+				</div>
 
+				{payload ? (
+					<div className="mt-5 flex flex-col gap-4">
+						{/* Steps sequence */}
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+							<div className="rounded-lg border border-graphite bg-muted/30 p-3.5 flex flex-col gap-1">
+								<span className="font-mono text-[10px] uppercase text-blue-600 dark:text-blue-400 font-semibold">
+									Langkah 1
+								</span>
+								<span className="font-semibold text-xs text-snow">
+									Cek CLI di terminal
+								</span>
+								<code className="mt-1 font-mono text-[11px] text-snow bg-muted p-1.5 rounded border border-graphite">
+									prdfy --version
+								</code>
+							</div>
+							<div className="rounded-lg border border-graphite bg-muted/30 p-3.5 flex flex-col gap-1">
+								<span className="font-mono text-[10px] uppercase text-blue-600 dark:text-blue-400 font-semibold">
+									Langkah 2
+								</span>
+								<span className="font-semibold text-xs text-snow">
+									Jalankan dari root project
+								</span>
+								<span className="mt-1 text-[11px] text-fog">
+									Pastikan posisi direktori terminal berada di root repository.
+								</span>
+							</div>
+							<div className="rounded-lg border border-graphite bg-muted/30 p-3.5 flex flex-col gap-1">
+								<span className="font-mono text-[10px] uppercase text-blue-600 dark:text-blue-400 font-semibold">
+									Langkah 3
+								</span>
+								<span className="font-semibold text-xs text-snow">
+									Pantau progres otomatis
+								</span>
+								<span className="mt-1 text-[11px] text-fog">
+									PrdFy akan mendeteksi status dan memulai analisis secara
+									real-time.
+								</span>
+							</div>
+						</div>
+
+						{/* Copyable Command Box (High Contrast Terminal Dark Theme) */}
+						<div className="relative rounded-lg border border-zinc-800 bg-zinc-950 p-3.5 font-mono text-xs text-zinc-100 shadow-inner">
+							<div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-zinc-800 text-[11px] text-zinc-400">
+								<span>Perintah Terminal (Token aktif 30 menit):</span>
+								<button
+									type="button"
+									onClick={handleCopyCommand}
+									className="inline-flex items-center gap-1.5 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-200 hover:bg-zinc-700 transition"
+								>
+									{copiedCommand ? (
+										<>
+											<Check size={12} className="text-emerald-400" />
+											<span className="text-emerald-400">Tersalin!</span>
+										</>
+									) : (
+										<>
+											<Copy size={12} />
+											<span>Salin perintah</span>
+										</>
+									)}
+								</button>
+							</div>
+							<div className="overflow-x-auto select-all text-emerald-400 py-1 font-mono">
+								{buildSyncCommand(payload.projectId)}
+							</div>
+						</div>
+					</div>
+				) : (
+					<div className="mt-4 py-4 text-center">
+						<p className="text-xs text-fog">
+							Klik tombol "Mulai sync" untuk menerbitkan token sesi aman dan
+							instruksi bagi agen AI Anda.
+						</p>
+					</div>
+				)}
+			</div>
+
+			{/* Real-Signal Status Checklist */}
 			<SyncStatus
 				projectId={d.projectId}
 				onStatus={handleStatus}
@@ -425,39 +554,52 @@ function CodebasePage() {
 				}
 			/>
 
+			{/* Analysis Failed Card (Retryable) */}
 			{failedAnalysis &&
 				currentSnapshotId &&
 				failedAnalysis.snapshotId === currentSnapshotId &&
 				(!analysis || analysis.snapshotId !== currentSnapshotId) && (
-					<Card>
-						<CardHeader>
-							<CardTitle>Analisis codebase gagal</CardTitle>
-							<CardDescription>
-								Snapshot sudah terupload lengkap — hanya tahap analisis yang
-								gagal dan dapat diulang tanpa sync ulang.
-							</CardDescription>
-						</CardHeader>
-						<CardContent className="flex flex-col gap-3">
-							<p className="text-sm text-fog">{failedAnalysis.message}</p>
-							<div className="flex flex-wrap gap-2">
-								<Button
-									onClick={() => void triggerAnalysis(currentSnapshotId)}
-									disabled={isWorking}
-								>
-									{isWorking ? "Menganalisis" : "Analisis ulang"}
-								</Button>
-								<Button
-									variant="outline"
-									onClick={() => void startSession(true)}
-									disabled={isStarting}
-								>
-									Sync ulang
-								</Button>
-							</div>
-						</CardContent>
-					</Card>
+					<div className="rounded-xl border border-crimson/30 bg-crimson/10 p-5 shadow-sm sm:p-6 flex flex-col gap-3">
+						<div className="flex items-center gap-2 text-crimson font-medium text-sm">
+							<AlertCircle size={16} />
+							<span>Analisis codebase gagal</span>
+						</div>
+						<p className="text-xs text-fog leading-relaxed">
+							Snapshot sudah terupload lengkap di server — hanya tahap analisis
+							AI yang mengalami kendala dan dapat diulang tanpa perlu sinkronisasi
+							ulang berkas.
+						</p>
+						<p className="text-xs font-mono text-crimson">
+							{failedAnalysis.message}
+						</p>
+						<div className="mt-2 flex flex-wrap gap-2.5">
+							<Button
+								onClick={() => void triggerAnalysis(currentSnapshotId)}
+								disabled={isWorking}
+								className="btn-primary px-4 py-2 text-xs"
+							>
+								{isWorking ? (
+									<>
+										<RefreshCw size={13} className="mr-1.5 animate-spin" />
+										Menganalisis...
+									</>
+								) : (
+									"Analisis ulang"
+								)}
+							</Button>
+							<Button
+								variant="outline"
+								onClick={() => void startSession(true)}
+								disabled={isStarting}
+								className="border-iron bg-surface text-xs hover:bg-muted text-mist"
+							>
+								Sync ulang
+							</Button>
+						</div>
+					</div>
 				)}
 
+			{/* Rendered Codebase Review (Bento Grid) */}
 			{analysis?.output &&
 				currentSnapshotId &&
 				analysis.snapshotId === currentSnapshotId && (
@@ -479,6 +621,7 @@ function CodebasePage() {
 					/>
 				)}
 
+			{/* Full Instructions Modal */}
 			<SyncAgentModal
 				open={modalOpen}
 				onClose={() => setModalOpen(false)}
