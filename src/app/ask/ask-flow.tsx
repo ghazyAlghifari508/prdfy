@@ -1,7 +1,7 @@
 "use client";
 
 import { useNavigate } from "@tanstack/react-router";
-import { Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
+import { Check, Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
 	type CodebaseAnalysis,
@@ -547,11 +547,18 @@ Deployment: ${tech.deployment || defaultChoice}`;
 				) : (
 					<div className="space-y-6 pb-8">
 						{analysis ? (
-							<div className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3.5 text-xs text-emerald-200">
-								Tech stack otomatis terdeteksi dari codebase kamu (
-								{analysis.framework || analysis.language || "Existing Codebase"}
-								). Pilihan di bawah telah terisi otomatis dan siap digunakan, atau
-								dapat kamu sesuaikan bila diperlukan.
+							<div className="flex items-start gap-3 rounded-xl border border-graphite bg-card p-4 shadow-sm text-card-foreground">
+								<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 mt-0.5">
+									<Check size={14} className="stroke-[2.5]" />
+								</div>
+								<div className="flex flex-col gap-0.5">
+									<span className="text-xs font-semibold text-snow">
+										Tech stack otomatis terdeteksi ({analysis.framework || analysis.language || "Existing Codebase"})
+									</span>
+									<span className="text-xs text-fog leading-relaxed">
+										Pilihan di bawah telah terisi otomatis sesuai arsitektur repositori kamu dan siap digunakan, atau dapat kamu sesuaikan bila diperlukan.
+									</span>
+								</div>
 							</div>
 						) : (
 							<p className="font-inter text-xs text-fog italic">
