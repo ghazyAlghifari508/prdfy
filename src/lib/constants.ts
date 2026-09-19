@@ -84,6 +84,23 @@ export const CODEBASE_ANALYSIS_MAX_TOKENS = 12_000;
 // Maximum manifest entries listed in the analysis prompt. Overflow is marked
 // explicitly so the model never mistakes a truncated list for the full tree.
 export const CODEBASE_ANALYSIS_MAX_MANIFEST_ENTRIES = 500;
+// === Existing-codebase generation grounding (Task 8) ===
+// Bounded snapshot-bound context injected into Ask/PRD/AC/Task prompts via
+// one formatting boundary (buildCodebasePromptBlock). Null context (greenfield)
+// is a no-op so greenfield prompts stay byte-identical.
+export const CODEBASE_GENERATION_MAX_CONTEXT_CHARS = 6_000;
+export const CODEBASE_GENERATION_MAX_PATHS = 40;
+export const CODEBASE_GENERATION_MAX_FINDINGS = 5;
+export const CODEBASE_GENERATION_MAX_PROMPT_CHARS = 2_000;
+export const CODEBASE_GENERATION_MAX_ANSWER_CHARS = 1_000;
+// === Ask handoff persistence (Task 8) ===
+// Authoritative Ask answers/compiled prompt stored server-side for
+// existing-codebase projects so refresh and multi-device access keep them.
+// sessionStorage remains for UI continuity.
+export const CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS = 8_000;
+export const CODEBASE_ASK_HANDOFF_MAX_ANSWERS = 60;
+export const CODEBASE_ASK_HANDOFF_MAX_STATE_CHARS = 20_000;
+export const CODEBASE_ASK_HANDOFF_MAX_OPTIONS = 8;
 
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.

@@ -35,6 +35,7 @@ describe("PROJECT_SYNC_CHILD_TABLES", () => {
 		expect([...PROJECT_SYNC_CHILD_TABLES].sort()).toEqual(
 			[
 				"codebase_analyses",
+				"codebase_ask_handoffs",
 				"codebase_generation_contexts",
 				"codebase_snapshot_files",
 				"codebase_snapshots",
@@ -44,9 +45,13 @@ describe("PROJECT_SYNC_CHILD_TABLES", () => {
 		);
 	});
 
-	it("orders deletes FK-safe: contexts before analyses/snapshots, files before snapshots, sessions last", () => {
+	it("orders deletes FK-safe: handoffs first, contexts before analyses/snapshots, files before snapshots, sessions last", () => {
 		const order: string[] = [...PROJECT_SYNC_CHILD_TABLES];
 		const indexOf = (name: string) => order.indexOf(name);
+		// Ask handoffs carry no FK deps and go first.
+		expect(indexOf("codebase_ask_handoffs")).toBeLessThan(
+			indexOf("codebase_generation_contexts"),
+		);
 		// Generation contexts reference snapshots + analyses.
 		expect(indexOf("codebase_generation_contexts")).toBeLessThan(
 			indexOf("codebase_analyses"),

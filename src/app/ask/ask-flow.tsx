@@ -47,9 +47,13 @@ interface TechAnswers {
 interface AskFlowProps {
 	projectId: string;
 	projectName: string;
+	/** Existing-codebase projects persist the Ask handoff server-side.
+	 *  Absent/unknown behaves as greenfield (sessionStorage only). */
+	projectMode?: string | null;
 }
 
-export function AskFlow({ projectId, projectName }: AskFlowProps) {
+export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
+	const isExistingCodebase = projectMode === "existing_codebase";
 	const navigate = useNavigate();
 	const promptRef = useRef("");
 	const hasFetched = useRef(false);
@@ -109,17 +113,108 @@ export function AskFlow({ projectId, projectName }: AskFlowProps) {
 			return;
 		}
 
-		// Non-consuming read: the prompt is still needed at submit time to build the
-		// final PRD prompt, and a refresh mid-flow must not lose it.
-		const prompt = getSetupPrompt();
-		if (!prompt) {
-			navigate({ to: "/", replace: true });
-			return;
-		}
-		promptRef.current = prompt;
-		setPlatform(getAskPlatform());
+		// Task 8: authoritative server handoff for existing-codebase projects.
+		// Survives refresh and multi-device access where sessionStorage cannot.
+		// Best-effort: any failure falls through to the normal flow below.
+		const restoreFromServer = async (): Promise<boolean> => {
+			if (!isExistingCodebase) return false;
+			try {
+				const res = await fetch("/api/ask/options", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ projectId, action: "get-handoff" }),
+				});
+				if (!res.ok) return false;
+				const data = (await res.json().catch(() => null)) as {
+					handoff?: {
+						state?: {
+							prompt?: unknown;
+							platform?: unknown;
+							session?: unknown;
+							questions?: unknown;
+							nonTechAnswers?: unknown;
+							techAnswers?: unknown;
+							skippedTech?: unknown;
+						};
+					} | null;
+				};
+				const st = data?.handoff?.state;
+				if (
+					!st ||
+					typeof st.prompt !== "string" ||
+					!st.prompt ||
+					!Array.isArray(st.questions) ||
+					st.questions.length === 0
+				) {
+					return false;
+				}
+				const validTypes = ["select", "text", "multiselect"];
+				const validQuestions = st.questions.filter((q): q is AskQuestion => {
+					if (!q || typeof q !== "object") return false;
+					const cand = q as Partial<AskQuestion>;
+					if (
+						typeof cand.id !== "string" ||
+						typeof cand.question !== "string"
+					) {
+						return false;
+					}
+					if (!validTypes.includes(cand.type ?? "")) return false;
+					if (cand.options !== undefined) {
+						if (!Array.isArray(cand.options)) return false;
+						if (!cand.options.every((o) => typeof o === "string")) return false;
+					}
+					return true;
+				});
+				if (validQuestions.length === 0) return false;
+				promptRef.current = st.prompt;
+				if (st.platform === "web" || st.platform === "mobile") {
+					setPlatform(st.platform);
+				}
+				if (st.session === 1 || st.session === 2 || st.session === 3) {
+					setSession(st.session);
+				}
+				setQuestions(validQuestions);
+				if (st.nonTechAnswers && typeof st.nonTechAnswers === "object") {
+					setNonTechAnswers(st.nonTechAnswers as Record<string, NonTechAnswer>);
+				}
+				if (st.techAnswers && typeof st.techAnswers === "object") {
+					const t = st.techAnswers as Record<string, unknown>;
+					setTechAnswers({
+						...(typeof t.frontend === "string" ? { frontend: t.frontend } : {}),
+						...(typeof t.backend === "string" ? { backend: t.backend } : {}),
+						...(typeof t.fullstackFramework === "string"
+							? { fullstackFramework: t.fullstackFramework }
+							: {}),
+						...(typeof t.database === "string" ? { database: t.database } : {}),
+						...(typeof t.deployment === "string"
+							? { deployment: t.deployment }
+							: {}),
+					});
+				}
+				if (Array.isArray(st.skippedTech)) {
+					setSkippedTech(
+						new Set(st.skippedTech.filter((s) => typeof s === "string")),
+					);
+				}
+				setIsLoadingQuestions(false);
+				return true;
+			} catch {
+				return false;
+			}
+		};
 
-		const fetchOptions = async () => {
+		const run = async () => {
+			if (await restoreFromServer()) return;
+			// Non-consuming read: the prompt is still needed at submit time to build the
+			// final PRD prompt, and a refresh mid-flow must not lose it.
+			const prompt = getSetupPrompt();
+			if (!prompt) {
+				navigate({ to: "/", replace: true });
+				return;
+			}
+			promptRef.current = prompt;
+			setPlatform(getAskPlatform());
+
 			try {
 				const res = await fetch("/api/ask/options", {
 					method: "POST",
@@ -146,7 +241,7 @@ export function AskFlow({ projectId, projectName }: AskFlowProps) {
 				setIsLoadingQuestions(false);
 			}
 		};
-		fetchOptions();
+		void run();
 	}, []);
 
 	// Persist across refresh/hard-refresh: write state whenever it changes.
@@ -205,7 +300,7 @@ export function AskFlow({ projectId, projectName }: AskFlowProps) {
 	// so non-technical users can let the AI pick the whole stack.
 	const allTechAnswered = true;
 
-	const submit = (tech: TechAnswers) => {
+	const submit = async (tech: TechAnswers) => {
 		const isEn = getAskLanguage() === "en";
 		const skipLabel = isEn ? "(Let AI decide)" : "(Biarkan AI yang memilih)";
 		const defaultChoice = isEn ? "Let AI decide" : "Biarkan AI yang memilih";
@@ -256,6 +351,58 @@ Deployment: ${tech.deployment || defaultChoice}`;
 		}
 
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
+		// Task 8: authoritative server handoff for existing-codebase projects.
+		// sessionStorage above keeps UI continuity; this row survives refresh
+		// and multi-device access. Best-effort — never blocks navigation.
+		// Greenfield skips the request entirely (no behavior change).
+		if (isExistingCodebase) {
+			try {
+				const skipLabel = isEn
+					? "(Let AI decide)"
+					: "(Biarkan AI yang memilih)";
+				const answers = questions.map((q) => {
+					const a = nonTechAnswers[q.id];
+					const picked =
+						a && !a.skipped
+							? Array.isArray(a.values) && a.values.length > 0
+								? a.values.join(", ")
+								: (a.value ?? "")
+							: "";
+					return {
+						question: q.question,
+						answer: picked || skipLabel,
+					};
+				});
+				await fetch("/api/ask/options", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						projectId,
+						action: "save-handoff",
+						handoff: {
+							answers,
+							compiledPrompt,
+							state: {
+								prompt: promptRef.current,
+								platform,
+								session,
+								questions: questions.map((q) => ({
+									id: q.id,
+									question: q.question,
+									type: q.type,
+									...(q.options ? { options: q.options } : {}),
+								})),
+								nonTechAnswers,
+								techAnswers: tech,
+								skippedTech: [...skippedTech],
+							},
+						},
+					}),
+				});
+			} catch (err) {
+				console.warn("Ask handoff save skipped:", err);
+			}
+		}
 		navigate({ to: "/prd/$id", params: { id: projectId } });
 	};
 
@@ -466,7 +613,7 @@ Deployment: ${tech.deployment || defaultChoice}`;
 						<div className="rounded-lg border border-graphite bg-charcoal p-4">
 							<ContextUpload
 								onContext={setBriefContext}
-								onSkip={() => submit(techAnswers)}
+								onSkip={() => void submit(techAnswers)}
 							/>
 						</div>
 
@@ -480,7 +627,7 @@ Deployment: ${tech.deployment || defaultChoice}`;
 							</button>
 							<button
 								type="button"
-								onClick={() => submit(techAnswers)}
+								onClick={() => void submit(techAnswers)}
 								className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510]"
 							>
 								Generate PRD

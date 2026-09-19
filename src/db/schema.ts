@@ -530,6 +530,28 @@ export const codebaseGenerationContexts = pgTable(
 	],
 );
 
+// Ask handoff: authoritative server-side copy of the Ask answers/compiled
+// prompt for existing-codebase projects (one row per project, upserted on
+// submit). sessionStorage keeps UI continuity; this row survives refresh and
+// multi-device access. Greenfield projects never write here.
+export const codebaseAskHandoffs = pgTable("codebase_ask_handoffs", {
+	projectId: text("project_id")
+		.primaryKey()
+		.references(() => projects.id, { onDelete: "cascade" }),
+	userId: text("user_id")
+		.notNull()
+		.references(() => users.id, { onDelete: "cascade" }),
+	// Advisory binding to the snapshot the Ask flow saw; plain text (no FK)
+	// so later snapshot selection never blocks handoff reads.
+	snapshotId: text("snapshot_id"),
+	answers: jsonb("answers"),
+	compiledPrompt: text("compiled_prompt"),
+	// Restorable Ask UI snapshot (questions + both sessions' answers).
+	state: jsonb("state"),
+	createdAt: timestamp("created_at").defaultNow(),
+	updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Payments
 export const payments = pgTable(
 	"payments",

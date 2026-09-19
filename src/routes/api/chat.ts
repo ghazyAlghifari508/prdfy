@@ -2,6 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { projects, subscriptions } from "@/db/schema";
+import {
+	buildCodebasePromptBlock,
+	getProjectGenerationContext,
+	linkGenerationContext,
+} from "@/lib/codebase-generation-context";
 import { BRIEF_MAX_CHARS } from "@/lib/constants";
 import { checkCredits, consumeCredit } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
@@ -132,10 +137,19 @@ export const Route = createFileRoute("/api/chat")({
 						? `\n\nBRIEF KONTEXT:\n${briefContext.slice(0, BRIEF_MAX_CHARS)}`
 						: "");
 				let projectLanguage: "id" | "en" = "id";
+				// Task 8 snapshot-bound context (existing-codebase only).
+				// Stays "" for greenfield so prompts are byte-identical.
+				let codebaseBlock = "";
+				let codebaseSnapshotId: string | undefined;
+				let codebaseAnalysisId: string | undefined;
 
 				if (projectIdToUse) {
 					const [projCheck] = await db
-						.select({ id: projects.id, language: projects.language })
+						.select({
+							id: projects.id,
+							language: projects.language,
+							projectMode: projects.projectMode,
+						})
 						.from(projects)
 						.where(
 							and(
@@ -154,6 +168,23 @@ export const Route = createFileRoute("/api/chat")({
 
 					if (projCheck?.language) {
 						projectLanguage = normalizeLanguage(projCheck.language);
+					}
+
+					// Task 8: bounded, snapshot-bound context via the shared
+					// builder (never duplicated queries/formatting). Null for
+					// greenfield or not-ready snapshots. Consumes no credits.
+					if (projCheck?.projectMode === "existing_codebase") {
+						try {
+							const generationContext =
+								await getProjectGenerationContext(projectIdToUse);
+							if (generationContext) {
+								codebaseBlock = buildCodebasePromptBlock(generationContext);
+								codebaseSnapshotId = generationContext.snapshotId;
+								codebaseAnalysisId = generationContext.analysisId ?? undefined;
+							}
+						} catch {
+							/* ponytail: optional context must never block generation */
+						}
 					}
 
 					if (mode === "revise" || mode === "chat") {
@@ -191,6 +222,8 @@ export const Route = createFileRoute("/api/chat")({
 				} catch {
 					/* ponytail: optional grounding must never block generation */
 				}
+				// Task 8: same grounding boundary — "" for greenfield (no-op).
+				systemPrompt += codebaseBlock;
 
 				let fullMessages: Array<{
 					role: "system" | "user" | "assistant";
@@ -454,6 +487,16 @@ export const Route = createFileRoute("/api/chat")({
 									mode === "resume" ? "generate" : mode,
 									allowShare,
 								);
+
+								// Task 8: link snapshot identity (non-fatal, no
+								// credit change: generate burns 1, revision free).
+								if (codebaseSnapshotId && projectIdToUse) {
+									await linkGenerationContext(
+										projectIdToUse,
+										codebaseSnapshotId,
+										codebaseAnalysisId,
+									);
+								}
 
 								// ponytail: revive the documented-but-never-wired AI rename.
 								// Cosmetic only — must never delay or fail the done event.

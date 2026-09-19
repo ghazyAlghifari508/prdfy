@@ -78,6 +78,20 @@
       "when": 1789806063454,
       "tag": "0010_chemical_red_shift",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789809830904,
+      "tag": "0011_legal_wolverine",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789809968890,
+      "tag": "0012_young_luminals",
+      "breakpoints": true
     }
   ]
 }

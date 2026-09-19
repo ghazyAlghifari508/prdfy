@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
 	acVersions,
 	codebaseAnalyses,
+	codebaseAskHandoffs,
 	codebaseGenerationContexts,
 	codebaseSnapshotFiles,
 	codebaseSnapshots,
@@ -17,12 +18,14 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/session";
 
-// Every project-owned sync table, in FK-safe delete order: generation
-// contexts reference snapshots + analyses, analyses/idempotency/files
-// reference snapshots/sessions, and snapshots reference sessions. Sessions go
-// last. Unit-tested in ./-project-mode.test.ts — keep the order and the
-// transaction below in sync.
+// Every project-owned sync table, in FK-safe delete order: ask handoffs
+// carry no FK deps (snapshot binding is advisory text) so they go first,
+// then generation contexts reference snapshots + analyses,
+// analyses/idempotency/files reference snapshots/sessions, and snapshots
+// reference sessions. Sessions go last. Unit-tested in
+// ./-project-mode.test.ts — keep the order and the transaction below in sync.
 export const PROJECT_SYNC_CHILD_TABLES = [
+	"codebase_ask_handoffs",
 	"codebase_generation_contexts",
 	"codebase_analyses",
 	"codebase_sync_idempotency_keys",
@@ -91,10 +94,14 @@ export const Route = createFileRoute("/api/projects/$id")({
 						.where(eq(acVersions.projectId, projectId));
 					await tx.delete(tasks).where(eq(tasks.projectId, projectId));
 					// Existing-codebase sync records, in PROJECT_SYNC_CHILD_TABLES
-					// order (FK-safe: contexts → analyses → idempotency → files →
-					// snapshots → sessions). Raw filtered source lives in
-					// codebase_snapshot_files for the project lifetime, so project
-					// deletion is its retention boundary — everything goes.
+					// order (FK-safe: handoffs → contexts → analyses →
+					// idempotency → files → snapshots → sessions). Raw filtered
+					// source lives in codebase_snapshot_files for the project
+					// lifetime, so project deletion is its retention boundary —
+					// everything goes.
+					await tx
+						.delete(codebaseAskHandoffs)
+						.where(eq(codebaseAskHandoffs.projectId, projectId));
 					await tx
 						.delete(codebaseGenerationContexts)
 						.where(eq(codebaseGenerationContexts.projectId, projectId));
