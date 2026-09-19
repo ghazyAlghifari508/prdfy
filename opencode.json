@@ -7,6 +7,7 @@
     ".opencode/rules/no-type-bypass.md",
     ".opencode/rules/anti-satisficing.md",
     ".opencode/rules/anti-ai-slop.md",
+    ".opencode/rules/skills-mcp.md",
     ".opencode/rules/prdfy-context.md"
   ],
   "mcp": {
