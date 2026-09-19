@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq } from "drizzle-orm";
+// Server-import exception: top-level `@/db` and schema imports are correct
+// here — server handlers only, no client component (neighboring
+// `/api/codebase` pattern). Never import this module from client code.
 import { db } from "@/db";
 import {
 	codebaseAnalyses,

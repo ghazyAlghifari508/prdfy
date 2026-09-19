@@ -23,10 +23,12 @@ import {
 	CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS,
 	CODEBASE_ASK_HANDOFF_MAX_STATE_CHARS,
 	CODEBASE_GENERATION_MAX_ANSWER_CHARS,
+	CODEBASE_GENERATION_MAX_CONSTRAINTS,
 	CODEBASE_GENERATION_MAX_CONTEXT_CHARS,
 	CODEBASE_GENERATION_MAX_FINDINGS,
 	CODEBASE_GENERATION_MAX_PATHS,
 	CODEBASE_GENERATION_MAX_PROMPT_CHARS,
+	CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
 } from "./constants";
 
 const analysis: CodebaseAnalysis = {
@@ -131,6 +133,8 @@ describe("task 8 generation-context bounds", () => {
 		expect(CODEBASE_GENERATION_MAX_FINDINGS).toBe(5);
 		expect(CODEBASE_GENERATION_MAX_PROMPT_CHARS).toBe(2_000);
 		expect(CODEBASE_GENERATION_MAX_ANSWER_CHARS).toBe(1_000);
+		expect(CODEBASE_GENERATION_MAX_SUMMARY_CHARS).toBe(2_000);
+		expect(CODEBASE_GENERATION_MAX_CONSTRAINTS).toBe(10);
 		expect(CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS).toBe(8_000);
 		expect(CODEBASE_ASK_HANDOFF_MAX_ANSWERS).toBe(60);
 	});
@@ -178,6 +182,36 @@ describe("task 8 generation-context bounds", () => {
 		// Snapshot identity survives limiting.
 		expect(limited.snapshotId).toBe(snapshot.snapshotId);
 		expect(limited.projectId).toBe(snapshot.projectId);
+	});
+
+	it("limitGenerationContext caps summary chars and constraint count", () => {
+		const big = buildGenerationContext({
+			featurePrompt: "prompt",
+			analysis: {
+				...analysis,
+				moduleMap: Array.from({ length: 60 }, (_, i) => ({
+					path: `src/mod-${i}`,
+					summary: `X${"y".repeat(200)}`,
+				})),
+				limitations: Array.from(
+					{ length: CODEBASE_GENERATION_MAX_CONSTRAINTS + 5 },
+					(_, i) => `Constraint ${i}`,
+				),
+			},
+			snapshot,
+		});
+		const limited = limitGenerationContext(big);
+		expect(limited.analysisSummary.length).toBeLessThanOrEqual(
+			CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
+		);
+		expect(limited.constraints.length).toBeLessThanOrEqual(
+			CODEBASE_GENERATION_MAX_CONSTRAINTS,
+		);
+		expect(limited.constraints).toEqual(
+			big.constraints.slice(0, CODEBASE_GENERATION_MAX_CONSTRAINTS),
+		);
+		// Identity still survives the new caps.
+		expect(limited.snapshotId).toBe(snapshot.snapshotId);
 	});
 
 	it("formatBoundedGenerationContext stays within the char budget", () => {

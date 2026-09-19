@@ -3,6 +3,9 @@ import {
 	AI_MODELS,
 	BRIEF_MAX_BYTES,
 	BRIEF_MAX_CHARS,
+	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
+	CODEBASE_GENERATION_MAX_CONSTRAINTS,
+	CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
 	HISTORY_PAGE_SIZE,
 	HOME_DRAFT_DEBOUNCE_MS,
 	MAX_PROMPT_LENGTH,
@@ -61,5 +64,11 @@ describe("no-hardcode constants (Task 1)", () => {
 		expect(PDF_STYLES.font).toBe("Inter");
 		expect(PDF_STYLES.headerSize).toBe(14);
 		expect(PDF_STYLES.bodySize).toBe(11);
+	});
+
+	it("has Task 9 codebase hardening limits (no magic literals)", () => {
+		expect(CODEBASE_GENERATION_MAX_SUMMARY_CHARS).toBe(2_000);
+		expect(CODEBASE_GENERATION_MAX_CONSTRAINTS).toBe(10);
+		expect(CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS).toBe(8_000);
 	});
 });

@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+// Server-import exception: top-level `@/db`, schema, and `.server` imports
+// are correct here — server handlers only, no client component (neighboring
+// `/api/codebase` pattern). Never import this module from client code.
 import { db } from "@/db";
 import { codebaseSyncSessions, projects, subscriptions } from "@/db/schema";
 import {
@@ -174,67 +177,78 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				};
 				const isRetry = body?.action === "retry";
 
-				const existing = await db
-					.select()
-					.from(codebaseSyncSessions)
-					.where(
-						and(
-							eq(codebaseSyncSessions.projectId, projectId),
-							eq(codebaseSyncSessions.userId, user.id),
-						),
-					)
-					.orderBy(desc(codebaseSyncSessions.createdAt));
-
-				if (isRetry) {
-					const now = new Date();
-					for (const row of existing) {
-						if (getSessionUsability(row, now).usable) {
-							await db
-								.update(codebaseSyncSessions)
-								.set({
-									status: "expired",
-									consumedAt: now,
-									updatedAt: now,
-								})
-								.where(eq(codebaseSyncSessions.id, row.id));
-						}
-					}
-				} else if (!shouldCreateSyncSession(existing)) {
-					const active = existing.find(
-						(row) => getSessionUsability(row).usable,
-					);
-					return Response.json(
-						{
-							error: "Masih ada sync session yang aktif",
-							code: "SYNC_SESSION_ACTIVE",
-							sessionId: active?.id,
-						},
-						{ status: 409 },
-					);
-				}
-
-				// crypto-random credential; ONLY the hash is persisted.
 				const rawCredential = generateSyncToken();
 				const expiresAt = new Date(
 					Date.now() + CODEBASE_SYNC_SESSION_EXPIRY_MS,
 				);
-				const [inserted] = await db
-					.insert(codebaseSyncSessions)
-					.values({
-						id: crypto.randomUUID(),
-						projectId,
-						userId: user.id,
-						credentialHash: hashSyncToken(rawCredential),
-						status: "waiting_for_cli",
-						expiresAt,
-						cliMinVersion: CODEBASE_CLI_MIN_VERSION,
-						attempt: existing.length + 1,
-					})
-					.returning({
-						id: codebaseSyncSessions.id,
-						expiresAt: codebaseSyncSessions.expiresAt,
-						cliMinVersion: codebaseSyncSessions.cliMinVersion,
-					});
+				const result = await db.transaction(async (tx) => {
+					// Serialize session minting per project. Without this lock, two
+					// concurrent POSTs can both observe no active row and mint two
+					// usable credentials. The lock lasts only for this transaction.
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+					);
+					const existing = await tx
+						.select()
+						.from(codebaseSyncSessions)
+						.where(
+							and(
+								eq(codebaseSyncSessions.projectId, projectId),
+								eq(codebaseSyncSessions.userId, user.id),
+							),
+						)
+						.orderBy(desc(codebaseSyncSessions.createdAt));
+
+					if (isRetry) {
+						const now = new Date();
+						for (const row of existing) {
+							if (getSessionUsability(row, now).usable) {
+								await tx
+									.update(codebaseSyncSessions)
+									.set({
+										status: "expired",
+										consumedAt: now,
+										updatedAt: now,
+									})
+									.where(eq(codebaseSyncSessions.id, row.id));
+							}
+						}
+					} else if (!shouldCreateSyncSession(existing)) {
+						const active = existing.find(
+							(row) => getSessionUsability(row).usable,
+						);
+						return { conflictSessionId: active?.id, inserted: null };
+					}
+
+					const [inserted] = await tx
+						.insert(codebaseSyncSessions)
+						.values({
+							id: crypto.randomUUID(),
+							projectId,
+							userId: user.id,
+							credentialHash: hashSyncToken(rawCredential),
+							status: "waiting_for_cli",
+							expiresAt,
+							cliMinVersion: CODEBASE_CLI_MIN_VERSION,
+							attempt: existing.length + 1,
+						})
+						.returning({
+							id: codebaseSyncSessions.id,
+							expiresAt: codebaseSyncSessions.expiresAt,
+							cliMinVersion: codebaseSyncSessions.cliMinVersion,
+						});
+					return { inserted, conflictSessionId: undefined };
+				});
+				if (result.conflictSessionId)
+					return Response.json(
+						{
+							error: "Masih ada sync session yang aktif",
+							code: "SYNC_SESSION_ACTIVE",
+							sessionId: result.conflictSessionId,
+						},
+						{ status: 409 },
+					);
+				const inserted = result.inserted;
 				if (!inserted)
 					return Response.json(
 						{ error: "Gagal membuat sync session", code: "SYNC_FAILED" },

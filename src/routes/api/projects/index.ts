@@ -32,7 +32,12 @@ export const Route = createFileRoute("/api/projects/")({
 	server: {
 		handlers: {
 			POST: async ({ request }: { request: Request }) => {
-				const user = await requireUser(request.headers);
+				let user: { id: string };
+				try {
+					user = await requireUser(request.headers);
+				} catch {
+					return Response.json({ error: "Unauthorized" }, { status: 401 });
+				}
 				const body = await request.json().catch(() => null);
 				const message = body?.message;
 				const language = normalizeLanguage(body?.language);

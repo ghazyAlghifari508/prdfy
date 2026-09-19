@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getRequestHeaders } from "@tanstack/react-start/server";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { projects, subscriptions } from "@/db/schema";
@@ -8,6 +7,7 @@ import {
 	buildCodebasePromptBlock,
 	getAskHandoff,
 	getProjectGenerationContext,
+	resolveActiveSnapshotId,
 	saveAskHandoff,
 } from "@/lib/codebase-generation-context";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
@@ -121,7 +121,18 @@ export const Route = createFileRoute("/api/ask/options")({
 							{ status: 400 },
 						);
 					try {
-						await saveAskHandoff(user.id, parsed.data);
+						// Snapshot write-through (Task 9): stamp the handoff with
+						// the snapshot that is active at submit time for traceability.
+						// No ready snapshot saves unstamped; a database failure fails
+						// the save rather than silently losing identity. Generation
+						// still resolves the active snapshot at call time.
+						const activeSnapshotId =
+							parsed.data.snapshotId ??
+							(await resolveActiveSnapshotId(projectId));
+						await saveAskHandoff(user.id, {
+							...parsed.data,
+							...(activeSnapshotId ? { snapshotId: activeSnapshotId } : {}),
+						});
 					} catch (e) {
 						console.error("ask handoff save failed:", e);
 						return Response.json(

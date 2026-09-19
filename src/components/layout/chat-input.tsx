@@ -296,6 +296,7 @@ export function ChatInput({
 											? "Buat PRD dari ide produk baru"
 											: "Rencanakan fitur untuk codebase yang sudah ada"
 									}
+									aria-pressed={active}
 									className={cn(
 										"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
 										active

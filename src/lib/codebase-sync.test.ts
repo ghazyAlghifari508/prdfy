@@ -21,7 +21,10 @@ import {
 	fileChunkRequestSchema,
 	getSessionUsability,
 	hasSyncCapability,
+	isCompleteReplayCompatible,
 	isExpectedIdempotencyKey,
+	isFileReplayCompatible,
+	isManifestReplayCompatible,
 	isSafeRelativePath,
 	isSlotIdempotencyKey,
 	isSupportedCliVersion,
@@ -799,6 +802,104 @@ describe("idempotency key binding (Task 5)", () => {
 			isExpectedIdempotencyKey("sess_2:manifest:0", "sess_1", "manifest", 0),
 		).toBe(false);
 		expect(isExpectedIdempotencyKey("", "sess_1", "manifest", 0)).toBe(false);
+	});
+});
+
+describe("replay-payload identity (Task 9)", () => {
+	const entry = {
+		path: "src/index.ts",
+		size: 120,
+		hash: "a".repeat(64),
+		language: "TypeScript",
+	};
+
+	it("accepts only identical manifest replays", () => {
+		const stored = [
+			entry,
+			{ path: "src/other.ts", size: 10, hash: "b".repeat(64) },
+		];
+		expect(isManifestReplayCompatible(stored, [entry])).toBe(false);
+		expect(isManifestReplayCompatible(stored, [])).toBe(false);
+		expect(isManifestReplayCompatible(stored, stored)).toBe(true);
+	});
+
+	it("rejects manifest replays with missing or divergent entries", () => {
+		const stored = [entry];
+		expect(isManifestReplayCompatible(stored, [{ ...entry, size: 121 }])).toBe(
+			false,
+		);
+		expect(
+			isManifestReplayCompatible(stored, [{ ...entry, hash: "c".repeat(64) }]),
+		).toBe(false);
+		expect(
+			isManifestReplayCompatible(stored, [
+				{ ...entry, language: "JavaScript" },
+			]),
+		).toBe(false);
+		expect(
+			isManifestReplayCompatible(stored, [
+				{ path: "src/new.ts", size: 1, hash: "d".repeat(64) },
+			]),
+		).toBe(false);
+	});
+
+	it("treats manifest hashes case-insensitively like the merge path", () => {
+		const stored = [entry];
+		expect(
+			isManifestReplayCompatible(stored, [{ ...entry, hash: "A".repeat(64) }]),
+		).toBe(true);
+	});
+
+	it("accepts byte-identical file chunk replays only", () => {
+		const replayed = {
+			path: "src/index.ts",
+			chunkIndex: 0,
+			chunkTotal: 2,
+			contentHash: "a".repeat(64),
+			data: "aGVsbG8=",
+		};
+		const stored = [{ ...replayed }];
+		expect(isFileReplayCompatible(stored, replayed)).toBe(true);
+		expect(
+			isFileReplayCompatible(stored, { ...replayed, data: "d29ybGQ=" }),
+		).toBe(false);
+		expect(
+			isFileReplayCompatible(stored, {
+				...replayed,
+				contentHash: "b".repeat(64),
+			}),
+		).toBe(false);
+		expect(isFileReplayCompatible(stored, { ...replayed, chunkTotal: 3 })).toBe(
+			false,
+		);
+		expect(isFileReplayCompatible(stored, { ...replayed, chunkIndex: 1 })).toBe(
+			false,
+		);
+		expect(
+			isFileReplayCompatible(stored, { ...replayed, path: "src/x.ts" }),
+		).toBe(false);
+		expect(isFileReplayCompatible([], replayed)).toBe(false);
+	});
+
+	it("accepts completion replays with identical counts only", () => {
+		expect(
+			isCompleteReplayCompatible(
+				{ fileCount: 3, excludedCount: 7 },
+				{ fileCount: 3, excludedCount: 7 },
+			),
+		).toBe(true);
+		expect(
+			isCompleteReplayCompatible(
+				{ fileCount: 3, excludedCount: 7 },
+				{ fileCount: 4, excludedCount: 7 },
+			),
+		).toBe(false);
+		expect(
+			isCompleteReplayCompatible(
+				{ fileCount: 3, excludedCount: 7 },
+				{ fileCount: 3, excludedCount: 8 },
+			),
+		).toBe(false);
 	});
 });
 

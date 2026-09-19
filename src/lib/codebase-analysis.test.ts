@@ -13,6 +13,9 @@ import {
 	selectSourceExcerpts,
 	toSafeAnalysisErrorMessage,
 } from "./codebase-analysis";
+// Server-module import is safe in vitest: .env.local provides DATABASE_URL
+// (see vitest.config.ts) and no connection opens until a query runs.
+import { AnalysisServiceError } from "./codebase-analysis.server";
 
 const validAnalysis = {
 	projectId: "proj_123",
@@ -312,5 +315,25 @@ describe("toSafeAnalysisErrorMessage", () => {
 		expect(toSafeAnalysisErrorMessage("raw string")).not.toContain(
 			"raw string",
 		);
+	});
+});
+
+describe("AnalysisServiceError attempt identity (Task 9)", () => {
+	it("carries the failed attempt id for the route to attach", () => {
+		const error = new AnalysisServiceError(
+			"ANALYSIS_FAILED",
+			"Analisis codebase gagal. Coba analisis ulang.",
+			"analysis_123",
+		);
+		expect(error.code).toBe("ANALYSIS_FAILED");
+		expect(error.analysisId).toBe("analysis_123");
+	});
+
+	it("leaves the attempt id undefined for pre-attempt failures", () => {
+		const error = new AnalysisServiceError(
+			"SNAPSHOT_NOT_UPLOADED",
+			"Snapshot belum siap",
+		);
+		expect(error.analysisId).toBeUndefined();
 	});
 });

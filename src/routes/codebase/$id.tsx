@@ -38,6 +38,10 @@ export function decideCodebaseEntry(
 	return projectMode === "existing_codebase" ? "allow" : "deny";
 }
 
+// ponytail: top-level `@/db` + schema imports are consumed ONLY inside
+// `loadCodebase` (createServerFn) and get pruned from the client bundle —
+// same exception as `src/routes/ask/$id.tsx`. Never import them in the
+// page component below.
 const loadCodebase = createServerFn({ method: "GET" })
 	.validator((id: string) => id)
 	.handler(async ({ data: id }) => {
@@ -101,9 +105,28 @@ function CodebasePage() {
 	const [payload, setPayload] = useState<SyncPromptPayload | null>(null);
 	const [modalOpen, setModalOpen] = useState(false);
 	const [pageError, setPageError] = useState<string | null>(null);
+	// Handoff-loss recovery (Task 9): the Home handoff is one-time storage —
+	// opening this page in another tab (or after storage loss) and pressing
+	// "Mulai sync" answers 409 SYNC_SESSION_ACTIVE because the creation-time
+	// session is still usable. Offer an explicit revoke-with-warning CTA
+	// instead of a dead-end banner: retry revokes the orphaned credential
+	// and mints a replacement.
+	const [sessionConflict, setSessionConflict] = useState<{
+		sessionId?: string;
+		message: string;
+	} | null>(null);
 	const [isStarting, setIsStarting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+	// Page-level failed-analysis state (Task 9): without this the page is a
+	// dead end after ANALYSIS_FAILED — the session rolls back to `uploaded`
+	// (so no session retry shows) and the review card only renders ready
+	// output. The failed card renders an explicit Analisis-ulang action.
+	const [failedAnalysis, setFailedAnalysis] = useState<{
+		snapshotId: string;
+		analysisId: string | null;
+		message: string;
+	} | null>(null);
 	const [latestStatus, setLatestStatus] = useState<SyncStatusResponse | null>(
 		null,
 	);
@@ -171,6 +194,7 @@ function CodebasePage() {
 					const response = json as AnalysisResponse;
 					if (response.status === "ready" && response.output) {
 						setAnalysis(response);
+						setFailedAnalysis(null);
 					}
 					return;
 				}
@@ -178,14 +202,38 @@ function CodebasePage() {
 					json && typeof json === "object" && "error" in json
 						? String((json as { error: unknown }).error)
 						: "Analisis codebase gagal.";
-				setPageError(message);
+				const code =
+					json && typeof json === "object" && "code" in json
+						? String((json as { code: unknown }).code)
+						: null;
+				const failedId =
+					json && typeof json === "object" && "analysisId" in json
+						? String((json as { analysisId: unknown }).analysisId)
+						: null;
+				// ANALYSIS_FAILED is retryable at page level: record the
+				// failed attempt (polling also converges here) instead of a
+				// bare banner. Other errors stay a dismissible page error.
+				if (code === "ANALYSIS_FAILED") {
+					const targetSnapshot = snapshotId ?? currentSnapshotId;
+					if (targetSnapshot) {
+						setFailedAnalysis({
+							snapshotId: targetSnapshot,
+							analysisId: failedId,
+							message,
+						});
+					} else {
+						setPageError(message);
+					}
+				} else {
+					setPageError(message);
+				}
 			} catch {
 				setPageError("Gagal menghubungi server.");
 			} finally {
 				setIsWorking(false);
 			}
 		},
-		[d.projectId],
+		[d.projectId, currentSnapshotId],
 	);
 
 	const handleStatus = useCallback(
@@ -196,6 +244,36 @@ function CodebasePage() {
 			// retry-sync never renders a stale review from a previous attempt.
 			if (status.snapshotId !== currentSnapshotId) {
 				setCurrentSnapshotId(status.snapshotId ?? null);
+				// New attempt: drop the previous snapshot's failed state (and
+				// stale ready output below) so polling reconverges cleanly.
+				setFailedAnalysis(null);
+				setAnalysis(null);
+			}
+			// Converge the page-level failed state from polling: after a
+			// reload the trigger error banner is gone but analysisStatus
+			// stays `failed` until a retry succeeds.
+			if (status.analysisStatus === "failed" && status.snapshotId) {
+				const snapshotId = status.snapshotId;
+				const message =
+					status.errorMessage ??
+					"Analisis codebase gagal. Coba analisis ulang.";
+				setFailedAnalysis((prev) =>
+					prev?.snapshotId === snapshotId
+						? prev
+						: {
+								snapshotId,
+								analysisId: status.analysisId ?? null,
+								message,
+							},
+				);
+			} else if (
+				status.analysisStatus === "ready" ||
+				status.analysisStatus === "pending" ||
+				(status.snapshotId && status.analysisId == null)
+			) {
+				// Superseded: a newer attempt is pending, ready output is on
+				// its way, or a fresh snapshot has no analysis yet.
+				setFailedAnalysis(null);
 			}
 			// Auto-trigger analysis exactly once per uploaded snapshot without
 			// an analysis record; the trigger endpoint itself is idempotent
@@ -221,6 +299,7 @@ function CodebasePage() {
 						result.snapshotId === status.snapshotId
 					) {
 						setAnalysis(result);
+						setFailedAnalysis(null);
 					}
 				});
 			}
@@ -232,6 +311,7 @@ function CodebasePage() {
 		async (retry: boolean) => {
 			setIsStarting(true);
 			setPageError(null);
+			setSessionConflict(null);
 			try {
 				const res = await fetch(
 					`/api/codebase/${encodeURIComponent(d.projectId)}/session`,
@@ -248,10 +328,22 @@ function CodebasePage() {
 					setModalOpen(true);
 					return;
 				}
+				const code =
+					json && typeof json === "object" && "code" in json
+						? String((json as { code: unknown }).code)
+						: null;
 				const message =
 					json && typeof json === "object" && "error" in json
 						? String((json as { error: unknown }).error)
 						: "Gagal membuat sync session.";
+				if (res.status === 409 && code === "SYNC_SESSION_ACTIVE") {
+					const conflictId =
+						json && typeof json === "object" && "sessionId" in json
+							? String((json as { sessionId: unknown }).sessionId)
+							: undefined;
+					setSessionConflict({ sessionId: conflictId, message });
+					return;
+				}
 				setPageError(message);
 			} catch {
 				setPageError("Gagal menghubungi server.");
@@ -293,11 +385,78 @@ function CodebasePage() {
 				</p>
 			)}
 
+			{sessionConflict && (
+				<Card>
+					<CardHeader>
+						<CardTitle>Sesi sync aktif ditemukan</CardTitle>
+						<CardDescription>{sessionConflict.message}</CardDescription>
+					</CardHeader>
+					<CardContent className="flex flex-col gap-3">
+						<p className="text-sm text-fog">
+							Perintah sync sebelumnya masih berlaku (misalnya Anda membuka
+							halaman ini di tab lain). Membuat sesi baru akan mencabut
+							kredensial lama — agen yang masih memakai perintah lama harus
+							menjalankan ulang perintah baru.
+						</p>
+						<div className="flex flex-wrap gap-2">
+							<Button
+								onClick={() => void startSession(true)}
+								disabled={isStarting}
+							>
+								{isStarting ? "Menyiapkan" : "Cabut sesi lama & buat baru"}
+							</Button>
+							<Button
+								variant="outline"
+								onClick={() => setSessionConflict(null)}
+							>
+								Pertahankan sesi lama
+							</Button>
+						</div>
+					</CardContent>
+				</Card>
+			)}
+
 			<SyncStatus
 				projectId={d.projectId}
 				onStatus={handleStatus}
 				onRetrySync={() => void startSession(true)}
+				onRetryAnalysis={() =>
+					currentSnapshotId && void triggerAnalysis(currentSnapshotId)
+				}
 			/>
+
+			{failedAnalysis &&
+				currentSnapshotId &&
+				failedAnalysis.snapshotId === currentSnapshotId &&
+				(!analysis || analysis.snapshotId !== currentSnapshotId) && (
+					<Card>
+						<CardHeader>
+							<CardTitle>Analisis codebase gagal</CardTitle>
+							<CardDescription>
+								Snapshot sudah terupload lengkap — hanya tahap analisis yang
+								gagal dan dapat diulang tanpa sync ulang.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="flex flex-col gap-3">
+							<p className="text-sm text-fog">{failedAnalysis.message}</p>
+							<div className="flex flex-wrap gap-2">
+								<Button
+									onClick={() => void triggerAnalysis(currentSnapshotId)}
+									disabled={isWorking}
+								>
+									{isWorking ? "Menganalisis" : "Analisis ulang"}
+								</Button>
+								<Button
+									variant="outline"
+									onClick={() => void startSession(true)}
+									disabled={isStarting}
+								>
+									Sync ulang
+								</Button>
+							</div>
+						</CardContent>
+					</Card>
+				)}
 
 			{analysis?.output &&
 				currentSnapshotId &&

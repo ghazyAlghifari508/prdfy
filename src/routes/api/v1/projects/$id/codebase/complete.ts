@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { eq } from "drizzle-orm";
+// Server-import exception: top-level `@/db`, schema, and `.server` imports
+// are correct here — server handlers only, no client component (neighboring
+// `/api/v1` pattern). Never import this module from client code.
 import { db } from "@/db";
 import {
 	codebaseSnapshotFiles,
@@ -9,6 +12,7 @@ import {
 import {
 	assertSyncTransition,
 	checkSnapshotCompletion,
+	isCompleteReplayCompatible,
 	isExpectedIdempotencyKey,
 	manifestEntrySchema,
 	SnapshotCompletionError,
@@ -34,7 +38,14 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 			// reassembled file hashes to its manifest hash. Partial/failed
 			// snapshots stay `uploading` and are never usable by analysis.
 			// Completion replay (same or new key) returns the stored result
-			// without mutating. Bearer sync credential only (see
+			// without mutating — but ONLY while the session is still usable:
+			// once analysis has run (session ready/failed) or the session
+			// expired, the guard above rejects (401/410) before the replay
+			// lookup, so post-analysis completion replays are rejected, not
+			// replayed. Safe for MVP because the CLI always completes before
+			// the browser triggers analysis (analysis POST requires an
+			// uploaded snapshot and never replays completion itself).
+			// Bearer sync credential only (see
 			// `codebase-sync-upload.server.ts` for the scope-separation
 			// rationale).
 			POST: async ({
@@ -81,10 +92,46 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 				const { session, snapshot } = guard.ctx;
 
 				const replay = await getIdempotentReplay(body.idempotencyKey);
-				if (replay)
+				if (replay) {
+					// Replay-payload identity check (Task 9): completion carries
+					// only counts, so the retried counts must equal the stored
+					// result's counts. Divergent counts mean the client is
+					// completing a different snapshot view — fail closed.
+					const storedCounts =
+						replay.response != null && typeof replay.response === "object"
+							? (replay.response as {
+									fileCount?: unknown;
+									excludedCount?: unknown;
+								})
+							: null;
+					if (
+						typeof storedCounts?.fileCount !== "number" ||
+						typeof storedCounts?.excludedCount !== "number"
+					)
+						return Response.json(
+							{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
+							{ status: 500 },
+						);
+					if (
+						!isCompleteReplayCompatible(
+							{
+								fileCount: storedCounts.fileCount,
+								excludedCount: storedCounts.excludedCount,
+							},
+							{ fileCount: body.fileCount, excludedCount: body.excludedCount },
+						)
+					)
+						return Response.json(
+							{
+								error: "Snapshot verification failed",
+								code: "SNAPSHOT_CONFLICT",
+							},
+							{ status: 409 },
+						);
 					return Response.json(replay.response, {
 						status: replay.statusCode,
 					});
+				}
 
 				// Idempotent completion: an already-uploaded snapshot returns
 				// its stored result (new keys are recorded for future replay).

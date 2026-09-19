@@ -56,6 +56,11 @@ interface SyncStatusProps {
 	pollIntervalMs?: number;
 	onStatus?: (status: SyncStatusResponse | null) => void;
 	onRetrySync?: () => void;
+	/** Retry a failed analysis (session stays `uploaded`; only the analysis
+	 *  attempt failed). Rendered when the polled status carries
+	 *  `analysisStatus: "failed"` — without this the page is a dead end:
+	 *  the session-level retry only covers failed/expired sync sessions. */
+	onRetryAnalysis?: () => void;
 }
 
 export function SyncStatus({
@@ -64,6 +69,7 @@ export function SyncStatus({
 	pollIntervalMs = CODEBASE_SYNC_POLL_INTERVAL_MS,
 	onStatus,
 	onRetrySync,
+	onRetryAnalysis,
 }: SyncStatusProps) {
 	const [status, setStatus] = useState<SyncStatusResponse | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -133,6 +139,10 @@ export function SyncStatus({
 
 	const isTerminal = status ? isTerminalSyncStatus(status.status) : false;
 	const showRetry = status?.status === "failed" || status?.status === "expired";
+	// Analysis failure rolls the session back to `uploaded` (retryable), so
+	// the session-level retry above never shows for it — the analysis-level
+	// retry must render from `analysisStatus` instead.
+	const showAnalysisRetry = status?.analysisStatus === "failed";
 
 	return (
 		<Card>
@@ -208,6 +218,13 @@ export function SyncStatus({
 									{status.status === "expired"
 										? "Buat sesi baru"
 										: "Coba sync ulang"}
+								</Button>
+							</div>
+						)}
+						{showAnalysisRetry && (
+							<div className="flex justify-end">
+								<Button variant="outline" onClick={onRetryAnalysis}>
+									Analisis ulang
 								</Button>
 							</div>
 						)}

@@ -54,11 +54,16 @@ export type AnalysisServiceCode = "SNAPSHOT_NOT_UPLOADED" | "ANALYSIS_FAILED";
 
 export class AnalysisServiceError extends Error {
 	readonly code: AnalysisServiceCode;
+	/** Failed-attempt analysis row id (Task 9): lets the route attach the
+	 *  exact failed attempt instead of the latest row, which under a
+	 *  concurrent duplicate trigger could be the sibling's ready record. */
+	readonly analysisId?: string;
 
-	constructor(code: AnalysisServiceCode, message: string) {
+	constructor(code: AnalysisServiceCode, message: string, analysisId?: string) {
 		super(message);
 		this.name = "AnalysisServiceError";
 		this.code = code;
+		this.analysisId = analysisId;
 	}
 }
 
@@ -269,6 +274,6 @@ export async function requestCodebaseAnalysis(
 				.where(eq(codebaseSyncSessions.id, session.id));
 		}
 		if (error instanceof AnalysisServiceError) throw error;
-		throw new AnalysisServiceError("ANALYSIS_FAILED", safe);
+		throw new AnalysisServiceError("ANALYSIS_FAILED", safe, analysisId);
 	}
 }

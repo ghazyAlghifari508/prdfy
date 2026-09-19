@@ -148,6 +148,30 @@ describe("SyncStatus", () => {
 		expect(c.textContent).toMatch(/kedaluwarsa/i);
 	});
 
+	it("offers analysis retry when the session is uploaded but analysis failed", async () => {
+		const onRetryAnalysis = vi.fn();
+		mockFetchSequence([
+			statusResponse({
+				status: "uploaded",
+				snapshotId: "snap_123",
+				analysisId: "analysis_123",
+				analysisStatus: "failed",
+				errorMessage: "Analisis codebase gagal. Coba analisis ulang.",
+			}),
+		]);
+		const c = renderStatus({ onRetryAnalysis });
+		await settle();
+		expect(c.textContent).toContain("Analisis codebase gagal.");
+		const retryButton = [...c.querySelectorAll("button")].find((b) =>
+			/analisis ulang/i.test(b.textContent ?? ""),
+		);
+		expect(retryButton).toBeDefined();
+		act(() => {
+			retryButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onRetryAnalysis).toHaveBeenCalledTimes(1);
+	});
+
 	it("notifies the parent of status updates for analysis wiring", async () => {
 		const onStatus = vi.fn();
 		mockFetchSequence([statusResponse({ status: "analyzing" })]);

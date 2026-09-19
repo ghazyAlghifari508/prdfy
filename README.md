@@ -25,6 +25,7 @@ AI-powered product development planner. Answer a guided flow of questions and Pr
 - [Scripts](#scripts)
 - [Project Structure](#project-structure)
 - [API](#api)
+- [Existing Codebase Sync](#existing-codebase-sync)
 - [Testing](#testing)
 - [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
@@ -292,6 +293,72 @@ PrdFy exposes a public REST API under `/api/v1`. All endpoints are JSON and sess
 - Tasks: `GET /api/v1/projects/:id/tasks`
 - Status: `PATCH /api/v1/tasks/:id/status`, `PATCH /api/v1/subtasks/:id/status`
 - Kanban: `GET /api/v1/projects/:id/kanban`
+
+## Existing Codebase Sync
+
+PrdFy supports generating PRDs, acceptance criteria, and task boards for existing applications without uploading files manually. An external AI coding agent runs locally in your project, scans the repository safely via the official PrdFy CLI, and synchronizes a filtered snapshot to PrdFy.
+
+### 1. CLI Installation
+
+Install the official PrdFy CLI globally:
+
+```bash
+npm install -g @ghazynabiel/prdfy
+```
+
+Verify that the installed version meets the minimum required version (`>= 2.0.0`):
+
+```bash
+prdfy --version
+```
+
+### 2. Synchronization Command
+
+When you choose **Codebase existing** on the Home page, PrdFy creates a project and issues a temporary, single-use sync token (valid for 30 minutes). Run the command from your repository root:
+
+```bash
+prdfy codebase sync --project-id <id> --sync-token <token>
+```
+
+Available flags:
+- `--project-id <id>`: Required project UUID.
+- `--sync-token <token>`: Required project-scoped sync token (in-memory, never saved to global config).
+- `--root <path>`: Optional repository root (defaults to current working directory).
+- `--output <mode>`: Output format (`human` by default, or `json` for agent-to-agent piping).
+- `--api-url <url>`: Override API base URL (defaults to `http://localhost:3000`).
+
+### 3. Exclusions & `.prdfyignore`
+
+The CLI enforces **built-in exclusions** that can never be overridden by user configuration:
+- Secrets and credentials: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `secrets/`, `credentials/`
+- Build outputs & dependencies: `node_modules/`, `dist/`, `build/`, `.git/`, `coverage/`
+- Local database dumps & binaries: `.sqlite`, `.db`, image/media binary files
+
+You can supplement these exclusions with a local `.prdfyignore` file in your repository root:
+```gitignore
+# Custom exclusions
+internal-tools/
+private-docs/
+fixtures/
+```
+*Note: Negation patterns (`!pattern`) in `.prdfyignore` are ignored to prevent accidental leakage of protected paths.*
+
+### 4. Privacy & Data Retention Policy
+
+- **Payload limits**: Maximum snapshot size is 50 MiB; individual files cannot exceed 1 MiB; chunks are transmitted in 256 KiB envelopes.
+- **Source retention**: Filtered text source context is stored securely and associated with the project snapshot for analysis and generation context.
+- **Project deletion**: Deleting a project permanently and transactionally removes all associated codebase sync sessions, snapshots, file chunks, and analyses.
+
+### 5. Failure Recovery
+
+| Issue | Cause | Resolution |
+|---|---|---|
+| `CLI_UPDATE_REQUIRED` | CLI version is older than 2.0.0 | Run `npm install -g @ghazynabiel/prdfy` to update |
+| `INVALID_SYNC_CREDENTIAL` | Token expired (30 min) or wrong project | Click "Mulai sync baru" on the web page to issue a fresh session |
+| `SYNC_SESSION_ACTIVE` (409) | A sync session is already active in another tab | Click "Cabut sesi lama & buat baru" to revoke the previous session and issue a new one |
+| `SNAPSHOT_BLOCKED` | A file matching high-risk secret patterns was found | Add the file to `.prdfyignore` or redact sensitive tokens before syncing |
+| `SNAPSHOT_TOO_LARGE` | Repository exceeds 50 MiB or file exceeds 1 MiB | Add large assets or directories to `.prdfyignore` |
+| `Network / 5xx error` | Temporary connection or server timeout | The CLI automatically retries up to 3 times with identical idempotency keys |
 
 ## Testing
 

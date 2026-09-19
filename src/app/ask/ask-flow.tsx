@@ -4,7 +4,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ContextUpload } from "@/components/ask/context-upload";
-import { BRIEF_MAX_CHARS } from "@/lib/constants";
+import {
+	BRIEF_MAX_CHARS,
+	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
+} from "@/lib/constants";
 import {
 	clearBriefContext,
 	getAskLanguage,
@@ -353,9 +356,17 @@ Deployment: ${tech.deployment || defaultChoice}`;
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
 		// Task 8: authoritative server handoff for existing-codebase projects.
 		// sessionStorage above keeps UI continuity; this row survives refresh
-		// and multi-device access. Best-effort — never blocks navigation.
+		// and multi-device access. Best-effort with a timeout (Task 9) — the
+		// save must never stall navigation: abort/timeout/failure all fall
+		// through to the warn below (same AbortController pattern as
+		// context7-client rpcWithTimeout).
 		// Greenfield skips the request entirely (no behavior change).
 		if (isExistingCodebase) {
+			const ctrl = new AbortController();
+			const timer = setTimeout(
+				() => ctrl.abort(),
+				CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
+			);
 			try {
 				const skipLabel = isEn
 					? "(Let AI decide)"
@@ -376,6 +387,7 @@ Deployment: ${tech.deployment || defaultChoice}`;
 				await fetch("/api/ask/options", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
+					signal: ctrl.signal,
 					body: JSON.stringify({
 						projectId,
 						action: "save-handoff",
@@ -401,6 +413,8 @@ Deployment: ${tech.deployment || defaultChoice}`;
 				});
 			} catch (err) {
 				console.warn("Ask handoff save skipped:", err);
+			} finally {
+				clearTimeout(timer);
 			}
 		}
 		navigate({ to: "/prd/$id", params: { id: projectId } });
@@ -490,8 +504,8 @@ Deployment: ${tech.deployment || defaultChoice}`;
 				) : session === 2 ? (
 					<div className="space-y-6 pb-8">
 						<p className="font-inter text-xs text-fog italic">
-							Pilih &ldquo;Gunakan Rekomendasi AI&rdquo; jika tidak yakin, AI akan
-							memilih stack yang paling sesuai untuk aplikasi Anda.
+							Pilih &ldquo;Gunakan Rekomendasi AI&rdquo; jika tidak yakin, AI
+							akan memilih stack yang paling sesuai untuk aplikasi Anda.
 						</p>
 						<div className="grid gap-4 sm:grid-cols-2">
 							<StackDropdown

@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { eq } from "drizzle-orm";
+// Server-import exception: top-level `@/db`, schema, and `.server` imports
+// are correct here — server handlers only, no client component (neighboring
+// `/api/v1` pattern). Never import this module from client code.
 import { db } from "@/db";
 import { codebaseSnapshots, codebaseSyncSessions } from "@/db/schema";
 import {
 	assertSyncTransition,
 	isExpectedIdempotencyKey,
+	isManifestReplayCompatible,
 	manifestBatchRequestSchema,
 	manifestEntrySchema,
 	uploadTransitionSteps,
@@ -69,11 +73,34 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 					});
 				const { session, snapshot } = guard.ctx;
 
+				// Merge normalized entries. Identical re-sends are benign;
+				// same path with different identity fails closed.
+				const stored = manifestEntrySchema
+					.array()
+					.safeParse(snapshot.manifest ?? []);
+				if (!stored.success)
+					return Response.json(
+						{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
+						{ status: 500 },
+					);
+
 				const replay = await getIdempotentReplay(body.idempotencyKey);
-				if (replay)
+				if (replay) {
+					// Replay-payload identity check (Task 9): the retried batch
+					// must agree with what the first write merged. A divergent
+					// retry fails closed instead of silently returning success.
+					if (!isManifestReplayCompatible(stored.data, body.entries))
+						return Response.json(
+							{
+								error: "Manifest entry conflicts with uploaded manifest",
+								code: "SNAPSHOT_CONFLICT",
+							},
+							{ status: 409 },
+						);
 					return Response.json(replay.response, {
 						status: replay.statusCode,
 					});
+				}
 
 				// The session must be on the upload path (handshake happened).
 				// Each step is asserted valid before persisting `uploading`.
@@ -92,16 +119,14 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 					);
 				}
 
-				// Merge normalized entries. Identical re-sends are benign;
-				// same path with different identity fails closed.
-				const stored = manifestEntrySchema
-					.array()
-					.safeParse(snapshot.manifest ?? []);
-				if (!stored.success)
-					return Response.json(
-						{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
-						{ status: 500 },
-					);
+				// Merge against the already-loaded manifest (parsed above for the
+				// replay identity check). Sequential-only guard (Task 5 → 9):
+				// the merge is a read-modify-write without a row lock because
+				// the supported CLI sends batches strictly sequentially
+				// (`uploadManifest`: `for` + `await` in sync-client.ts), so two
+				// merges for one snapshot can never interleave. A future
+				// concurrent client must move this merge into a transaction
+				// with SELECT … FOR UPDATE before enabling parallelism.
 				const byPath = new Map(stored.data.map((entry) => [entry.path, entry]));
 				for (const rawEntry of body.entries) {
 					const entry = {

@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { eq } from "drizzle-orm";
+// Server-import exception: top-level `@/db`, schema, and `.server` imports
+// are correct here — server handlers only, no client component (neighboring
+// `/api/v1` pattern). Never import this module from client code.
 import { db } from "@/db";
 import { codebaseSnapshotFiles, codebaseSyncSessions } from "@/db/schema";
 import {
 	assertSyncTransition,
 	fileChunkRequestSchema,
+	isFileReplayCompatible,
 	isSlotIdempotencyKey,
 	uploadTransitionSteps,
 } from "@/lib/codebase-sync";
@@ -71,11 +75,38 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/files")({
 					});
 				const { session, snapshot } = guard.ctx;
 
+				const contentHash = body.contentHash.toLowerCase();
+				const rows = await db
+					.select()
+					.from(codebaseSnapshotFiles)
+					.where(eq(codebaseSnapshotFiles.snapshotId, snapshot.id));
+
 				const replay = await getIdempotentReplay(body.idempotencyKey);
-				if (replay)
+				if (replay) {
+					// Replay-payload identity check (Task 9): the retried chunk
+					// must match the stored (path, chunkIndex) row byte-for-byte.
+					// Slot keys cannot encode the path, so a divergent retry
+					// fails closed instead of silently returning success.
+					if (
+						!isFileReplayCompatible(rows, {
+							path: body.path,
+							chunkIndex: body.chunkIndex,
+							chunkTotal: body.chunkTotal,
+							contentHash,
+							data: body.data,
+						})
+					)
+						return Response.json(
+							{
+								error: "File chunk conflicts with uploaded chunks",
+								code: "SNAPSHOT_CONFLICT",
+							},
+							{ status: 409 },
+						);
 					return Response.json(replay.response, {
 						status: replay.statusCode,
 					});
+				}
 
 				let steps: ReturnType<typeof uploadTransitionSteps>;
 				try {
@@ -92,11 +123,8 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/files")({
 					);
 				}
 
-				const contentHash = body.contentHash.toLowerCase();
-				const rows = await db
-					.select()
-					.from(codebaseSnapshotFiles)
-					.where(eq(codebaseSnapshotFiles.snapshotId, snapshot.id));
+				// Chunk rows and the normalized hash were loaded above for the
+				// replay identity check.
 				const pathRows = rows.filter((row) => row.path === body.path);
 
 				// Chunk identity must agree within a path; a desynced client

@@ -29,6 +29,11 @@ import type { Plan } from "@/types/database";
 
 // Analysis trigger/read boundary (Task 6).
 //
+// Server-import exception: top-level `@/db`, schema, and `.server` imports
+// are correct here — this module registers server handlers only (no client
+// component), following the neighboring `/api/v1` pattern. Never import
+// this route module (or the `.server` modules) from client code.
+//
 // Auth decision: browser session (requireUser), NOT the sync credential and
 // NOT an API key. The trigger comes from the review UI after the CLI upload
 // finishes; the sync credential must never leave the modal textarea, and the
@@ -169,12 +174,18 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						{ status: 404 },
 					);
 
+				// Unpinned reads scope to the LATEST snapshot (not the latest
+				// analysis across all snapshots): after a re-sync starts, the
+				// previous attempt's stale ready analysis must not surface as
+				// the current state. Pass ?snapshotId= to pin an older attempt.
 				const snapshotRows = snapshotScope
 					? [{ id: snapshotScope[0] as string }]
 					: await db
 							.select({ id: codebaseSnapshots.id })
 							.from(codebaseSnapshots)
-							.where(inArray(codebaseSnapshots.syncSessionId, sessionIds));
+							.where(inArray(codebaseSnapshots.syncSessionId, sessionIds))
+							.orderBy(desc(codebaseSnapshots.createdAt))
+							.limit(1);
 				if (snapshotRows.length === 0)
 					return Response.json(
 						{ error: "Belum ada analisis codebase" },
@@ -210,6 +221,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 			// pending or ready record is reused; only a failed (or missing)
 			// record mints a fresh attempt. Never replays completion and never
 			// touches terminal sync rows.
+			//
+			// Sync/async evaluation (Task 9): this POST stays synchronous
+			// (model thinking 15–90s+, same trade-off as `/api/ask/options`) —
+			// no 202 + job queue in MVP. The review page single-flights the
+			// trigger per uploaded snapshot and polls status, so a duplicate
+			// POST reuses the pending row instead of stacking model calls.
 			POST: async ({
 				request,
 				params,
@@ -391,14 +408,23 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						const [failed] = await db
 							.select()
 							.from(codebaseAnalyses)
-							.where(eq(codebaseAnalyses.snapshotId, snapshot.id))
+							.where(
+								and(
+									eq(codebaseAnalyses.snapshotId, snapshot.id),
+									eq(codebaseAnalyses.status, "failed"),
+								),
+							)
 							.orderBy(desc(codebaseAnalyses.createdAt))
 							.limit(1);
 						return Response.json(
 							{
 								error: error.message,
 								code: "ANALYSIS_FAILED",
-								analysisId: failed?.id,
+								// Prefer the exact failed attempt carried by the
+								// service (Task 9): under a concurrent duplicate
+								// trigger the latest row could be the sibling's
+								// ready record. The failed-only query is fallback.
+								analysisId: error.analysisId ?? failed?.id,
 							},
 							{ status: 502 },
 						);

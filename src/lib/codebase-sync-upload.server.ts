@@ -246,9 +246,12 @@ export interface IdempotentReplay {
 	response: unknown;
 }
 
-// Duplicate-chunk idempotent replay: a retried request carries the same
+// Duplicate-request idempotent replay: a retried request carries the same
 // idempotency key, so the stored response is returned without duplicating
-// records or re-validating payload identity.
+// records. Callers verify the replayed payload's identity against stored
+// state (isManifestReplayCompatible / isFileReplayCompatible /
+// isCompleteReplayCompatible) BEFORE returning the replay — a divergent
+// retry fails closed instead of silently succeeding.
 export async function getIdempotentReplay(
 	key: string,
 ): Promise<IdempotentReplay | null> {

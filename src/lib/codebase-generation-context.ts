@@ -12,10 +12,12 @@ import {
 	CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS,
 	CODEBASE_ASK_HANDOFF_MAX_STATE_CHARS,
 	CODEBASE_GENERATION_MAX_ANSWER_CHARS,
+	CODEBASE_GENERATION_MAX_CONSTRAINTS,
 	CODEBASE_GENERATION_MAX_CONTEXT_CHARS,
 	CODEBASE_GENERATION_MAX_FINDINGS,
 	CODEBASE_GENERATION_MAX_PATHS,
 	CODEBASE_GENERATION_MAX_PROMPT_CHARS,
+	CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
 	MAX_PROMPT_LENGTH,
 } from "./constants";
 
@@ -140,6 +142,14 @@ export function limitGenerationContext(
 		),
 		userAnswers: context.userAnswers.map((answer) =>
 			truncateText(answer, CODEBASE_GENERATION_MAX_ANSWER_CHARS),
+		),
+		analysisSummary: truncateText(
+			context.analysisSummary,
+			CODEBASE_GENERATION_MAX_SUMMARY_CHARS,
+		),
+		constraints: context.constraints.slice(
+			0,
+			CODEBASE_GENERATION_MAX_CONSTRAINTS,
 		),
 		relevantPaths: context.relevantPaths.slice(
 			0,
@@ -522,6 +532,42 @@ export async function getProjectGenerationContext(
 		},
 		analysisId: readyRow?.id,
 	});
+}
+
+/** Resolve the currently active ready snapshot id for handoff
+ *  traceability (Task 9 write-through). Returns null when no snapshot is
+ *  ready, but preserves database failures so callers never silently lose
+ *  snapshot identity. Generation still resolves
+ *  the active snapshot at call time (first-ready default, see
+ *  selectActiveSnapshot); the stamped id is advisory traceability only. */
+export async function resolveActiveSnapshotId(
+	projectId: string,
+): Promise<string | null> {
+	const { db } = await import("@/db");
+	const { codebaseSnapshots } = await import("@/db/schema");
+	const { and, asc, eq } = await import("drizzle-orm");
+	const rows = await db
+		.select({
+			id: codebaseSnapshots.id,
+			status: codebaseSnapshots.status,
+			createdAt: codebaseSnapshots.createdAt,
+		})
+		.from(codebaseSnapshots)
+		.where(
+			and(
+				eq(codebaseSnapshots.projectId, projectId),
+				eq(codebaseSnapshots.status, "ready"),
+			),
+		)
+		.orderBy(asc(codebaseSnapshots.createdAt));
+	const active = selectActiveSnapshot(
+		rows.map((row) => ({
+			id: row.id,
+			status: row.status,
+			createdAt: row.createdAt?.toISOString() ?? "",
+		})),
+	);
+	return active?.id ?? null;
 }
 
 /** Persist the snapshot-identity link after a successful generation.

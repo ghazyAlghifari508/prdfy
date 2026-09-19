@@ -232,6 +232,14 @@ export type SnapshotContext = z.infer<typeof snapshotContextSchema>;
 // The first successful snapshot becomes the active generation context. A
 // later snapshot never silently rewrites output; new generation requests use
 // the latest user-selected ready snapshot when one is chosen.
+//
+// First-ready default + selection follow-up (Task 9): per-snapshot selection
+// UI does not exist in MVP, so `selectedId` is currently always unset and
+// the earliest ready snapshot wins deterministically. The Ask handoff stores
+// an advisory `snapshotId` (write-through at submit) for traceability, but
+// generation resolves via this function at call time and ignores it — when
+// selection UI lands, it must pass the chosen id here AND stop ignoring the
+// handoff stamp.
 
 export interface SelectableSnapshot {
 	id: string;
@@ -633,11 +641,92 @@ export function isSlotIdempotencyKey(
 	return /^\d+$/.test(key.slice(prefix.length));
 }
 
-// === Attempt binding (Task 5) ===
+// === Idempotent replay identity (Task 9 hardening) ===
+// On an idempotency-key hit the route returns the stored response WITHOUT
+// re-applying the payload. These pure checks verify the replayed payload's
+// identity agrees with stored state first; a divergent retry fails closed
+// (409 SNAPSHOT_CONFLICT) instead of silently returning success. The CLI
+// always resends byte-identical payloads on retry, so true retries pass.
+
+function sameManifestIdentity(
+	stored: ManifestEntry,
+	replayed: ManifestEntry,
+): boolean {
+	return (
+		stored.size === replayed.size &&
+		stored.hash.toLowerCase() === replayed.hash.toLowerCase() &&
+		(stored.language ?? undefined) === (replayed.language ?? undefined)
+	);
+}
+
+/** A replay must reproduce the exact manifest batch identity. A subset,
+ *  missing path, or divergent entry means conflicting reuse of the key. */
+export function isManifestReplayCompatible(
+	stored: readonly ManifestEntry[],
+	replayed: readonly ManifestEntry[],
+): boolean {
+	if (stored.length !== replayed.length) return false;
+	const byPath = new Map(stored.map((entry) => [entry.path, entry]));
+	for (const entry of replayed) {
+		const previous = byPath.get(entry.path);
+		if (!previous || !sameManifestIdentity(previous, entry)) return false;
+	}
+	return true;
+}
+
+export interface StoredFileChunkLike {
+	path: string;
+	chunkIndex: number;
+	chunkTotal: number;
+	contentHash: string;
+	data: string;
+}
+
+export interface ReplayedFileChunkLike {
+	path: string;
+	chunkIndex: number;
+	chunkTotal: number;
+	contentHash: string;
+	data: string;
+}
+
+/** The replayed chunk must match the stored (path, chunkIndex) row
+ *  byte-for-byte. A missing row means stored state desynced from the
+ *  idempotency record — fail closed rather than report success. */
+export function isFileReplayCompatible(
+	storedRows: readonly StoredFileChunkLike[],
+	replayed: ReplayedFileChunkLike,
+): boolean {
+	const row = storedRows.find(
+		(candidate) =>
+			candidate.path === replayed.path &&
+			candidate.chunkIndex === replayed.chunkIndex,
+	);
+	if (!row) return false;
+	return (
+		row.chunkTotal === replayed.chunkTotal &&
+		row.contentHash.toLowerCase() === replayed.contentHash.toLowerCase() &&
+		row.data === replayed.data
+	);
+}
+
+/** Completion replay must carry the same counts that produced the stored
+ *  result; divergent counts mean the client is completing a different
+ *  snapshot view. */
+export function isCompleteReplayCompatible(
+	stored: { fileCount: number; excludedCount: number },
+	replayed: { fileCount: number; excludedCount: number },
+): boolean {
+	return (
+		stored.fileCount === replayed.fileCount &&
+		stored.excludedCount === replayed.excludedCount
+	);
+}
 // One session is one attempt: attemptId MUST equal the bound session id.
 // Anything else is a foreign/wrong-project credential use — rejected with the
 // uniform credential error (no oracle, no id echo).
 
+// === Attempt binding (Task 5) ===
 export class SyncBindingError extends Error {
 	readonly code = "INVALID_SYNC_CREDENTIAL" as const;
 

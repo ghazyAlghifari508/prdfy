@@ -93,6 +93,12 @@ export const CODEBASE_GENERATION_MAX_PATHS = 40;
 export const CODEBASE_GENERATION_MAX_FINDINGS = 5;
 export const CODEBASE_GENERATION_MAX_PROMPT_CHARS = 2_000;
 export const CODEBASE_GENERATION_MAX_ANSWER_CHARS = 1_000;
+// Per-section caps inside the bounded block (Task 9 hardening): the global
+// char ceiling alone would let one oversized section (e.g. a huge analysis
+// summary) silently crowd out constraints/findings. Snapshot identity stays
+// above truncation (buildCodebasePromptBlock), so identity always survives.
+export const CODEBASE_GENERATION_MAX_SUMMARY_CHARS = 2_000;
+export const CODEBASE_GENERATION_MAX_CONSTRAINTS = 10;
 // === Ask handoff persistence (Task 8) ===
 // Authoritative Ask answers/compiled prompt stored server-side for
 // existing-codebase projects so refresh and multi-device access keep them.
@@ -101,6 +107,10 @@ export const CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS = 8_000;
 export const CODEBASE_ASK_HANDOFF_MAX_ANSWERS = 60;
 export const CODEBASE_ASK_HANDOFF_MAX_STATE_CHARS = 20_000;
 export const CODEBASE_ASK_HANDOFF_MAX_OPTIONS = 8;
+// Upper bound for the best-effort handoff save at Ask submit (Task 9): the
+// save must never stall navigation to PRD. Abort/timeout/failure all fall
+// through; sessionStorage already preserves UI continuity.
+export const CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS = 8_000;
 
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.
