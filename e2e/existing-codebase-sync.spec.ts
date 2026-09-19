@@ -52,10 +52,20 @@ test.describe("Existing Codebase Sync Flow", () => {
 		await expect(greenfieldBtn).toHaveAttribute("aria-pressed", "true");
 		await expect(existingBtn).toHaveAttribute("aria-pressed", "false");
 
+		// In greenfield: Web/App toggle and Template gallery are visible
+		const webToggle = page.getByRole("button", { name: "Web", exact: true });
+		const templateCard = page.getByText("SaaS Analytics Dashboard");
+		await expect(webToggle).toBeVisible();
+		await expect(templateCard).toBeVisible();
+
 		// Toggle to existing codebase
 		await existingBtn.click();
 		await expect(existingBtn).toHaveAttribute("aria-pressed", "true");
 		await expect(greenfieldBtn).toHaveAttribute("aria-pressed", "false");
+
+		// In existing codebase: Web/App toggle and Template gallery must be hidden
+		await expect(webToggle).not.toBeVisible();
+		await expect(templateCard).not.toBeVisible();
 
 		// Verify existing button title attribute
 		await expect(existingBtn).toHaveAttribute(
@@ -67,6 +77,10 @@ test.describe("Existing Codebase Sync Flow", () => {
 		await greenfieldBtn.click();
 		await expect(greenfieldBtn).toHaveAttribute("aria-pressed", "true");
 		await expect(existingBtn).toHaveAttribute("aria-pressed", "false");
+
+		// In greenfield again: Web/App toggle and Template gallery are restored
+		await expect(webToggle).toBeVisible();
+		await expect(templateCard).toBeVisible();
 	});
 
 	test("UI: Unauthenticated visit to /codebase/:id redirects to /login", async ({

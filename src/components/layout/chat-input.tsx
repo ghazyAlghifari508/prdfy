@@ -76,6 +76,7 @@ interface ChatInputProps {
 	initialValue?: string;
 	initialMobile?: boolean;
 	prefillKey?: number;
+	onModeChange?: (mode: HomeProjectMode) => void;
 }
 
 export function ChatInput({
@@ -83,11 +84,17 @@ export function ChatInput({
 	initialValue,
 	initialMobile,
 	prefillKey,
+	onModeChange,
 }: ChatInputProps) {
 	const [message, setMessage] = useState(() => getHomeDraft());
 	const [focused, setFocused] = useState(false);
 	const [isMobileMode, setIsMobileMode] = useState(false);
 	const [projectMode, setProjectMode] = useState<HomeProjectMode>("greenfield");
+
+	const handleModeChange = (mode: HomeProjectMode) => {
+		setProjectMode(mode);
+		onModeChange?.(mode);
+	};
 	const [language, setLanguage] = useState<OutputLanguage>(() =>
 		getAskLanguage(),
 	);
@@ -132,12 +139,17 @@ export function ChatInput({
 
 		// Store model & platform preference alongside the prompt
 		const originalMessage = message.trim();
-		const enrichedPrompt = isMobileMode
-			? `[Platform: Mobile App]\n${originalMessage}`
-			: `[Platform: Web App]\n${originalMessage}`;
+		const enrichedPrompt =
+			projectMode === "existing_codebase"
+				? originalMessage
+				: isMobileMode
+					? `[Platform: Mobile App]\n${originalMessage}`
+					: `[Platform: Web App]\n${originalMessage}`;
 
 		saveSetupPrompt(enrichedPrompt);
-		saveAskPlatform(isMobileMode ? "mobile" : "web");
+		if (projectMode !== "existing_codebase") {
+			saveAskPlatform(isMobileMode ? "mobile" : "web");
+		}
 		saveAskLanguage(language);
 		// Save original message for display in chat bubble (without platform tags)
 		sessionStorage.setItem("prdfy:original-message", originalMessage);
@@ -230,7 +242,7 @@ export function ChatInput({
 										? "home-mode-greenfield"
 										: "home-mode-existing-codebase"
 								}
-								onClick={() => setProjectMode(option.id)}
+								onClick={() => handleModeChange(option.id)}
 								title={
 									option.id === "greenfield"
 										? "Buat PRD dari ide produk baru"
@@ -278,39 +290,41 @@ export function ChatInput({
 								)}
 							</div>
 
-							{/* Mobile / Web Segmented Control */}
-							<div className="flex items-center gap-0.5 rounded-md bg-charcoal p-1 shadow-[var(--shadow-inset)]">
-								<button
-									type="button"
-									id="platform-toggle-mobile-label"
-									onClick={() => setIsMobileMode(true)}
-									title="Generate PRD untuk Mobile App"
-									className={cn(
-										"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-										isMobileMode
-											? "border border-iron/50 bg-iron text-snow"
-											: "border border-transparent text-fog hover:text-snow",
-									)}
-								>
-									<Smartphone size={12} />
-									App
-								</button>
-								<button
-									type="button"
-									id="platform-toggle-web"
-									onClick={() => setIsMobileMode(false)}
-									title="Generate PRD untuk Web App"
-									className={cn(
-										"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
-										!isMobileMode
-											? "border border-iron/50 bg-iron text-snow"
-											: "border border-transparent text-fog hover:text-snow",
-									)}
-								>
-									<Monitor size={12} />
-									Web
-								</button>
-							</div>
+							{/* Mobile / Web Segmented Control (only for greenfield mode) */}
+							{projectMode === "greenfield" && (
+								<div className="flex items-center gap-0.5 rounded-md bg-charcoal p-1 shadow-[var(--shadow-inset)]">
+									<button
+										type="button"
+										id="platform-toggle-mobile-label"
+										onClick={() => setIsMobileMode(true)}
+										title="Generate PRD untuk Mobile App"
+										className={cn(
+											"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+											isMobileMode
+												? "border border-iron/50 bg-iron text-snow"
+												: "border border-transparent text-fog hover:text-snow",
+										)}
+									>
+										<Smartphone size={12} />
+										App
+									</button>
+									<button
+										type="button"
+										id="platform-toggle-web"
+										onClick={() => setIsMobileMode(false)}
+										title="Generate PRD untuk Web App"
+										className={cn(
+											"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+											!isMobileMode
+												? "border border-iron/50 bg-iron text-snow"
+												: "border border-transparent text-fog hover:text-snow",
+										)}
+									>
+										<Monitor size={12} />
+										Web
+									</button>
+								</div>
+							)}
 						</div>
 
 						{/* Main input area */}
