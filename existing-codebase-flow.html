@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PrdFy · Existing Codebase Flow</title>
+  <style>
+    :root {
+      --onyx: #08090a; --charcoal: #0f1011; --obsidian: #161718;
+      --graphite: #23252a; --iron: #323334; --steel: #383b3f;
+      --slate: #62666d; --fog: #8a8f98; --mist: #d0d6e0; --snow: #f7f8f8;
+      --green: #92d6ae; --green-bg: rgba(146,214,174,.1);
+      --blue: #9ecbff; --blue-bg: rgba(158,203,255,.1);
+      --yellow: #e8cb8a; --yellow-bg: rgba(232,203,138,.1);
+      --red: #eb5757;
+      --shadow: inset 0 0 0 1px var(--graphite), 0 4px 32px rgba(0,0,0,.6);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--onyx); color: var(--snow); font-family: var(--sans); font-size: 14px; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .shell { min-height: 100vh; background: radial-gradient(circle at 50% -20%, #1b1e22 0, var(--onyx) 38rem); }
+    .topbar { height: 58px; padding: 0 28px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px solid var(--graphite); background: rgba(8,9,10,.78); backdrop-filter: blur(18px); }
+    .brand { display:flex; align-items:center; gap:10px; font-weight: 650; letter-spacing:-.02em; }
+    .mark { width:25px; height:25px; display:grid; place-items:center; border:1px solid var(--fog); border-radius:7px; color:var(--snow); font-size:11px; font-weight:800; }
+    .top-actions { display:flex; align-items:center; gap:18px; color:var(--fog); font-size:12px; }
+    .avatar { width:27px; height:27px; border-radius:50%; display:grid; place-items:center; background:#59616d; color:var(--snow); font-size:11px; }
+    .workspace { display:grid; grid-template-columns: 210px minmax(0, 1fr); min-height: calc(100vh - 58px); }
+    aside { border-right:1px solid var(--graphite); padding:26px 14px; color:var(--fog); }
+    .side-title { padding:0 12px 12px; color:var(--mist); font-size:11px; font-weight:650; }
+    .nav { display:grid; gap:3px; }
+    .nav button { text-align:left; border:0; border-radius:7px; padding:10px 12px; background:transparent; color:var(--fog); }
+    .nav button:hover, .nav button.active { background:var(--obsidian); color:var(--snow); }
+    .nav button.active { box-shadow: inset 2px 0 var(--mist); }
+    main { width:min(100%, 1120px); margin:0 auto; padding:48px 46px 80px; }
+    .screen { display:none; animation: enter .22s ease-out; }
+    .screen.active { display:block; }
+    @keyframes enter { from { opacity:0; transform: translateY(5px); } to { opacity:1; transform:none; } }
+    .eyebrow { color:var(--fog); font-size:11px; letter-spacing:.04em; margin-bottom:12px; }
+    h1 { margin:0; font-size:34px; line-height:1.08; letter-spacing:-.045em; font-weight:620; }
+    h2 { margin:0; font-size:22px; letter-spacing:-.03em; font-weight:600; }
+    h3 { margin:0; font-size:14px; font-weight:620; }
+    p { color:var(--fog); line-height:1.6; margin:0; }
+    .muted { color:var(--fog); }
+    .hero { max-width:720px; margin:70px auto 0; text-align:center; }
+    .hero p { margin:18px auto 28px; max-width:510px; }
+    .mode-switch { display:inline-flex; padding:4px; gap:3px; border:1px solid var(--graphite); border-radius:9px; background:var(--charcoal); margin-bottom:18px; }
+    .mode-switch button { border:0; padding:8px 13px; border-radius:6px; color:var(--fog); background:transparent; font-size:12px; }
+    .mode-switch button.selected { background:var(--steel); color:var(--snow); box-shadow:0 1px 2px #000; }
+    .prompt-box { text-align:left; border:1px solid var(--iron); border-radius:10px; background:var(--charcoal); padding:5px; box-shadow:var(--shadow); }
+    .prompt-box textarea { width:100%; min-height:105px; resize:vertical; padding:14px; border:0; outline:0; border-radius:7px; color:var(--snow); background:var(--obsidian); line-height:1.5; }
+    .prompt-footer { display:flex; align-items:center; justify-content:space-between; padding:10px 8px 7px; }
+    .platform { color:var(--fog); font-size:11px; }
+    .primary, .secondary { border:1px solid transparent; border-radius:6px; padding:9px 14px; font-size:12px; font-weight:600; }
+    .primary { color:var(--onyx); background:var(--snow); }
+    .secondary { color:var(--mist); border-color:var(--iron); background:var(--obsidian); }
+    .primary:hover, .secondary:hover { filter:brightness(1.12); }
+    .hint { margin-top:16px; font-size:11px; color:var(--slate); }
+    .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:22px; margin-bottom:28px; }
+    .page-head p { margin-top:9px; max-width:650px; }
+    .pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--iron); border-radius:99px; padding:5px 9px; color:var(--fog); font-size:11px; white-space:nowrap; }
+    .dot { width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); }
+    .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+    .card { border:1px solid var(--graphite); border-radius:9px; background:rgba(15,16,17,.78); padding:19px; box-shadow:var(--shadow); }
+    .card p { font-size:12px; margin-top:8px; }
+    .card .icon { width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--iron); border-radius:7px; margin-bottom:16px; color:var(--mist); font-family:var(--mono); font-size:12px; }
+    .flowline { display:flex; align-items:center; gap:8px; margin:26px 0; color:var(--slate); font-size:11px; }
+    .flowline span { padding:7px 10px; border:1px solid var(--graphite); border-radius:5px; color:var(--fog); }
+    .flowline span.current { border-color:var(--fog); color:var(--snow); }
+    .panel { border:1px solid var(--graphite); border-radius:10px; background:var(--charcoal); box-shadow:var(--shadow); overflow:hidden; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; padding:15px 18px; border-bottom:1px solid var(--graphite); }
+    .panel-body { padding:20px; }
+    .modal-wrap { display:grid; place-items:center; min-height:550px; position:relative; border:1px dashed var(--iron); border-radius:10px; background:rgba(15,16,17,.35); }
+    .modal { width:min(100%, 620px); border:1px solid var(--iron); border-radius:11px; background:var(--obsidian); box-shadow:0 24px 80px #000; }
+    .modal-head { padding:20px 22px 15px; border-bottom:1px solid var(--graphite); }
+    .modal-head p { margin-top:7px; font-size:12px; }
+    .modal-body { padding:18px 22px; }
+    .step { display:grid; grid-template-columns:26px 1fr; gap:11px; margin-bottom:18px; }
+    .step-no { width:24px; height:24px; display:grid; place-items:center; border:1px solid var(--iron); border-radius:50%; color:var(--mist); font-size:11px; }
+    .step-title { color:var(--mist); font-size:12px; font-weight:600; margin:2px 0 6px; }
+    .code { position:relative; border:1px solid var(--graphite); border-radius:6px; background:var(--onyx); padding:12px 13px; color:var(--mist); font:11px/1.65 var(--mono); white-space:pre-wrap; }
+    .copy { position:absolute; top:8px; right:8px; padding:5px 8px; border:1px solid var(--iron); border-radius:4px; color:var(--fog); background:var(--obsidian); font-size:10px; }
+    .modal-foot { display:flex; justify-content:flex-end; gap:8px; padding:15px 22px; border-top:1px solid var(--graphite); }
+    .status-list { display:grid; gap:8px; margin:20px 0; }
+    .status-row { display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--graphite); border-radius:6px; color:var(--fog); font-size:12px; }
+    .status-row.done { color:var(--mist); background:var(--green-bg); border-color:rgba(146,214,174,.25); }
+    .status-row.live { color:var(--blue); background:var(--blue-bg); border-color:rgba(158,203,255,.25); }
+    .check { color:var(--green); font-weight:700; } .spinner { color:var(--blue); animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
+    .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px; }
+    .kv { padding:13px; border-bottom:1px solid var(--graphite); } .kv label { display:block; color:var(--slate); font-size:10px; margin-bottom:5px; } .kv strong { color:var(--mist); font-size:12px; font-weight:550; }
+    .review { display:grid; grid-template-columns:1.15fr .85fr; gap:14px; }
+    .tree { display:grid; gap:8px; margin-top:15px; } .tree-item { display:flex; gap:10px; align-items:center; padding:9px 11px; border-radius:5px; color:var(--mist); font:11px var(--mono); background:var(--onyx); } .tree-item.indent { margin-left:20px; color:var(--fog); }
+    .question { padding:17px 0; border-bottom:1px solid var(--graphite); } .question:last-child { border-bottom:0; } .question p { color:var(--mist); font-size:13px; margin-bottom:12px; } .choice { display:flex; gap:8px; flex-wrap:wrap; } .choice button { border:1px solid var(--iron); background:transparent; color:var(--fog); border-radius:5px; padding:7px 10px; font-size:11px; } .choice button.active { border-color:var(--mist); background:var(--steel); color:var(--snow); }
+    .doc-layout { display:grid; grid-template-columns:180px minmax(0, 1fr) 220px; gap:22px; } .toc { position:sticky; top:20px; align-self:start; } .toc div { padding:7px 10px; color:var(--fog); font-size:11px; border-left:1px solid var(--graphite); } .toc div.active { color:var(--snow); border-left-color:var(--snow); } .doc { max-width:680px; } .doc h2 { margin:27px 0 9px; } .doc p { font-size:13px; line-height:1.75; } .doc ul { padding-left:20px; color:var(--fog); line-height:1.8; font-size:13px; } .impact { align-self:start; } .impact .card { margin-bottom:10px; } .tag { display:inline-block; margin:4px 4px 0 0; padding:4px 7px; border:1px solid var(--iron); border-radius:4px; color:var(--fog); font:10px var(--mono); }
+    .screen-nav { display:flex; justify-content:space-between; margin-top:28px; padding-top:18px; border-top:1px solid var(--graphite); }
+    @media (max-width: 820px) { .workspace { grid-template-columns:1fr; } aside { display:none; } main { padding:30px 18px 60px; } .grid, .review, .summary-grid, .doc-layout { grid-template-columns:1fr; } .doc-layout .toc { display:flex; overflow:auto; position:static; gap:4px; } .toc div { white-space:nowrap; border-left:0; border-bottom:1px solid var(--graphite); } .page-head { display:block; } .page-head .pill { margin-top:14px; } h1 { font-size:29px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar"><div class="brand"><span class="mark">P</span><span>prdfy</span></div><div class="top-actions"><span>2 kredit tersisa</span><span class="avatar">AR</span></div></header>
+    <div class="workspace">
+      <aside><div class="side-title">Prototype flow</div><nav class="nav">
+        <button class="active" data-screen="home">01 · Home</button><button data-screen="sync-modal">02 · Sync modal</button><button data-screen="sync-status">03 · Sync status</button><button data-screen="analysis">04 · Codebase review</button><button data-screen="questions">05 · Pertanyaan</button><button data-screen="prd">06 · PRD awal</button>
+      </nav></aside>
+      <main>
+        <section class="screen active" id="home">
+          <div class="hero"><div class="eyebrow">PRODUCT DEVELOPMENT PLANNER</div><h1>Dari ide ke implementasi<br />yang bisa dipahami agent.</h1><p>Pilih cara kamu memulai. PrdFy bisa merancang produk baru atau memahami codebase yang sudah kamu punya.</p>
+            <div class="mode-switch"><button class="selected" data-mode="new">Produk baru</button><button data-mode="existing">Codebase existing</button></div>
+            <div class="prompt-box"><textarea id="homePrompt">Saya ingin menambahkan fitur wishlist agar pengguna bisa menyimpan produk untuk dibeli nanti.</textarea><div class="prompt-footer"><span class="platform">Web app · Bahasa Indonesia</span><button class="primary" onclick="go('sync-modal')">Lanjutkan <span aria-hidden="true">↗</span></button></div></div>
+            <div class="hint">Untuk codebase existing, AI agent kamu akan menjalankan PrdFy CLI dari repository lokal.</div>
+          </div>
+        </section>
+
+        <section class="screen" id="sync-modal"><div class="page-head"><div><div class="eyebrow">NEW PROJECT · EXISTING CODEBASE</div><h1>Hubungkan codebase kamu</h1><p>PrdFy tidak meminta upload ZIP. Jalankan sync langsung dari repository melalui AI coding agent kamu.</p></div><span class="pill"><span class="dot"></span>Menunggu koneksi</span></div>
+          <div class="modal-wrap"><div class="modal"><div class="modal-head"><h2><span style="color:var(--blue)">◈</span> Sync codebase dengan PrdFy</h2><p>Salin prompt ini dan paste ke Claude Code, Cursor, Windsurf, atau AI agent lain dari root repository kamu.</p></div><div class="modal-body"><div class="step"><span class="step-no">1</span><div><div class="step-title">Copy prompt untuk AI agent</div><div class="code">Hubungkan codebase ini ke project PrdFy saya.<br /><br />Gunakan PrdFy CLI untuk menganalisis struktur repository, mendeteksi stack, dan melakukan sync codebase. Jangan mengubah file aplikasi. Abaikan secrets, dependencies, build output, dan file binary. Setelah selesai, laporkan status sync kepada saya.<button class="copy" onclick="copyText(this)">Copy</button></div></div></div><div class="step"><span class="step-no">2</span><div><div class="step-title">Buka AI coding agent di repository kamu</div><p style="font-size:11px">Pastikan agent berjalan dari root folder project yang ingin dianalisis.</p></div></div><div class="step"><span class="step-no">3</span><div><div class="step-title">Paste prompt lalu jalankan</div><p style="font-size:11px">PrdFy akan menampilkan status ketika CLI berhasil terhubung.</p></div></div></div><div class="modal-foot"><button class="secondary" onclick="go('home')">Kembali</button><button class="primary" onclick="go('sync-status')">Saya sudah menjalankan agent</button></div></div></div>
+        </section>
+
+        <section class="screen" id="sync-status"><div class="page-head"><div><div class="eyebrow">PROJECT / WISHLIST</div><h1>Sync codebase</h1><p>AI agent sedang menjalankan PrdFy CLI. Kamu bisa tetap melihat terminal agent untuk detail proses.</p></div><span class="pill"><span class="dot"></span>Agent terhubung</span></div><div class="panel"><div class="panel-head"><div><h3>Analisis repository lokal</h3><p style="font-size:11px;margin-top:4px">Sync ID: sync_8f3c2a · dimulai 12 detik lalu</p></div><span class="muted" style="font:11px var(--mono)">62%</span></div><div class="panel-body"><div class="status-list"><div class="status-row done"><span class="check">✓</span> Repository root terdeteksi <span style="margin-left:auto;font:10px var(--mono)">/shop-app</span></div><div class="status-row done"><span class="check">✓</span> Package manifest dan framework dibaca</div><div class="status-row done"><span class="check">✓</span> Secrets dan generated files dikecualikan</div><div class="status-row live"><span class="spinner">◌</span> Mengirim source context yang relevan ke PrdFy</div><div class="status-row"><span style="color:var(--slate)">○</span> Menyusun codebase analysis</div></div><div style="display:flex;justify-content:space-between;align-items:center"><p style="font-size:11px">Progress berasal dari event CLI yang nyata.</p><button class="secondary" onclick="go('analysis')">Lihat hasil sementara</button></div></div></div></section>
+
+        <section class="screen" id="analysis"><div class="page-head"><div><div class="eyebrow">CODEBASE ANALYSIS · REVIEW BEFORE GENERATE</div><h1>Kami menemukan konteks aplikasimu.</h1><p>Review ringkasan ini sebelum PrdFy membuat pertanyaan. Kamu bisa mengoreksi hasil deteksi yang tidak sesuai.</p></div><span class="pill"><span class="dot"></span>Sync selesai</span></div><div class="summary-grid"><div class="panel"><div class="panel-head"><h3>Detected environment</h3><span class="check">✓</span></div><div class="panel-body" style="padding:0"><div class="kv"><label>FRAMEWORK</label><strong>TanStack Start + React 19</strong></div><div class="kv"><label>LANGUAGE</label><strong>TypeScript</strong></div><div class="kv"><label>DATABASE</label><strong>PostgreSQL · Drizzle ORM</strong></div><div class="kv"><label>AUTHENTICATION</label><strong>Better Auth · OAuth</strong></div><div class="kv"><label>PACKAGE MANAGER</label><strong>pnpm</strong></div></div></div><div class="panel"><div class="panel-head"><h3>Repository map</h3><span class="muted" style="font-size:11px">148 files indexed</span></div><div class="panel-body"><div class="tree"><div class="tree-item">▾ <b>src/</b></div><div class="tree-item indent">▾ routes/</div><div class="tree-item indent">▾ components/</div><div class="tree-item indent">▾ db/</div><div class="tree-item indent">▾ lib/services/</div><div class="tree-item">▾ <b>packages/cli/</b></div></div></div></div></div><div class="panel" style="margin-top:14px"><div class="panel-head"><h3>Potential impact areas for wishlist</h3><span class="pill">AI generated · review</span></div><div class="panel-body"><div class="grid"><div><h3>Database</h3><p>Tambah tabel `wishlists` yang terhubung ke user dan product.</p></div><div><h3>Application</h3><p>Route product detail dan service untuk operasi add/remove item.</p></div><div><h3>Authorization</h3><p>Gunakan session user yang sudah tersedia untuk membatasi akses.</p></div></div><div class="screen-nav"><button class="secondary" onclick="go('sync-modal')">Sync ulang</button><button class="primary" onclick="go('questions')">Review selesai, lanjutkan ↗</button></div></div></div></section>
+
+        <section class="screen" id="questions"><div class="page-head"><div><div class="eyebrow">STEP 1 OF 4 · CONTEXTUAL QUESTIONS</div><h1>Beberapa hal tentang fiturmu.</h1><p>Pertanyaan ini dibuat dari prompt kamu dan struktur codebase yang sudah dianalisis.</p></div><span class="pill">Codebase context aktif</span></div><div class="panel"><div class="panel-body"><div class="question"><p>Di aplikasi ini, wishlist perlu tersedia untuk user yang sudah login. Apakah user guest juga boleh menyimpan item?</p><div class="choice"><button class="active">Login saja</button><button>Guest + login</button><button>Belum ditentukan</button></div></div><div class="question"><p>Codebase memiliki database PostgreSQL dengan Drizzle ORM. Apakah wishlist perlu persisten lintas device?</p><div class="choice"><button class="active">Ya, simpan di database</button><button>Session sementara</button></div></div><div class="question"><p>Di mana user akan mengelola item wishlist?</p><div class="choice"><button class="active">Product detail + halaman wishlist</button><button>Product detail saja</button><button>Custom</button></div></div><div class="screen-nav"><span class="muted" style="font-size:11px">3 jawaban · bisa diubah nanti</span><button class="primary" onclick="go('prd')">Generate PRD ↗</button></div></div></div></section>
+
+        <section class="screen" id="prd"><div class="page-head"><div><div class="eyebrow">PRD · VERSION 1 · CODEBASE-AWARE</div><h1>Wishlist untuk Shop App</h1><p>Dokumen ini menggabungkan kebutuhan fitur, jawabanmu, dan konteks repository yang tersinkron.</p></div><span class="pill"><span class="dot"></span>Generated</span></div><div class="doc-layout"><nav class="toc"><div class="active">Overview</div><div>Problem & goals</div><div>User stories</div><div>Technical scope</div><div>Impact analysis</div><div>Acceptance criteria</div></nav><article class="doc"><div class="card" style="margin-bottom:22px;background:var(--blue-bg);border-color:rgba(158,203,255,.22)"><h3 style="color:var(--blue)">Existing codebase context</h3><p style="color:var(--mist)">PRD ini dirancang untuk TanStack Start + React 19, PostgreSQL, Drizzle ORM, dan Better Auth. Area terdampak telah dipetakan dari sync terakhir.</p></div><h2>1. Ringkasan</h2><p>Menambahkan fitur wishlist agar user yang sudah terautentikasi dapat menyimpan produk dan mengaksesnya kembali di halaman wishlist.</p><h2>2. User stories</h2><ul><li>Sebagai user yang login, saya dapat menambahkan produk ke wishlist.</li><li>Sebagai user yang login, saya dapat menghapus produk dari wishlist.</li><li>Sebagai user yang login, saya dapat melihat semua produk tersimpan.</li></ul><h2>3. Technical scope</h2><p>Implementasi mengikuti pola service dan route yang sudah ada. Tambahkan schema Drizzle, API endpoint dengan filter user ownership, dan UI pada product detail.</p><h2>4. Impacted areas</h2><div><span class="tag">src/db/schema.ts</span><span class="tag">src/routes/api/</span><span class="tag">src/components/product/</span><span class="tag">src/lib/services/</span></div></article><aside class="impact"><div class="card"><h3>Project context</h3><p>Synced 2 menit lalu</p><div style="margin-top:14px"><span class="tag">148 files</span><span class="tag">TypeScript</span><span class="tag">Postgres</span></div></div><div class="card"><h3>Next output</h3><p>Acceptance Criteria akan dibuat dari scope PRD ini.</p><button class="primary" style="width:100%;margin-top:14px" onclick="go('questions')">Revise PRD</button></div></aside></div></section>
+      </main>
+    </div>
+  </div>
+  <script>
+    function go(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id)); document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.screen === id)); window.scrollTo({top:0, behavior:'smooth'}); }
+    document.querySelectorAll('.nav button').forEach(b => b.addEventListener('click', () => go(b.dataset.screen)));
+    document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('[data-mode]').forEach(x => x.classList.remove('selected')); b.classList.add('selected'); }));
+    document.querySelectorAll('.choice button').forEach(b => b.addEventListener('click', () => { b.parentElement.querySelectorAll('button').forEach(x => x.classList.remove('active')); b.classList.add('active'); }));
+    function copyText(button) { const text = button.parentElement.innerText.replace('Copy','').trim(); navigator.clipboard?.writeText(text); button.textContent = 'Copied'; setTimeout(() => button.textContent = 'Copy', 1200); }
+  </script>
+</body>
+</html>
