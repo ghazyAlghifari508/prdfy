@@ -64,6 +64,13 @@
       "when": 1787756876548,
       "tag": "0008_add_admin_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789800239266,
+      "tag": "0009_lazy_leopardon",
+      "breakpoints": true
     }
   ]
 }

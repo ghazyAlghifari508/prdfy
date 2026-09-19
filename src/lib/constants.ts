@@ -59,6 +59,18 @@ export const PDF_STYLES = {
 export const KANBAN_SSE_INTERVAL_MS = 3_000;
 export const KANBAN_POLL_INTERVAL_MS = 10_000;
 
+// === Existing codebase sync (MVP locked decisions) ===
+// Browser polls the persisted sync status; no sync SSE endpoint in MVP.
+export const CODEBASE_SYNC_POLL_INTERVAL_MS = 2_000;
+// A sync session (and its credential) expires after 30 minutes.
+export const CODEBASE_SYNC_SESSION_EXPIRY_MS = 30 * 60 * 1000;
+// Transport bounds enforced by both CLI and server.
+export const CODEBASE_MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
+export const CODEBASE_MAX_FILE_BYTES = 1024 * 1024;
+export const CODEBASE_MAX_CHUNK_BYTES = 256 * 1024;
+// Minimum supported CLI version for `prdfy codebase sync`.
+export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
+
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.
 export const BILLING_PERIOD_DAYS = 30;

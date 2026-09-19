@@ -144,6 +144,10 @@ export const projects = pgTable(
 		description: text("description"),
 		status: text("status").default("draft"),
 		mode: text("mode").default("ai_auto"),
+		// Existing-codebase project mode: "greenfield" | "existing_codebase".
+		// Unrelated to `mode` (Ask generation mode "ai_auto" | "manual").
+		// Existing projects default to "greenfield" (greenfield flow unchanged).
+		projectMode: text("project_mode").notNull().default("greenfield"),
 		language: text("language").default("id"),
 		step: text("step").default("prd"), // prd, ac, task
 		acStatus: text("ac_status").default("pending"),
@@ -353,6 +357,113 @@ export const notificationPreferences = pgTable("notification_preferences", {
 	createdAt: timestamp("created_at").defaultNow(),
 	updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// === Existing codebase sync (MVP) ===
+// Project-owned sync/session/snapshot/analysis/context records. Every table
+// carries project + owner linkage with cascade delete so project deletion
+// removes sync data transactionally. Sync credentials persist as hashes only.
+
+// Sync session: one short-lived project-scoped credential per attempt.
+export const codebaseSyncSessions = pgTable(
+	"codebase_sync_sessions",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		// SHA-256 hex of the raw sync credential. Raw value is never stored.
+		credentialHash: text("credential_hash").notNull(),
+		// Sync status: waiting_for_cli | connected | scanning | filtering |
+		// uploading | uploaded | analyzing | ready | failed | expired.
+		status: text("status").notNull().default("waiting_for_cli"),
+		expiresAt: timestamp("expires_at").notNull(),
+		consumedAt: timestamp("consumed_at"),
+		cliMinVersion: text("cli_min_version").notNull().default("2.0.0"),
+		attempt: integer("attempt").notNull().default(1),
+		metadata: jsonb("metadata"),
+		createdAt: timestamp("created_at").defaultNow(),
+		updatedAt: timestamp("updated_at").defaultNow(),
+	},
+	(t) => [
+		index("codebase_sync_sessions_project_id_idx").on(t.projectId),
+		index("codebase_sync_sessions_user_id_idx").on(t.userId),
+	],
+);
+
+// Snapshot: persisted manifest + filtered source-context references.
+export const codebaseSnapshots = pgTable(
+	"codebase_snapshots",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		syncSessionId: text("sync_session_id")
+			.notNull()
+			.references(() => codebaseSyncSessions.id, { onDelete: "cascade" }),
+		branch: text("branch"),
+		commitSha: text("commit_sha"),
+		manifest: jsonb("manifest"),
+		fileCount: integer("file_count").notNull().default(0),
+		excludedCount: integer("excluded_count").notNull().default(0),
+		contentSize: integer("content_size").notNull().default(0),
+		// Snapshot status mirrors the sync status vocabulary.
+		status: text("status").notNull().default("uploading"),
+		createdAt: timestamp("created_at").defaultNow(),
+	},
+	(t) => [
+		index("codebase_snapshots_project_id_idx").on(t.projectId),
+		index("codebase_snapshots_sync_session_id_idx").on(t.syncSessionId),
+	],
+);
+
+// Analysis: validated structured output bound to one snapshot.
+export const codebaseAnalyses = pgTable(
+	"codebase_analyses",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		snapshotId: text("snapshot_id")
+			.notNull()
+			.references(() => codebaseSnapshots.id, { onDelete: "cascade" }),
+		output: jsonb("output"),
+		status: text("status").notNull().default("pending"),
+		errorCode: text("error_code"),
+		errorMessage: text("error_message"),
+		createdAt: timestamp("created_at").defaultNow(),
+		updatedAt: timestamp("updated_at").defaultNow(),
+	},
+	(t) => [
+		index("codebase_analyses_project_id_idx").on(t.projectId),
+		index("codebase_analyses_snapshot_id_idx").on(t.snapshotId),
+	],
+);
+
+// Generation context: links the active snapshot/analysis to later Ask/PRD/AC/
+// Task generation without changing existing version-table semantics.
+export const codebaseGenerationContexts = pgTable(
+	"codebase_generation_contexts",
+	{
+		id: text("id").primaryKey(),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		snapshotId: text("snapshot_id")
+			.notNull()
+			.references(() => codebaseSnapshots.id, { onDelete: "cascade" }),
+		analysisId: text("analysis_id").references(() => codebaseAnalyses.id, {
+			onDelete: "cascade",
+		}),
+		createdAt: timestamp("created_at").defaultNow(),
+		updatedAt: timestamp("updated_at").defaultNow(),
+	},
+	(t) => [index("codebase_generation_contexts_project_id_idx").on(t.projectId)],
+);
 
 // Payments
 export const payments = pgTable(
