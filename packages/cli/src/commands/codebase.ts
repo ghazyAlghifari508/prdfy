@@ -307,3 +307,26 @@ export async function syncCodebase(
 		return res;
 	}
 }
+
+/**
+ * Commander action for `prdfy codebase sync`. Commander v12 camelCases
+ * dashed flags (`--project-id` → `opts.projectId`), so this reads camelCase
+ * fields — matching the `login.ts` precedent (`options.apiKey`). Owns the
+ * nonzero exit on incomplete sync; `syncCodebase` itself never exits.
+ */
+export async function codebaseSyncAction(opts: {
+	projectId?: string;
+	syncToken?: string;
+	root?: string;
+	output?: string;
+	apiUrl?: string;
+}): Promise<void> {
+	const result = await syncCodebase({
+		projectId: opts.projectId ?? "",
+		syncToken: opts.syncToken ?? "",
+		root: opts.root,
+		output: opts.output as "human" | "json",
+		apiUrl: opts.apiUrl,
+	});
+	if (!result.ok) process.exit(1);
+}

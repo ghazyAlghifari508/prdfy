@@ -18,13 +18,14 @@
  */
 
 import { ApiError, apiRequest } from "./api-client.js";
+import { CLI_VERSION } from "./version.js";
 
 /** Maximum serialized JSON per upload request (locked MVP bound). */
 export const CODEBASE_MAX_CHUNK_BYTES = 256 * 1024;
 /** Minimum CLI version the server accepts for sync. */
 export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
-/** This CLI's version (mirrors `packages/cli/package.json`). */
-export const CODEBASE_CLI_VERSION = "2.0.0";
+/** This CLI's version (single-sourced from `packages/cli/package.json`). */
+export const CODEBASE_CLI_VERSION = CLI_VERSION;
 /** Bounded retry budget for retryable transport failures. */
 export const SYNC_MAX_ATTEMPTS = 3;
 /** Reserved bytes for the request envelope (ids/keys) on top of payloads. */

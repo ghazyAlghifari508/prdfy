@@ -13,9 +13,10 @@
  *   prdfy kanban <projectId>
  */
 
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { acCommand } from "./commands/ac.js";
-import { syncCodebase } from "./commands/codebase.js";
+import { codebaseSyncAction } from "./commands/codebase.js";
 import { exportRulesCommand } from "./commands/export.js";
 import { kanbanCommand } from "./commands/kanban.js";
 import { loginCommand } from "./commands/login.js";
@@ -27,13 +28,15 @@ import {
 	taskNextCommand,
 	taskUpdateCommand,
 } from "./commands/task.js";
+import { CLI_VERSION } from "./lib/version.js";
 
-const program = new Command();
+/** Shared program instance (exported so wiring tests can parse argv). */
+export const program = new Command();
 
 program
 	.name("prdfy")
 	.description("CLI tool for PrdFy — manage projects and tasks from terminal")
-	.version("2.0.0");
+	.version(CLI_VERSION);
 
 // prdfy login
 program
@@ -126,16 +129,7 @@ codebaseCmd
 	.option("--root <path>", "Repository root (default: current directory)")
 	.option("--output <mode>", "Output mode (human|json)", "human")
 	.option("--api-url <url>", "API base URL")
-	.action(async (opts: Record<string, string>) => {
-		const result = await syncCodebase({
-			projectId: opts["project-id"],
-			syncToken: opts["sync-token"],
-			root: opts.root,
-			output: opts.output as "human" | "json",
-			apiUrl: opts["api-url"],
-		});
-		if (!result.ok) process.exit(1);
-	});
+	.action(codebaseSyncAction);
 
 // prdfy export
 const exportCmd = program
@@ -150,4 +144,11 @@ exportCmd
 	.option("--format <format>", "Output format (agents|claude|cursor)")
 	.action(exportRulesCommand);
 
-program.parse(process.argv);
+// Parse only when executed as the CLI entrypoint; importing this module
+// (e.g. wiring tests) must not consume the importer's argv.
+const invokedAsMain =
+	typeof process.argv[1] === "string" &&
+	import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsMain) {
+	program.parse(process.argv);
+}
