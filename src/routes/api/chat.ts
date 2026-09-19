@@ -7,7 +7,6 @@ import {
 	getProjectGenerationContext,
 	linkGenerationContext,
 } from "@/lib/codebase-generation-context";
-import { BRIEF_MAX_CHARS } from "@/lib/constants";
 import { checkCredits, consumeCredit } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
@@ -61,7 +60,6 @@ export const Route = createFileRoute("/api/chat")({
 					partialContent,
 					preferences,
 					selectedVersionNum,
-					briefContext,
 				} = body as {
 					message: string;
 					displayMessage?: string;
@@ -71,7 +69,6 @@ export const Route = createFileRoute("/api/chat")({
 					partialContent?: string;
 					preferences?: Record<string, unknown>;
 					selectedVersionNum?: number;
-					briefContext?: string;
 				};
 
 				if (!message?.trim())
@@ -131,11 +128,7 @@ export const Route = createFileRoute("/api/chat")({
 				}
 
 				let systemPrompt = PRD_SYSTEM_PROMPT();
-				let groundingSource =
-					message +
-					(briefContext && !message.includes("BRIEF KONTEXT")
-						? `\n\nBRIEF KONTEXT:\n${briefContext.slice(0, BRIEF_MAX_CHARS)}`
-						: "");
+				let groundingSource = message;
 				let projectLanguage: "id" | "en" = "id";
 				// Task 8 snapshot-bound context (existing-codebase only).
 				// Stays "" for greenfield so prompts are byte-identical.
@@ -211,11 +204,7 @@ export const Route = createFileRoute("/api/chat")({
 								? await getPrdVersionContent(projectIdToUse, selectedVersionNum)
 								: await getLatestPrdContent(projectIdToUse);
 						if (activeContent) {
-							groundingSource = `${activeContent}\n\n${message}${
-								briefContext && !message.includes("BRIEF KONTEXT")
-									? `\n\nBRIEF KONTEXT:\n${briefContext.slice(0, BRIEF_MAX_CHARS)}`
-									: ""
-							}`;
+							groundingSource = `${activeContent}\n\n${message}`;
 							if (mode === "revise") {
 								systemPrompt = `${PRD_REVISION_PROMPT}\n\nCURRENT PRD CONTENT:\n\n${activeContent}`;
 							}

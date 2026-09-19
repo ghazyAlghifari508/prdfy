@@ -3,20 +3,15 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { ContextUpload } from "@/components/ask/context-upload";
 import {
-	BRIEF_MAX_CHARS,
 	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
 } from "@/lib/constants";
 import {
-	clearBriefContext,
 	getAskLanguage,
 	getAskPlatform,
 	getAskState,
-	getBriefContext,
 	getSetupPrompt,
 	saveAskState,
-	saveBriefContext,
 	savePendingPrdPrompt,
 } from "@/lib/prompt-handoff";
 import {
@@ -78,15 +73,7 @@ export function AskFlow({
 	const navigate = useNavigate();
 	const promptRef = useRef("");
 	const hasFetched = useRef(false);
-	const [session, setSession] = useState<1 | 2 | 3>(1);
-	const [briefContext, setBriefContext] = useState<string>(() =>
-		typeof window === "undefined" ? "" : getBriefContext(),
-	);
-
-	useEffect(() => {
-		if (briefContext) saveBriefContext(briefContext);
-		else clearBriefContext();
-	}, [briefContext]);
+	const [session, setSession] = useState<1 | 2>(1);
 	const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
 	const [loadError, setLoadError] = useState("");
 	const [questions, setQuestions] = useState<AskQuestion[]>([]);
@@ -144,8 +131,10 @@ export function AskFlow({
 			if (s.platform === "web" || s.platform === "mobile") {
 				setPlatform(s.platform);
 			}
-			if (s.session === 1 || s.session === 2 || s.session === 3) {
+			if (s.session === 1 || s.session === 2) {
 				setSession(s.session);
+			} else if (s.session === 3) {
+				setSession(2);
 			}
 			if (s.nonTechAnswers && typeof s.nonTechAnswers === "object") {
 				setNonTechAnswers(s.nonTechAnswers as Record<string, NonTechAnswer>);
@@ -394,11 +383,6 @@ Fullstack Framework: ${tech.fullstackFramework || fullstackDefault}
 Database: ${tech.database || defaultChoice}
 Deployment: ${tech.deployment || defaultChoice}`;
 
-		const briefCtx = getBriefContext()?.trim();
-		if (briefCtx) {
-			compiledPrompt += `\n\nBRIEF KONTEXT:\n${briefCtx.slice(0, BRIEF_MAX_CHARS)}`;
-		}
-
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
 		// Authoritative server handoff: survives refresh and multi-device access.
 		// Best-effort with a timeout — the save must never stall navigation:
@@ -490,17 +474,13 @@ Deployment: ${tech.deployment || defaultChoice}`;
 				<div className="mb-8 flex items-center justify-between">
 					<div>
 						<p className="font-inter text-xs uppercase tracking-wide text-fog">
-							Sesi {session} dari 3
+							Sesi {session} dari 2
 						</p>
 						<h1
 							className="font-inter text-2xl font-[510]"
 							style={{ color: "var(--text-primary)" }}
 						>
-							{session === 1
-								? "Ceritakan lebih lanjut"
-								: session === 2
-									? "Preferensi Teknis"
-									: "Tambah Konteks (opsional)"}
+							{session === 1 ? "Ceritakan lebih lanjut" : "Preferensi Teknis"}
 						</h1>
 					</div>
 					{session === 1 && (
@@ -539,7 +519,7 @@ Deployment: ${tech.deployment || defaultChoice}`;
 							</button>
 						</div>
 					</div>
-				) : session === 2 ? (
+				) : (
 					<div className="space-y-6 pb-8">
 						<p className="font-inter text-xs text-fog italic">
 							Pilih &ldquo;Gunakan Rekomendasi AI&rdquo; jika tidak yakin, AI
@@ -648,39 +628,8 @@ Deployment: ${tech.deployment || defaultChoice}`;
 							<button
 								type="button"
 								disabled={!allTechAnswered}
-								onClick={() => setSession(3)}
-								className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510] disabled:opacity-40 disabled:cursor-not-allowed"
-							>
-								Lanjut
-							</button>
-						</div>
-					</div>
-				) : (
-					<div className="space-y-6 pb-8">
-						<p className="font-inter text-xs text-fog italic">
-							Tambahkan brief, dokumen, atau URL kompetitor untuk memperkaya
-							konteks AI. Boleh dilewati — AI akan tetap generate PRD dari
-							jawaban sebelumnya.
-						</p>
-						<div className="rounded-lg border border-graphite bg-charcoal p-4">
-							<ContextUpload
-								onContext={setBriefContext}
-								onSkip={() => void submit(techAnswers)}
-							/>
-						</div>
-
-						<div className="flex flex-wrap items-center justify-between gap-3 border-t border-(--border-subtle) pt-6">
-							<button
-								type="button"
-								onClick={() => setSession(2)}
-								className="font-inter text-sm text-fog hover:text-snow"
-							>
-								Kembali
-							</button>
-							<button
-								type="button"
 								onClick={() => void submit(techAnswers)}
-								className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510]"
+								className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510] disabled:opacity-40 disabled:cursor-not-allowed"
 							>
 								Generate PRD
 							</button>

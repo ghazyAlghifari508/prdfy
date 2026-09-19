@@ -11,13 +11,10 @@ import {
 	useState,
 } from "react";
 import { syncPaymentStatus } from "@/app/actions/payment";
-import { BRIEF_MAX_CHARS } from "@/lib/constants";
 import {
-	clearBriefContext,
 	clearPrdDraft,
 	consumePendingPrdPrompt,
 	consumeResumeIntent,
-	getBriefContext,
 	getPrdDraft,
 	savePendingPrdPrompt,
 	savePrdDraft,
@@ -312,15 +309,6 @@ export const ChatPanel = memo(function ChatPanel({
 			/** If this is a resume call, the previous partial content */
 			existingPartialContent: string = "",
 		) => {
-			// ponytail: attach brief context for grounding AI (Task 8) — read from
-			// sessionStorage where ContextUpload saved it via ask flow.
-			if (
-				(chatMode === "generate" || chatMode === "resume") &&
-				!body.briefContext
-			) {
-				const brief = getBriefContext();
-				if (brief) body.briefContext = brief.slice(0, BRIEF_MAX_CHARS);
-			}
 			const abortController = new AbortController();
 			abortControllerRef.current = abortController;
 
@@ -515,7 +503,6 @@ export const ChatPanel = memo(function ChatPanel({
 									if (typeof parsed.content === "string" && parsed.content) {
 										onPrdRevised?.(parsed.content);
 									}
-									clearBriefContext();
 									startTransition(() => {
 										router.invalidate();
 									});
@@ -643,13 +630,9 @@ export const ChatPanel = memo(function ChatPanel({
 					if (finalDisplayContent.trim()) {
 						if (chatMode === "resume") {
 							setGeneratingPRD(false);
-							clearBriefContext();
 							startTransition(() => {
 								router.invalidate();
 							});
-						}
-						if (chatMode === "generate" || chatMode === "resume") {
-							clearBriefContext();
 						}
 						// revise - not reached if done event handled it, but keep
 						// state clean in case the stream ended without a done event.

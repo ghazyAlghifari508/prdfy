@@ -302,7 +302,9 @@ export function sanitizeAskHandoffState(
 	const clean: AskHandoffState = {
 		prompt: truncateText(state.prompt, MAX_PROMPT_LENGTH),
 		...(state.platform ? { platform: state.platform } : {}),
-		...(state.session ? { session: state.session } : {}),
+		...(state.session
+			? { session: (state.session === 3 ? 2 : state.session) as 1 | 2 }
+			: {}),
 		questions,
 	};
 	if (state.nonTechAnswers && typeof state.nonTechAnswers === "object") {
