@@ -135,6 +135,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 						id: codebaseSnapshots.id,
 						fileCount: codebaseSnapshots.fileCount,
 						excludedCount: codebaseSnapshots.excludedCount,
+						createdAt: codebaseSnapshots.createdAt,
 					})
 					.from(codebaseSnapshots)
 					.where(eq(codebaseSnapshots.syncSessionId, session.id))
@@ -142,6 +143,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					.limit(1);
 
 				let analysisId: string | null = null;
+				let analysisStatus: "pending" | "ready" | "failed" | undefined;
 				let errorCode: string | null = null;
 				let errorMessage: string | null = null;
 				if (snapshot) {
@@ -158,6 +160,16 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 						.limit(1);
 					if (analysis) {
 						analysisId = analysis.id;
+						// Task 6: drive the review/retry UI. Stored statuses are
+						// writer-controlled (pending/ready/failed); anything
+						// else is dropped so polling never shows a bogus state.
+						if (
+							analysis.status === "pending" ||
+							analysis.status === "ready" ||
+							analysis.status === "failed"
+						) {
+							analysisStatus = analysis.status;
+						}
 						// Server-written codes only; unknown values collapse so
 						// analysis internals never leak through status polling.
 						if (analysis.errorCode) {
@@ -176,11 +188,14 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					projectId,
 					sessionId: session.id,
 					status,
+					snapshotId: snapshot?.id ?? null,
+					snapshotCreatedAt: toIso(snapshot?.createdAt),
 					fileCount: snapshot?.fileCount ?? undefined,
 					excludedCount: snapshot?.excludedCount ?? undefined,
 					errorCode,
 					errorMessage,
 					analysisId,
+					analysisStatus,
 					createdAt: toIso(session.createdAt),
 					updatedAt: toIso(session.updatedAt),
 					expiresAt: toIso(session.expiresAt),

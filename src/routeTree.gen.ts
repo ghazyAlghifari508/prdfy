@@ -30,6 +30,7 @@ import { Route as ApiFeedbackRouteImport } from './routes/api/feedback'
 import { Route as ApiReportErrorRouteImport } from './routes/api/report-error'
 import { Route as AskIdRouteImport } from './routes/ask/$id'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as CodebaseIdRouteImport } from './routes/codebase/$id'
 import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-query'
 import { Route as KanbanIdRouteImport } from './routes/kanban/$id'
 import { Route as PrdIdRouteImport } from './routes/prd/$id'
@@ -75,6 +76,7 @@ import { Route as ApiV1ProjectsIdPrdRouteImport } from './routes/api/v1/projects
 import { Route as ApiV1ProjectsIdTasksRouteImport } from './routes/api/v1/projects/$id/tasks'
 import { Route as ApiV1SubtasksIdStatusRouteImport } from './routes/api/v1/subtasks/$id/status'
 import { Route as ApiV1TasksIdStatusRouteImport } from './routes/api/v1/tasks/$id/status'
+import { Route as ApiV1ProjectsIdCodebaseAnalysisRouteImport } from './routes/api/v1/projects/$id/codebase/analysis'
 import { Route as ApiV1ProjectsIdCodebaseCompleteRouteImport } from './routes/api/v1/projects/$id/codebase/complete'
 import { Route as ApiV1ProjectsIdCodebaseFilesRouteImport } from './routes/api/v1/projects/$id/codebase/files'
 import { Route as ApiV1ProjectsIdCodebaseManifestRouteImport } from './routes/api/v1/projects/$id/codebase/manifest'
@@ -183,6 +185,11 @@ const AskIdRoute = AskIdRouteImport.update({
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CodebaseIdRoute = CodebaseIdRouteImport.update({
+  id: '/codebase/$id',
+  path: '/codebase/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DemoTanstackQueryRoute = DemoTanstackQueryRouteImport.update({
@@ -412,6 +419,12 @@ const ApiV1TasksIdStatusRoute = ApiV1TasksIdStatusRouteImport.update({
   path: '/api/v1/tasks/$id/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1ProjectsIdCodebaseAnalysisRoute =
+  ApiV1ProjectsIdCodebaseAnalysisRouteImport.update({
+    id: '/codebase/analysis',
+    path: '/codebase/analysis',
+    getParentRoute: () => ApiV1ProjectsIdRoute,
+  } as any)
 const ApiV1ProjectsIdCodebaseCompleteRoute =
   ApiV1ProjectsIdCodebaseCompleteRouteImport.update({
     id: '/codebase/complete',
@@ -458,6 +471,7 @@ export interface FileRoutesByFullPath {
   '/api/report-error': typeof ApiReportErrorRoute
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/codebase/$id': typeof CodebaseIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -504,6 +518,7 @@ export interface FileRoutesByFullPath {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
   '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
@@ -528,6 +543,7 @@ export interface FileRoutesByTo {
   '/api/report-error': typeof ApiReportErrorRoute
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/codebase/$id': typeof CodebaseIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -574,6 +590,7 @@ export interface FileRoutesByTo {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
   '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
@@ -601,6 +618,7 @@ export interface FileRoutesById {
   '/api/report-error': typeof ApiReportErrorRoute
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/codebase/$id': typeof CodebaseIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -647,6 +665,7 @@ export interface FileRoutesById {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
   '/api/v1/projects/$id/codebase/manifest': typeof ApiV1ProjectsIdCodebaseManifestRoute
@@ -675,6 +694,7 @@ export interface FileRouteTypes {
     | '/api/report-error'
     | '/ask/$id'
     | '/auth/callback'
+    | '/codebase/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -721,6 +741,7 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
     | '/api/v1/projects/$id/codebase/manifest'
@@ -745,6 +766,7 @@ export interface FileRouteTypes {
     | '/api/report-error'
     | '/ask/$id'
     | '/auth/callback'
+    | '/codebase/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -791,6 +813,7 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
     | '/api/v1/projects/$id/codebase/manifest'
@@ -817,6 +840,7 @@ export interface FileRouteTypes {
     | '/api/report-error'
     | '/ask/$id'
     | '/auth/callback'
+    | '/codebase/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -863,6 +887,7 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
     | '/api/v1/projects/$id/codebase/manifest'
@@ -886,6 +911,7 @@ export interface RootRouteChildren {
   ApiReportErrorRoute: typeof ApiReportErrorRoute
   AskIdRoute: typeof AskIdRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  CodebaseIdRoute: typeof CodebaseIdRoute
   DemoTanstackQueryRoute: typeof DemoTanstackQueryRoute
   KanbanIdRoute: typeof KanbanIdRoute
   PrdIdRoute: typeof PrdIdRoute
@@ -1066,6 +1092,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/callback'
       fullPath: '/auth/callback'
       preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/codebase/$id': {
+      id: '/codebase/$id'
+      path: '/codebase/$id'
+      fullPath: '/codebase/$id'
+      preLoaderRoute: typeof CodebaseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/demo/tanstack-query': {
@@ -1383,6 +1416,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1TasksIdStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/projects/$id/codebase/analysis': {
+      id: '/api/v1/projects/$id/codebase/analysis'
+      path: '/codebase/analysis'
+      fullPath: '/api/v1/projects/$id/codebase/analysis'
+      preLoaderRoute: typeof ApiV1ProjectsIdCodebaseAnalysisRouteImport
+      parentRoute: typeof ApiV1ProjectsIdRoute
+    }
     '/api/v1/projects/$id/codebase/complete': {
       id: '/api/v1/projects/$id/codebase/complete'
       path: '/codebase/complete'
@@ -1477,6 +1517,7 @@ interface ApiV1ProjectsIdRouteChildren {
   ApiV1ProjectsIdKanbanRoute: typeof ApiV1ProjectsIdKanbanRoute
   ApiV1ProjectsIdPrdRoute: typeof ApiV1ProjectsIdPrdRoute
   ApiV1ProjectsIdTasksRoute: typeof ApiV1ProjectsIdTasksRoute
+  ApiV1ProjectsIdCodebaseAnalysisRoute: typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   ApiV1ProjectsIdCodebaseCompleteRoute: typeof ApiV1ProjectsIdCodebaseCompleteRoute
   ApiV1ProjectsIdCodebaseFilesRoute: typeof ApiV1ProjectsIdCodebaseFilesRoute
   ApiV1ProjectsIdCodebaseManifestRoute: typeof ApiV1ProjectsIdCodebaseManifestRoute
@@ -1488,6 +1529,7 @@ const ApiV1ProjectsIdRouteChildren: ApiV1ProjectsIdRouteChildren = {
   ApiV1ProjectsIdKanbanRoute: ApiV1ProjectsIdKanbanRoute,
   ApiV1ProjectsIdPrdRoute: ApiV1ProjectsIdPrdRoute,
   ApiV1ProjectsIdTasksRoute: ApiV1ProjectsIdTasksRoute,
+  ApiV1ProjectsIdCodebaseAnalysisRoute: ApiV1ProjectsIdCodebaseAnalysisRoute,
   ApiV1ProjectsIdCodebaseCompleteRoute: ApiV1ProjectsIdCodebaseCompleteRoute,
   ApiV1ProjectsIdCodebaseFilesRoute: ApiV1ProjectsIdCodebaseFilesRoute,
   ApiV1ProjectsIdCodebaseManifestRoute: ApiV1ProjectsIdCodebaseManifestRoute,
@@ -1515,6 +1557,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiReportErrorRoute: ApiReportErrorRoute,
   AskIdRoute: AskIdRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  CodebaseIdRoute: CodebaseIdRoute,
   DemoTanstackQueryRoute: DemoTanstackQueryRoute,
   KanbanIdRoute: KanbanIdRoute,
   PrdIdRoute: PrdIdRoute,

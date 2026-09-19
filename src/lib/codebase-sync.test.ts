@@ -17,6 +17,7 @@ import {
 	checkSnapshotCompletion,
 	cliHandshakeRequestSchema,
 	cliHandshakeResponseSchema,
+	codebaseAnalysisStatusSchema,
 	fileChunkRequestSchema,
 	getSessionUsability,
 	hasSyncCapability,
@@ -1054,6 +1055,83 @@ describe("safe sync error messages (Task 5 carry-over)", () => {
 		const sanitized = sanitizeSyncErrorMessage(long);
 		expect(sanitized?.length).toBeLessThanOrEqual(500);
 		expect(sanitized).not.toContain("\0");
+	});
+});
+
+describe("analysis retry rollback (Task 6)", () => {
+	it("allows analyzing -> uploaded when an analysis attempt fails", () => {
+		expect(canTransitionSyncStatus("analyzing", "uploaded")).toBe(true);
+		expect(() => assertSyncTransition("analyzing", "uploaded")).not.toThrow();
+	});
+
+	it("keeps ready, failed, and expired terminal after the rollback edge", () => {
+		for (const from of ["ready", "failed", "expired"] as const) {
+			expect(canTransitionSyncStatus(from, "uploaded")).toBe(false);
+			expect(canTransitionSyncStatus(from, "analyzing")).toBe(false);
+		}
+	});
+
+	it("still rejects unrelated backward transitions", () => {
+		expect(canTransitionSyncStatus("analyzing", "uploading")).toBe(false);
+		expect(canTransitionSyncStatus("ready", "analyzing")).toBe(false);
+	});
+});
+
+describe("analysis status DTO (Task 6)", () => {
+	it("validates pending, ready, and failed analysis statuses", () => {
+		for (const status of ["pending", "ready", "failed"]) {
+			expect(codebaseAnalysisStatusSchema.safeParse(status).success).toBe(true);
+		}
+		expect(codebaseAnalysisStatusSchema.safeParse("analyzing").success).toBe(
+			false,
+		);
+	});
+
+	it("accepts a status response with analysis linkage", () => {
+		const result = syncStatusResponseSchema.safeParse({
+			projectId: "proj_123",
+			sessionId: "sess_123",
+			status: "ready",
+			analysisId: "an_123",
+			analysisStatus: "ready",
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts a status response without analysis linkage", () => {
+		const result = syncStatusResponseSchema.safeParse({
+			projectId: "proj_123",
+			sessionId: "sess_123",
+			status: "uploading",
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects an unknown analysis status", () => {
+		const result = syncStatusResponseSchema.safeParse({
+			projectId: "proj_123",
+			sessionId: "sess_123",
+			status: "ready",
+			analysisStatus: "done",
+		});
+		expect(result.success).toBe(false);
+	});
+});
+
+describe("codebase route entry (Task 6)", () => {
+	it("denies greenfield projects from entering the codebase route", () => {
+		expect(isSyncCapableProject({ projectMode: "greenfield" })).toBe(false);
+	});
+
+	it("allows existing-codebase projects to enter the codebase route", () => {
+		expect(isSyncCapableProject({ projectMode: "existing_codebase" })).toBe(
+			true,
+		);
+	});
+
+	it("denies projects without an explicit existing-codebase mode", () => {
+		expect(isSyncCapableProject({})).toBe(false);
+		expect(isSyncCapableProject({ projectMode: null })).toBe(false);
 	});
 });
 

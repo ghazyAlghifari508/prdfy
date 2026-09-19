@@ -29,7 +29,12 @@ export const existingCodebaseProjectModeSchema = z.enum(
 // uploading → uploaded → analyzing → ready. Any active state may move to
 // failed or expired (session expiry is time-based, not CLI-reported).
 // Terminal states (ready, failed, expired) have no outgoing transitions; a
-// retry creates a new session/attempt instead of mutating a terminal record.
+// sync retry creates a new session/attempt instead of mutating a terminal
+// record. One documented exception: analyzing → uploaded. An analysis attempt
+// is not an upload — when the model call fails, the snapshot underneath is
+// still uploaded and valid, so the session returns to `uploaded` where a
+// fresh analysis record (never an in-place update) may be requested. Sync
+// transport failures still move to `failed` and require a new session.
 
 export const CODEBASE_SYNC_STATUSES = [
 	"waiting_for_cli",
@@ -80,6 +85,8 @@ export const CODEBASE_ANALYSIS_STATUSES = [
 export type CodebaseAnalysisStatus =
 	(typeof CODEBASE_ANALYSIS_STATUSES)[number];
 
+export const codebaseAnalysisStatusSchema = z.enum(CODEBASE_ANALYSIS_STATUSES);
+
 type SyncTransitionMap = Record<
 	CodebaseSyncStatus,
 	readonly CodebaseSyncStatus[]
@@ -92,7 +99,10 @@ const SYNC_TRANSITIONS: SyncTransitionMap = {
 	filtering: ["uploading", "failed", "expired"],
 	uploading: ["uploaded", "failed", "expired"],
 	uploaded: ["analyzing", "failed", "expired"],
-	analyzing: ["ready", "failed", "expired"],
+	// analyzing → uploaded is the analysis-retry rollback only (Task 6): the
+	// snapshot stays `uploaded`, and the next attempt writes a fresh analysis
+	// record. Terminal states below keep zero outgoing transitions.
+	analyzing: ["uploaded", "ready", "failed", "expired"],
 	ready: [],
 	failed: [],
 	expired: [],
@@ -187,7 +197,17 @@ export const syncStatusResponseSchema = z.object({
 	excludedCount: z.number().int().nonnegative().optional(),
 	errorCode: z.string().min(1).nullable().optional(),
 	errorMessage: z.string().min(1).nullable().optional(),
+	// Latest snapshot bound to the polled session, when one exists. Lets the
+	// review page scope its analysis read to the current attempt so a
+	// retry-sync never renders a stale review from a previous session.
+	snapshotId: z.string().min(1).nullable().optional(),
+	// Snapshot creation timestamp ("Waktu sync" in the review page).
+	snapshotCreatedAt: z.string().datetime().optional(),
 	analysisId: z.string().min(1).nullable().optional(),
+	// Latest analysis status for the snapshot (pending while the model runs,
+	// ready on success, failed when retryable). Drives the review/retry UI;
+	// absent when no analysis has been requested yet.
+	analysisStatus: codebaseAnalysisStatusSchema.optional(),
 	createdAt: z.string().datetime().optional(),
 	updatedAt: z.string().datetime().optional(),
 	expiresAt: z.string().datetime().optional(),

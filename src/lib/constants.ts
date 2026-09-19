@@ -73,6 +73,17 @@ export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
 // Maximum user-facing sync error message length served to browsers. Longer
 // server-written messages are truncated so status polling stays bounded.
 export const CODEBASE_MAX_ERROR_MESSAGE_CHARS = 500;
+// Maximum source-context characters fed to the analysis model per attempt.
+// Snapshot rows stay the source of truth; the prompt carries a bounded
+// excerpt and marks truncation explicitly.
+export const CODEBASE_ANALYSIS_MAX_CONTEXT_CHARS = 60_000;
+// Token headroom for analysis generation. Mirrors the ask/options budget:
+// reasoning models spend from the same maxOutputTokens budget before any
+// JSON content is emitted.
+export const CODEBASE_ANALYSIS_MAX_TOKENS = 12_000;
+// Maximum manifest entries listed in the analysis prompt. Overflow is marked
+// explicitly so the model never mistakes a truncated list for the full tree.
+export const CODEBASE_ANALYSIS_MAX_MANIFEST_ENTRIES = 500;
 
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.
