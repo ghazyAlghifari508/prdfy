@@ -1,0 +1,1 @@
+ALTER TABLE "codebase_ask_handoffs" ADD COLUMN "state" jsonb;

@@ -1,5 +1,12 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Check, ChevronDown, Monitor, Smartphone } from "lucide-react";
+import {
+	Check,
+	ChevronDown,
+	FolderGit2,
+	Monitor,
+	Plus,
+	Smartphone,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { CreditExhaustedModal } from "@/components/chat/credit-exhausted-modal";
 import {
@@ -11,6 +18,10 @@ import {
 import { useTypingPlaceholder } from "@/hooks/use-typing-placeholder";
 import { useUserPlan } from "@/hooks/use-user-plan";
 import { authClient } from "@/lib/auth-client";
+import {
+	getPendingSyncPayloadKey,
+	type SyncPromptPayload,
+} from "@/lib/codebase-sync";
 import {
 	HOME_DRAFT_DEBOUNCE_MS,
 	MAX_PROMPT_LENGTH,
@@ -29,6 +40,37 @@ import {
 import { cn } from "@/lib/utils";
 import { PLAN_CREDITS } from "@/types/database";
 
+// Home project-mode selector (unit-tested in ./-home-mode.test.ts).
+// Greenfield keeps the existing Home → /ask/$id flow byte-identical;
+// existing_codebase sends the mode with the prompt and routes to /codebase/$id.
+export const HOME_PROJECT_MODE_OPTIONS = [
+	{ id: "greenfield", label: "Produk baru" },
+	{ id: "existing_codebase", label: "Codebase existing" },
+] as const;
+
+export type HomeProjectMode = (typeof HOME_PROJECT_MODE_OPTIONS)[number]["id"];
+
+// Post-creation routing: existing-codebase enters the sync flow, everything
+// else (including legacy responses without a mode) keeps the /ask/$id route.
+export function decideHomePostCreationTarget(project: {
+	id: string;
+	projectMode?: string | null;
+}): { to: "/ask/$id" | "/codebase/$id"; params: { id: string } } {
+	if (project.projectMode === "existing_codebase") {
+		return { to: "/codebase/$id", params: { id: project.id } };
+	}
+	return { to: "/ask/$id", params: { id: project.id } };
+}
+
+// Credit precheck gate: block only on a known-zero balance. Unknown or
+// unlimited balances fail open here — the server still enforces with 403 at
+// generate time.
+export function shouldBlockProjectCreationOnCredits(
+	remaining: number | "unlimited" | null | undefined,
+): boolean {
+	return remaining === 0;
+}
+
 interface ChatInputProps {
 	className?: string;
 	initialValue?: string;
@@ -45,6 +87,7 @@ export function ChatInput({
 	const [message, setMessage] = useState(() => getHomeDraft());
 	const [focused, setFocused] = useState(false);
 	const [isMobileMode, setIsMobileMode] = useState(false);
+	const [projectMode, setProjectMode] = useState<HomeProjectMode>("greenfield");
 	const [language, setLanguage] = useState<OutputLanguage>(() =>
 		getAskLanguage(),
 	);
@@ -114,7 +157,7 @@ export function ChatInput({
 		// not after redirect to empty PRD/question page.
 		try {
 			const freshPlan = await refetchPlan();
-			if (freshPlan.data?.remaining === 0) {
+			if (shouldBlockProjectCreationOnCredits(freshPlan.data?.remaining)) {
 				setCreditsExhaustedMsg(
 					"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
 				);
@@ -128,16 +171,40 @@ export function ChatInput({
 			const res = await fetch("/api/projects", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message: enrichedPrompt, language }),
+				body: JSON.stringify({
+					message: enrichedPrompt,
+					language,
+					projectMode,
+				}),
 			});
 			const project = (await res.json().catch(() => ({}))) as {
 				id?: string;
 				error?: string;
+				projectMode?: string | null;
+				sync?: SyncPromptPayload;
 			};
 			if (!res.ok || !project.id)
 				throw new Error(project.error || "Gagal membuat proyek");
 			clearHomeDraft();
-			navigate({ to: "/ask/$id", params: { id: project.id } });
+			// Existing-codebase enters the sync flow: stash the one-time sync
+			// payload for /codebase/$id (consumed once to open the agent
+			// modal). Greenfield keeps the exact /ask/$id navigation.
+			const target = decideHomePostCreationTarget({
+				id: project.id,
+				projectMode: project.projectMode ?? projectMode,
+			});
+			if (target.to === "/codebase/$id" && project.sync) {
+				try {
+					sessionStorage.setItem(
+						getPendingSyncPayloadKey(project.id),
+						JSON.stringify(project.sync),
+					);
+				} catch {
+					// Storage blocked/full — the codebase page falls back to
+					// manual "Mulai sync", so creation still succeeds.
+				}
+			}
+			navigate({ to: target.to, params: target.params });
 		} catch (err) {
 			console.error("Create project error:", err);
 			setPromptError("Gagal membuat proyek. Coba lagi.");
@@ -207,6 +274,41 @@ export function ChatInput({
 								Web
 							</button>
 						</div>
+					</div>
+
+					{/* Project mode selector: Produk baru | Codebase existing */}
+					<div className="flex items-center gap-0.5 self-start rounded-md bg-charcoal p-1 shadow-[var(--shadow-inset)]">
+						{HOME_PROJECT_MODE_OPTIONS.map((option) => {
+							const active = projectMode === option.id;
+							const Icon = option.id === "greenfield" ? Plus : FolderGit2;
+							return (
+								<button
+									key={option.id}
+									type="button"
+									id={
+										option.id === "greenfield"
+											? "home-mode-greenfield"
+											: "home-mode-existing-codebase"
+									}
+									onClick={() => setProjectMode(option.id)}
+									title={
+										option.id === "greenfield"
+											? "Buat PRD dari ide produk baru"
+											: "Rencanakan fitur untuk codebase yang sudah ada"
+									}
+									aria-pressed={active}
+									className={cn(
+										"flex items-center gap-1.5 rounded px-2.5 py-1 font-inter text-[11px] font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+										active
+											? "border border-iron/50 bg-iron text-snow"
+											: "border border-transparent text-fog hover:text-snow",
+									)}
+								>
+									<Icon size={12} />
+									{option.label}
+								</button>
+							);
+						})}
 					</div>
 
 					{/* Main input area */}

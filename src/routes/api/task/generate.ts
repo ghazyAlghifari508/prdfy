@@ -2,6 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { projects, subscriptions } from "@/db/schema";
+import {
+	buildCodebasePromptBlock,
+	getProjectGenerationContext,
+	linkGenerationContext,
+} from "@/lib/codebase-generation-context";
 import { CLAIM_POLL_MS, CLAIM_RETRY_MS } from "@/lib/constants";
 import { checkCredits, consumeCredit, hasFullWorkflow } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
@@ -99,7 +104,11 @@ export const Route = createFileRoute("/api/task/generate")({
 				await recordRequest(user.id, "api_call");
 
 				const [project] = await db
-					.select({ id: projects.id, language: projects.language })
+					.select({
+						id: projects.id,
+						language: projects.language,
+						projectMode: projects.projectMode,
+					})
 					.from(projects)
 					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
 					.limit(1);
@@ -156,6 +165,10 @@ export const Route = createFileRoute("/api/task/generate")({
 						let eventDone = false;
 						let eventErrored = false;
 						let fullResponse = "";
+						// Task 8 snapshot identity, filled when the system
+						// prompt is built and read back in safeDone.
+						let codebaseSnapshotId: string | undefined;
+						let codebaseAnalysisId: string | undefined;
 
 						const emit = (payload: Record<string, unknown>) => {
 							try {
@@ -195,7 +208,18 @@ export const Route = createFileRoute("/api/task/generate")({
 									} catch {}
 									return;
 								}
+								// Full-replace semantics preserved: saveTaskTree
+								// deletes + reinserts (no version change).
 								const saveResult = await saveTaskTree(projectId, taskTree);
+								if (codebaseSnapshotId && saveResult.success) {
+									// Task 8: link snapshot identity (non-fatal,
+									// no credit change — Task generate still burns 1).
+									await linkGenerationContext(
+										projectId,
+										codebaseSnapshotId,
+										codebaseAnalysisId,
+									);
+								}
 								if (!saveResult.success) {
 									// Release the claim before the terminal event — same as the
 									// invalid-JSON branch above — or the project stays
@@ -291,8 +315,27 @@ export const Route = createFileRoute("/api/task/generate")({
 								if (e instanceof Error && e.name === "AbortError") throw e;
 								/* ponytail: optional grounding must never block generation */
 							}
+							// Task 8: bounded snapshot-bound context via the shared
+							// builder. "" for greenfield/not-ready (no-op).
+							// Consumes no credits.
+							let codebaseBlock = "";
+							if (project.projectMode === "existing_codebase") {
+								try {
+									const generationContext =
+										await getProjectGenerationContext(projectId);
+									if (generationContext) {
+										codebaseBlock = buildCodebasePromptBlock(generationContext);
+										codebaseSnapshotId = generationContext.snapshotId;
+										codebaseAnalysisId =
+											generationContext.analysisId ?? undefined;
+									}
+								} catch (e) {
+									if (e instanceof Error && e.name === "AbortError") throw e;
+									/* ponytail: optional context must never block generation */
+								}
+							}
 							const projectLanguage = normalizeLanguage(project.language);
-							const systemPrompt = `${TASK_GENERATION_PROMPT}\n${getLanguageDirective(projectLanguage, "task")}\n${grounded}\n\n--- ACCEPTANCE CRITERIA ---\n${acMarkdown}`;
+							const systemPrompt = `${TASK_GENERATION_PROMPT}\n${getLanguageDirective(projectLanguage, "task")}\n${grounded}${codebaseBlock}\n\n--- ACCEPTANCE CRITERIA ---\n${acMarkdown}`;
 							const messages: Array<{
 								role: "system" | "user" | "assistant";
 								content: string;

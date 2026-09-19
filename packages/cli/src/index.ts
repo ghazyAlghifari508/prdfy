@@ -13,8 +13,10 @@
  *   prdfy kanban <projectId>
  */
 
+import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { acCommand } from "./commands/ac.js";
+import { codebaseSyncAction } from "./commands/codebase.js";
 import { exportRulesCommand } from "./commands/export.js";
 import { kanbanCommand } from "./commands/kanban.js";
 import { loginCommand } from "./commands/login.js";
@@ -26,13 +28,15 @@ import {
 	taskNextCommand,
 	taskUpdateCommand,
 } from "./commands/task.js";
+import { CLI_VERSION } from "./lib/version.js";
 
-const program = new Command();
+/** Shared program instance (exported so wiring tests can parse argv). */
+export const program = new Command();
 
 program
 	.name("prdfy")
 	.description("CLI tool for PrdFy — manage projects and tasks from terminal")
-	.version("2.0.0");
+	.version(CLI_VERSION);
 
 // prdfy login
 program
@@ -110,6 +114,23 @@ program
 	.description("Show kanban board in terminal")
 	.action(kanbanCommand);
 
+// prdfy codebase
+const codebaseCmd = program
+	.command("codebase")
+	.description("Codebase commands");
+codebaseCmd
+	.command("sync")
+	.description("Sync a filtered local repository snapshot to PrdFy")
+	.requiredOption("--project-id <id>", "Project UUID")
+	.requiredOption(
+		"--sync-token <token>",
+		"Project-scoped sync token (passed in memory, never stored)",
+	)
+	.option("--root <path>", "Repository root (default: current directory)")
+	.option("--output <mode>", "Output mode (human|json)", "human")
+	.option("--api-url <url>", "API base URL")
+	.action(codebaseSyncAction);
+
 // prdfy export
 const exportCmd = program
 	.command("export")
@@ -123,4 +144,11 @@ exportCmd
 	.option("--format <format>", "Output format (agents|claude|cursor)")
 	.action(exportRulesCommand);
 
-program.parse(process.argv);
+// Parse only when executed as the CLI entrypoint; importing this module
+// (e.g. wiring tests) must not consume the importer's argv.
+const invokedAsMain =
+	typeof process.argv[1] === "string" &&
+	import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedAsMain) {
+	program.parse(process.argv);
+}

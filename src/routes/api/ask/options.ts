@@ -1,8 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getRequestHeaders } from "@tanstack/react-start/server";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { projects, subscriptions } from "@/db/schema";
+import {
+	askHandoffSchema,
+	buildCodebasePromptBlock,
+	getAskHandoff,
+	getProjectGenerationContext,
+	resolveActiveSnapshotId,
+	saveAskHandoff,
+} from "@/lib/codebase-generation-context";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { ASK_OPTIONS_GENERATION_PROMPT } from "@/lib/prompts-ask";
@@ -34,15 +41,32 @@ export const Route = createFileRoute("/api/ask/options")({
 					prompt?: string;
 					platform?: string;
 					language?: string;
+					action?: string;
+					handoff?: unknown;
 				};
-				const { projectId, prompt, platform, language: reqLang } = body;
+				const {
+					projectId,
+					prompt,
+					platform,
+					language: reqLang,
+					action,
+					handoff,
+				} = body;
 				if (!projectId)
 					return Response.json(
 						{ error: "Project ID required" },
 						{ status: 400 },
 					);
-				if (!prompt || typeof prompt !== "string" || prompt.trim().length < 3) {
-					return Response.json({ error: "Prompt required" }, { status: 400 });
+				const isHandoffAction =
+					action === "save-handoff" || action === "get-handoff";
+				if (!isHandoffAction) {
+					if (
+						!prompt ||
+						typeof prompt !== "string" ||
+						prompt.trim().length < 3
+					) {
+						return Response.json({ error: "Prompt required" }, { status: 400 });
+					}
 				}
 
 				const [sub] = await db
@@ -65,16 +89,90 @@ export const Route = createFileRoute("/api/ask/options")({
 				await recordRequest(user.id, "api_call");
 
 				const [project] = await db
-					.select({ id: projects.id, language: projects.language })
+					.select({
+						id: projects.id,
+						language: projects.language,
+						projectMode: projects.projectMode,
+					})
 					.from(projects)
 					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
+				// Task 8 Ask handoff (existing-codebase only): authoritative
+				// server-side copy of answers/compiled prompt so refresh and
+				// multi-device access keep them. sessionStorage stays for UI
+				// continuity. Greenfield never takes this branch and consumes
+				// no credits here (ask actions are credit-free).
+				if (action === "save-handoff") {
+					if (project.projectMode !== "existing_codebase")
+						return Response.json(
+							{ error: "Handoff hanya untuk proyek existing codebase" },
+							{ status: 400 },
+						);
+					const parsed = askHandoffSchema.safeParse({
+						...(typeof handoff === "object" && handoff !== null ? handoff : {}),
+						projectId,
+					});
+					if (!parsed.success)
+						return Response.json(
+							{ error: "Handoff tidak valid" },
+							{ status: 400 },
+						);
+					try {
+						// Snapshot write-through (Task 9): stamp the handoff with
+						// the snapshot that is active at submit time for traceability.
+						// No ready snapshot saves unstamped; a database failure fails
+						// the save rather than silently losing identity. Generation
+						// still resolves the active snapshot at call time.
+						const activeSnapshotId =
+							parsed.data.snapshotId ??
+							(await resolveActiveSnapshotId(projectId));
+						await saveAskHandoff(user.id, {
+							...parsed.data,
+							...(activeSnapshotId ? { snapshotId: activeSnapshotId } : {}),
+						});
+					} catch (e) {
+						console.error("ask handoff save failed:", e);
+						return Response.json(
+							{ error: "Gagal menyimpan handoff" },
+							{ status: 500 },
+						);
+					}
+					return Response.json({ saved: true });
+				}
+				if (action === "get-handoff") {
+					if (project.projectMode !== "existing_codebase")
+						return Response.json(
+							{ error: "Handoff hanya untuk proyek existing codebase" },
+							{ status: 400 },
+						);
+					const saved = await getAskHandoff(projectId, user.id);
+					if (!saved)
+						return Response.json(
+							{ error: "Handoff tidak ditemukan" },
+							{ status: 404 },
+						);
+					return Response.json({ handoff: saved });
+				}
+
 				const projectLanguage = normalizeLanguage(reqLang || project.language);
 				const platformLabel = platform === "mobile" ? "Mobile App" : "Web App";
-				const systemPrompt = `${ASK_OPTIONS_GENERATION_PROMPT}\n${getLanguageDirective(projectLanguage, "ask")}`;
+				// Task 8 contextual questions: snapshot-bound context is appended
+				// only for existing-codebase projects with ready analysis. Null
+				// (greenfield) appends "" so the prompt stays byte-identical.
+				let codebaseBlock = "";
+				if (project.projectMode === "existing_codebase") {
+					try {
+						codebaseBlock = buildCodebasePromptBlock(
+							await getProjectGenerationContext(projectId),
+						);
+					} catch (e) {
+						console.warn("ask codebase context skipped:", e);
+					}
+				}
+				const systemPrompt = `${ASK_OPTIONS_GENERATION_PROMPT}\n${getLanguageDirective(projectLanguage, "ask")}${codebaseBlock}`;
 				const messages: Array<{
 					role: "system" | "user" | "assistant";
 					content: string;

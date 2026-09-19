@@ -59,6 +59,59 @@ export const PDF_STYLES = {
 export const KANBAN_SSE_INTERVAL_MS = 3_000;
 export const KANBAN_POLL_INTERVAL_MS = 10_000;
 
+// === Existing codebase sync (MVP locked decisions) ===
+// Browser polls the persisted sync status; no sync SSE endpoint in MVP.
+export const CODEBASE_SYNC_POLL_INTERVAL_MS = 2_000;
+// A sync session (and its credential) expires after 30 minutes.
+export const CODEBASE_SYNC_SESSION_EXPIRY_MS = 30 * 60 * 1000;
+// Transport bounds enforced by both CLI and server.
+export const CODEBASE_MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
+export const CODEBASE_MAX_FILE_BYTES = 1024 * 1024;
+export const CODEBASE_MAX_CHUNK_BYTES = 256 * 1024;
+// Minimum supported CLI version for `prdfy codebase sync`.
+export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
+// Maximum user-facing sync error message length served to browsers. Longer
+// server-written messages are truncated so status polling stays bounded.
+export const CODEBASE_MAX_ERROR_MESSAGE_CHARS = 500;
+// Maximum source-context characters fed to the analysis model per attempt.
+// Snapshot rows stay the source of truth; the prompt carries a bounded
+// excerpt and marks truncation explicitly.
+export const CODEBASE_ANALYSIS_MAX_CONTEXT_CHARS = 60_000;
+// Token headroom for analysis generation. Mirrors the ask/options budget:
+// reasoning models spend from the same maxOutputTokens budget before any
+// JSON content is emitted.
+export const CODEBASE_ANALYSIS_MAX_TOKENS = 12_000;
+// Maximum manifest entries listed in the analysis prompt. Overflow is marked
+// explicitly so the model never mistakes a truncated list for the full tree.
+export const CODEBASE_ANALYSIS_MAX_MANIFEST_ENTRIES = 500;
+// === Existing-codebase generation grounding (Task 8) ===
+// Bounded snapshot-bound context injected into Ask/PRD/AC/Task prompts via
+// one formatting boundary (buildCodebasePromptBlock). Null context (greenfield)
+// is a no-op so greenfield prompts stay byte-identical.
+export const CODEBASE_GENERATION_MAX_CONTEXT_CHARS = 6_000;
+export const CODEBASE_GENERATION_MAX_PATHS = 40;
+export const CODEBASE_GENERATION_MAX_FINDINGS = 5;
+export const CODEBASE_GENERATION_MAX_PROMPT_CHARS = 2_000;
+export const CODEBASE_GENERATION_MAX_ANSWER_CHARS = 1_000;
+// Per-section caps inside the bounded block (Task 9 hardening): the global
+// char ceiling alone would let one oversized section (e.g. a huge analysis
+// summary) silently crowd out constraints/findings. Snapshot identity stays
+// above truncation (buildCodebasePromptBlock), so identity always survives.
+export const CODEBASE_GENERATION_MAX_SUMMARY_CHARS = 2_000;
+export const CODEBASE_GENERATION_MAX_CONSTRAINTS = 10;
+// === Ask handoff persistence (Task 8) ===
+// Authoritative Ask answers/compiled prompt stored server-side for
+// existing-codebase projects so refresh and multi-device access keep them.
+// sessionStorage remains for UI continuity.
+export const CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS = 8_000;
+export const CODEBASE_ASK_HANDOFF_MAX_ANSWERS = 60;
+export const CODEBASE_ASK_HANDOFF_MAX_STATE_CHARS = 20_000;
+export const CODEBASE_ASK_HANDOFF_MAX_OPTIONS = 8;
+// Upper bound for the best-effort handoff save at Ask submit (Task 9): the
+// save must never stall navigation to PRD. Abort/timeout/failure all fall
+// through; sessionStorage already preserves UI continuity.
+export const CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS = 8_000;
+
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.
 export const BILLING_PERIOD_DAYS = 30;

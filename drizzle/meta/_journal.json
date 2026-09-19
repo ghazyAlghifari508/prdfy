@@ -64,6 +64,34 @@
       "when": 1787756876548,
       "tag": "0008_add_admin_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789801295920,
+      "tag": "0009_condemned_luke_cage",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789806063454,
+      "tag": "0010_chemical_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789809830904,
+      "tag": "0011_legal_wolverine",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789809968890,
+      "tag": "0012_young_luminals",
+      "breakpoints": true
     }
   ]
 }

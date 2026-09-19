@@ -19,5 +19,9 @@ todos.json
 # local DB row backups (contain user content)
 .backups/
 
+# test reports
+playwright-report/
+test-results/
+
 # legacy Claude Code agent config (migrated to .opencode/)
 .claude/
