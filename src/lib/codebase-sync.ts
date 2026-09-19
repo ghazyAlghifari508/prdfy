@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { CODEBASE_CLI_MIN_VERSION, CODEBASE_MAX_FILE_BYTES } from "./constants";
 
@@ -48,6 +47,32 @@ export const CODEBASE_SYNC_TERMINAL_STATUSES: readonly CodebaseSyncStatus[] = [
 	"failed",
 	"expired",
 ] as const;
+
+// === Persisted row vocabularies ===
+// `codebase_snapshots.status` mirrors the sync flow from upload onward;
+// `codebase_analyses.status` is a separate small lifecycle. Both are
+// documented here so schema defaults never drift into unlisted literals.
+
+export const CODEBASE_SNAPSHOT_STATUSES = [
+	"uploading",
+	"uploaded",
+	"analyzing",
+	"ready",
+	"failed",
+	"expired",
+] as const;
+
+export type CodebaseSnapshotStatus =
+	(typeof CODEBASE_SNAPSHOT_STATUSES)[number];
+
+export const CODEBASE_ANALYSIS_STATUSES = [
+	"pending",
+	"ready",
+	"failed",
+] as const;
+
+export type CodebaseAnalysisStatus =
+	(typeof CODEBASE_ANALYSIS_STATUSES)[number];
 
 type SyncTransitionMap = Record<
 	CodebaseSyncStatus,
@@ -105,24 +130,20 @@ export function assertSyncTransition(
 // === Path safety ===
 // Manifest/source payloads must carry repository-relative paths only: no
 // absolute paths, no `..` escapes, no empty values, no null bytes.
+// Backslashes are normalized to `/` first so Windows absolute (`\abs`,
+// `C:\...`), UNC (`\\share`), drive-relative (`C:foo`), and
+// backslash-traversal (`foo\..\evil`) payloads cannot bypass the check.
 
 export function isSafeRelativePath(path: string): boolean {
 	if (!path || path.length === 0) return false;
 	if (path.includes("\0")) return false;
-	if (path.startsWith("/") || /^[a-zA-Z]:/.test(path)) return false;
-	const segments = path.split("/");
+	const normalized = path.replace(/\\/g, "/");
+	if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) return false;
+	const segments = normalized.split("/");
 	for (const segment of segments) {
 		if (segment === "" || segment === "." || segment === "..") return false;
 	}
 	return true;
-}
-
-// === Credential hashing ===
-// The server persists only the SHA-256 hex of a sync credential; the raw
-// credential is exposed once in the prompt payload and never stored.
-
-export function hashSyncToken(token: string): string {
-	return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
 // === DTOs (Zod boundary validation) ===

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	assertSyncTransition,
+	CODEBASE_ANALYSIS_STATUSES,
+	CODEBASE_SNAPSHOT_STATUSES,
 	type CodebaseSyncStatus,
 	canTransitionSyncStatus,
-	hashSyncToken,
 	isSafeRelativePath,
 	isTerminalSyncStatus,
 	manifestEntrySchema,
@@ -13,6 +14,7 @@ import {
 	syncPromptPayloadSchema,
 	syncStatusResponseSchema,
 } from "./codebase-sync";
+import { hashSyncToken } from "./codebase-sync.server";
 import {
 	CODEBASE_CLI_MIN_VERSION,
 	CODEBASE_MAX_CHUNK_BYTES,
@@ -150,7 +152,14 @@ describe("manifest entry DTO", () => {
 	});
 
 	it("rejects absolute and escaping paths", () => {
-		for (const path of ["/etc/passwd", "../outside.ts", "a/../../b.ts", ""]) {
+		for (const path of [
+			"/etc/passwd",
+			"../outside.ts",
+			"a/../../b.ts",
+			"",
+			"C:\\repo\\evil.ts",
+			"foo\\..\\evil.ts",
+		]) {
 			const result = manifestEntrySchema.safeParse({
 				path,
 				size: 10,
@@ -181,6 +190,14 @@ describe("isSafeRelativePath", () => {
 		expect(isSafeRelativePath("../escape.ts")).toBe(false);
 		expect(isSafeRelativePath("a/../../b.ts")).toBe(false);
 		expect(isSafeRelativePath("")).toBe(false);
+	});
+
+	it("rejects Windows absolute, UNC, and backslash-traversal paths", () => {
+		expect(isSafeRelativePath("\\abs\\path.ts")).toBe(false);
+		expect(isSafeRelativePath("\\\\share\\file.ts")).toBe(false);
+		expect(isSafeRelativePath("foo\\bar\\..\\evil.ts")).toBe(false);
+		expect(isSafeRelativePath("C:\\repo\\file.ts")).toBe(false);
+		expect(isSafeRelativePath("C:relative\\evil.ts")).toBe(false);
 	});
 });
 
@@ -281,5 +298,19 @@ describe("selectActiveSnapshot", () => {
 
 	it("returns null when no snapshot is ready", () => {
 		expect(selectActiveSnapshot([])).toBeNull();
+	});
+});
+
+describe("snapshot and analysis status vocabularies", () => {
+	it("covers the persisted snapshot default", () => {
+		expect(
+			(CODEBASE_SNAPSHOT_STATUSES as readonly string[]).includes("uploading"),
+		).toBe(true);
+	});
+
+	it("covers the persisted analysis default", () => {
+		expect(
+			(CODEBASE_ANALYSIS_STATUSES as readonly string[]).includes("pending"),
+		).toBe(true);
 	});
 });

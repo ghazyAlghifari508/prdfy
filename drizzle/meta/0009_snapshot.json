@@ -1,6 +1,6 @@
 {
-  "id": "da488a68-8043-4cb3-b8aa-4cf2cfc6f6ce",
-  "prevId": "9e4c7a36-d07f-4877-ae2d-0dd5bdce30b7",
+  "id": "4d558667-cb93-4319-ad30-20a7a5411a4f",
+  "prevId": "2f76ef68-8207-4d93-b559-6f447a43fbe5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -496,6 +496,36 @@
           "columns": [
             {
               "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "codebase_generation_contexts_snapshot_id_idx": {
+          "name": "codebase_generation_contexts_snapshot_id_idx",
+          "columns": [
+            {
+              "expression": "snapshot_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "codebase_generation_contexts_analysis_id_idx": {
+          "name": "codebase_generation_contexts_analysis_id_idx",
+          "columns": [
+            {
+              "expression": "analysis_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

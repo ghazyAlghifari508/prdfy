@@ -49,13 +49,6 @@ CREATE TABLE "codebase_sync_sessions" (
 );
 --> statement-breakpoint
 ALTER TABLE "projects" ADD COLUMN "project_mode" text DEFAULT 'greenfield' NOT NULL;--> statement-breakpoint
-ALTER TABLE "projects" ADD COLUMN "language" text DEFAULT 'id';--> statement-breakpoint
-ALTER TABLE "subscriptions" ADD COLUMN "current_period_start" timestamp;--> statement-breakpoint
-ALTER TABLE "subscriptions" ADD COLUMN "current_period_end" timestamp;--> statement-breakpoint
-ALTER TABLE "subscriptions" ADD COLUMN "cancelled_at" timestamp;--> statement-breakpoint
-ALTER TABLE "subscriptions" ADD COLUMN "reminder_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "is_admin" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "banned_at" timestamp;--> statement-breakpoint
 ALTER TABLE "codebase_analyses" ADD CONSTRAINT "codebase_analyses_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "codebase_analyses" ADD CONSTRAINT "codebase_analyses_snapshot_id_codebase_snapshots_id_fk" FOREIGN KEY ("snapshot_id") REFERENCES "public"."codebase_snapshots"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "codebase_generation_contexts" ADD CONSTRAINT "codebase_generation_contexts_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -68,6 +61,8 @@ ALTER TABLE "codebase_sync_sessions" ADD CONSTRAINT "codebase_sync_sessions_user
 CREATE INDEX "codebase_analyses_project_id_idx" ON "codebase_analyses" USING btree ("project_id");--> statement-breakpoint
 CREATE INDEX "codebase_analyses_snapshot_id_idx" ON "codebase_analyses" USING btree ("snapshot_id");--> statement-breakpoint
 CREATE INDEX "codebase_generation_contexts_project_id_idx" ON "codebase_generation_contexts" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX "codebase_generation_contexts_snapshot_id_idx" ON "codebase_generation_contexts" USING btree ("snapshot_id");--> statement-breakpoint
+CREATE INDEX "codebase_generation_contexts_analysis_id_idx" ON "codebase_generation_contexts" USING btree ("analysis_id");--> statement-breakpoint
 CREATE INDEX "codebase_snapshots_project_id_idx" ON "codebase_snapshots" USING btree ("project_id");--> statement-breakpoint
 CREATE INDEX "codebase_snapshots_sync_session_id_idx" ON "codebase_snapshots" USING btree ("sync_session_id");--> statement-breakpoint
 CREATE INDEX "codebase_sync_sessions_project_id_idx" ON "codebase_sync_sessions" USING btree ("project_id");--> statement-breakpoint

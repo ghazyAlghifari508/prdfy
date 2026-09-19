@@ -410,7 +410,8 @@ export const codebaseSnapshots = pgTable(
 		fileCount: integer("file_count").notNull().default(0),
 		excludedCount: integer("excluded_count").notNull().default(0),
 		contentSize: integer("content_size").notNull().default(0),
-		// Snapshot status mirrors the sync status vocabulary.
+		// Snapshot status uses CODEBASE_SNAPSHOT_STATUSES
+		// (see src/lib/codebase-sync.ts); default "uploading" is a member.
 		status: text("status").notNull().default("uploading"),
 		createdAt: timestamp("created_at").defaultNow(),
 	},
@@ -432,6 +433,8 @@ export const codebaseAnalyses = pgTable(
 			.notNull()
 			.references(() => codebaseSnapshots.id, { onDelete: "cascade" }),
 		output: jsonb("output"),
+		// Analysis status uses CODEBASE_ANALYSIS_STATUSES
+		// (see src/lib/codebase-sync.ts); default "pending" is a member.
 		status: text("status").notNull().default("pending"),
 		errorCode: text("error_code"),
 		errorMessage: text("error_message"),
@@ -462,7 +465,13 @@ export const codebaseGenerationContexts = pgTable(
 		createdAt: timestamp("created_at").defaultNow(),
 		updatedAt: timestamp("updated_at").defaultNow(),
 	},
-	(t) => [index("codebase_generation_contexts_project_id_idx").on(t.projectId)],
+	(t) => [
+		// Hot paths: latest context per project, plus snapshot/analysis
+		// lookups when linking generation output back to its source.
+		index("codebase_generation_contexts_project_id_idx").on(t.projectId),
+		index("codebase_generation_contexts_snapshot_id_idx").on(t.snapshotId),
+		index("codebase_generation_contexts_analysis_id_idx").on(t.analysisId),
+	],
 );
 
 // Payments
