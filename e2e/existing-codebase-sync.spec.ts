@@ -83,6 +83,45 @@ test.describe("Existing Codebase Sync Flow", () => {
 		await expect(templateCard).toBeVisible();
 	});
 
+	test("UI: Switching mode clears user prompt and shows codebase feature templates", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		await page.waitForLoadState("networkidle");
+
+		const greenfieldBtn = page.getByRole("button", { name: /produk baru/i });
+		const existingBtn = page.getByRole("button", { name: /codebase existing/i });
+		const textarea = page.getByRole("textbox");
+
+		// Type a prompt in greenfield mode
+		await textarea.fill("Ide startup baru untuk marketplace");
+		await expect(textarea).toHaveValue("Ide startup baru untuk marketplace");
+
+		// Switch to existing codebase mode -> prompt should be cleared
+		await existingBtn.click();
+		await expect(textarea).toHaveValue("");
+
+		// Verify codebase existing callout message is visible
+		await expect(
+			page.getByText(/Tambahkan fitur di codebase kamu:/i),
+		).toBeVisible();
+
+		// Verify codebase feature examples are visible
+		const wishlistCard = page.getByText("Wishlist Produk & Favorit");
+		await expect(wishlistCard).toBeVisible();
+
+		// Clicking example card prefills the textarea
+		await wishlistCard.click();
+		await expect(textarea).toHaveValue(/fitur wishlist produk/i);
+
+		// Switch back to greenfield mode -> prompt should be cleared again
+		await greenfieldBtn.click();
+		await expect(textarea).toHaveValue("");
+		await expect(
+			page.getByText(/Tambahkan fitur di codebase kamu:/i),
+		).not.toBeVisible();
+	});
+
 	test("UI: Unauthenticated visit to /codebase/:id redirects to /login", async ({
 		page,
 	}) => {

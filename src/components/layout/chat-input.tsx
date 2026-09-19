@@ -3,6 +3,7 @@ import {
 	Check,
 	ChevronDown,
 	FolderGit2,
+	Info,
 	Monitor,
 	Plus,
 	Smartphone,
@@ -92,8 +93,13 @@ export function ChatInput({
 	const [projectMode, setProjectMode] = useState<HomeProjectMode>("greenfield");
 
 	const handleModeChange = (mode: HomeProjectMode) => {
-		setProjectMode(mode);
-		onModeChange?.(mode);
+		if (mode !== projectMode) {
+			setProjectMode(mode);
+			setMessage("");
+			clearHomeDraft();
+			setPromptError("");
+			onModeChange?.(mode);
+		}
 	};
 	const [language, setLanguage] = useState<OutputLanguage>(() =>
 		getAskLanguage(),
@@ -326,6 +332,19 @@ export function ChatInput({
 								</div>
 							)}
 						</div>
+
+						{/* Informational callout for existing codebase mode */}
+						{projectMode === "existing_codebase" && (
+							<div className="flex items-start gap-2.5 rounded-md border border-iron/40 bg-charcoal/80 px-3 py-2 text-left">
+								<Info size={14} className="mt-0.5 shrink-0 text-mist" />
+								<p className="font-inter text-[12px] leading-relaxed text-fog">
+									<span className="font-[510] text-mist">
+										Tambahkan fitur di codebase kamu:
+									</span>{" "}
+									Tuliskan fitur baru atau perubahan yang ingin dibuat. PrdFy akan memandu AI agent kamu menjalankan CLI untuk membaca struktur aplikasi, lalu menyusun PRD, AC, dan Task yang presisi sesuai arsitektur yang sudah ada.
+								</p>
+							</div>
+						)}
 
 						{/* Main input area */}
 						<div className="relative flex flex-col rounded-md bg-charcoal shadow-[var(--shadow-inset)] transition-shadow duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] focus-within:shadow-[var(--shadow-focus)]">

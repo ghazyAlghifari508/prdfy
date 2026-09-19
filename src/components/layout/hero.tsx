@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChatInput, type HomeProjectMode } from "./chat-input";
+import { CodebaseFeatureGallery } from "./codebase-feature-gallery";
 import { TemplateGallery } from "./template-gallery";
 
 export function HeroContent() {
@@ -31,11 +32,18 @@ export function HeroContent() {
 						prefillKey={prefillTick}
 						onModeChange={setProjectMode}
 					/>
-					{projectMode === "greenfield" && (
+					{projectMode === "greenfield" ? (
 						<TemplateGallery
 							onSelect={(p, platform) => {
 								setPrefill(p);
 								setPrefillMobile(platform === "mobile");
+								setPrefillTick((t) => t + 1);
+							}}
+						/>
+					) : (
+						<CodebaseFeatureGallery
+							onSelect={(p) => {
+								setPrefill(p);
 								setPrefillTick((t) => t + 1);
 							}}
 						/>

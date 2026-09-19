@@ -48,3 +48,48 @@ export const TEMPLATE_GALLERY = [
 			"Aplikasi POS kasir untuk warung dengan scan barcode, cetak struk Bluetooth, laporan harian, dan manajemen stok. Platform mobile Android, offline-first.",
 	},
 ];
+
+export const CODEBASE_FEATURE_TEMPLATES = [
+	{
+		id: "feature-wishlist",
+		title: "Wishlist Produk & Favorit",
+		category: "Fitur Pengguna",
+		prompt:
+			"Tambahkan fitur wishlist produk agar pengguna yang sedang login dapat menyimpan item favorit mereka, melihat daftar wishlist di halaman profil, serta menambah atau menghapus produk langsung dari katalog dengan update state seketika.",
+	},
+	{
+		id: "feature-export-reports",
+		title: "Ekspor Transaksi CSV & PDF",
+		category: "Laporan & Export",
+		prompt:
+			"Buatkan fungsionalitas ekspor riwayat transaksi ke format file CSV dan PDF dengan filter rentang tanggal, status pesanan, serta pagination data yang efisien tanpa membebani server.",
+	},
+	{
+		id: "feature-oauth-google",
+		title: "Integrasi Google OAuth",
+		category: "Autentikasi",
+		prompt:
+			"Tambahkan opsi autentikasi login dan daftar menggunakan Google OAuth ke sistem akun yang sudah berjalan, dengan sinkronisasi data profil pengguna dan penanganan session cookie yang aman.",
+	},
+	{
+		id: "feature-rbac",
+		title: "Role & Permission (RBAC)",
+		category: "Hak Akses",
+		prompt:
+			"Implementasikan sistem Role-Based Access Control (Admin, Manager, Staff) untuk mengontrol izin akses endpoint API, mutasi database, dan pembatasan menu di dashboard internal.",
+	},
+	{
+		id: "feature-webhook-notifications",
+		title: "Notifikasi Webhook Otomatis",
+		category: "Integrasi",
+		prompt:
+			"Tambahkan pengiriman notifikasi email dan webhook otomatis saat status pembayaran atau pesanan berubah, dilengkapi dengan retry mechanism jika webhook tujuan gagal merespons.",
+	},
+	{
+		id: "feature-dark-mode",
+		title: "Dark Mode & Preferensi Tema",
+		category: "Antarmuka UI",
+		prompt:
+			"Tambahkan dukungan mode gelap dan terang pada antarmuka aplikasi dengan pendeteksian preferensi sistem operasi otomatis serta penyimpanan preferensi tema di level user session.",
+	},
+];
