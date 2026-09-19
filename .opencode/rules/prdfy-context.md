@@ -1,12 +1,12 @@
-# Novaplan — Application Context (WAJIB DIBACA SEBELUM KERJA)
+# PRDFY — Application Context (WAJIB DIBACA SEBELUM KERJA)
 
 **Tujuan rules ini**: Supaya AI PAHAM aplikasi ini sebelum ngoding. Jangan halu. Jangan tebak. Baca ini dulu, baru kerja.
 
 ---
 
-## Apa Novaplan?
+## Apa PRDFY?
 
-Novaplan = AI-powered product development planner. User input ide produk → app generate PRD → AC → Task/Kanban. Self-hosted (own Postgres, local AI router "9router"). Tagline: "Dari ide ke PRD profesional dalam 5 menit, bukan 5 hari."
+PRDFY = AI-powered product development planner. User input ide produk → app generate PRD → AC → Task/Kanban. Self-hosted (own Postgres, local AI router "9router"). Tagline: "Dari ide ke PRD profesional dalam 5 menit, bukan 5 hari."
 
 **Bahasa Indonesia** — semua UI copy, prompt, dan label pakai Bahasa Indonesia. Jangan translate istilah teknis.
 
