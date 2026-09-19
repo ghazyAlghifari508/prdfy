@@ -106,6 +106,7 @@ describe("isValidHistoryUrl", () => {
 	const id = "fca689ff-e194-45eb-b6fa-0188cc327759";
 
 	it("accepts valid project-internal URLs that belong to this project", () => {
+		expect(isValidHistoryUrl(`/codebase/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/prd/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/ac/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/task/${id}`, id)).toBe(true);

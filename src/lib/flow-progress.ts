@@ -66,7 +66,7 @@ export function isTruncatedGeneration(
  * Rejects non-project routes and `javascript:`/malformed URLs outright.
  */
 const HISTORY_URL_RE =
-	/^\/(?:ask|prd|ac|task|kanban)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/;
+	/^\/(?:codebase|ask|prd|ac|task|kanban)\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/;
 
 export function isValidHistoryUrl(url: string, projectId: string): boolean {
 	const m = HISTORY_URL_RE.exec(url);

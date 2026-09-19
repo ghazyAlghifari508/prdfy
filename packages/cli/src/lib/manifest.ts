@@ -142,11 +142,11 @@ const BINARY_EXTENSIONS = new Set([
 const SECRET_CONTENT_PATTERNS: RegExp[] = [
 	/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
 	/AKIA[0-9A-Z]{16}/,
-	/api[_-]?key\s*[:=]/i,
-	/api[_-]?secret\s*[:=]/i,
-	/secret[_-]?key\s*[:=]/i,
-	/aws[_-]?secret\s*[:=]/i,
-	/github[_-]?token\s*[:=]/i,
+	/api[_-]?key\s*[:=]\s*['"`][^'"\r\n\s]{8,}['"`]/i,
+	/api[_-]?secret\s*[:=]\s*['"`][^'"\r\n\s]{8,}['"`]/i,
+	/secret[_-]?key\s*[:=]\s*['"`][^'"\r\n\s]{8,}['"`]/i,
+	/aws[_-]?secret\s*[:=]\s*['"`][^'"\r\n\s]{8,}['"`]/i,
+	/github[_-]?token\s*[:=]\s*['"`][^'"\r\n\s]{8,}['"`]/i,
 	/\bghp_[A-Za-z0-9]{8,}/,
 ];
 

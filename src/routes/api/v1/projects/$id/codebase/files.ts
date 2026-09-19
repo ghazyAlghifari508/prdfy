@@ -68,7 +68,9 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/files")({
 						{ status: 400 },
 					);
 
-				const guard = await guardSyncUpload(request, projectId, body);
+				const guard = await guardSyncUpload(request, projectId, body, {
+					rateLimit: false,
+				});
 				if (!guard.ok)
 					return Response.json(guard.failure.body, {
 						status: guard.failure.status,
