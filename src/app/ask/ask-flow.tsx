@@ -4,6 +4,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
+	type CodebaseAnalysis,
+	inferTechAnswersFromCodebase,
+} from "@/lib/codebase-analysis";
+import {
 	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
 } from "@/lib/constants";
 import {
@@ -48,6 +52,7 @@ interface AskFlowProps {
 	/** Existing-codebase projects persist the Ask handoff server-side.
 	 *  Absent/unknown behaves as greenfield (sessionStorage only). */
 	projectMode?: string | null;
+	analysis?: CodebaseAnalysis | null;
 	initialHandoff?: {
 		projectId: string;
 		answers?: Array<{ question: string; answer: string }>;
@@ -68,6 +73,7 @@ export function AskFlow({
 	projectId,
 	projectName,
 	projectMode: _projectMode,
+	analysis,
 	initialHandoff,
 }: AskFlowProps) {
 	const navigate = useNavigate();
@@ -80,7 +86,16 @@ export function AskFlow({
 	const [nonTechAnswers, setNonTechAnswers] = useState<
 		Record<string, NonTechAnswer>
 	>({});
-	const [techAnswers, setTechAnswers] = useState<TechAnswers>({});
+	const [techAnswers, setTechAnswers] = useState<TechAnswers>(() => {
+		const savedFromHandoff = initialHandoff?.state?.techAnswers;
+		if (savedFromHandoff && Object.keys(savedFromHandoff).length > 0) {
+			return savedFromHandoff;
+		}
+		if (analysis) {
+			return inferTechAnswersFromCodebase(analysis, "web");
+		}
+		return {};
+	});
 	const [skippedTech, setSkippedTech] = useState<Set<string>>(new Set());
 	const [platform, setPlatform] = useState<"web" | "mobile">("web");
 
@@ -115,7 +130,10 @@ export function AskFlow({
 			setSession(saved.session);
 			setQuestions(saved.questions);
 			setNonTechAnswers(saved.nonTechAnswers);
-			setTechAnswers(saved.techAnswers);
+			const baseTech = analysis
+				? inferTechAnswersFromCodebase(analysis, saved.platform)
+				: {};
+			setTechAnswers({ ...baseTech, ...(saved.techAnswers ?? {}) });
 			setSkippedTech(new Set(saved.skippedTech ?? []));
 			setIsLoadingQuestions(false);
 			return;
@@ -139,9 +157,14 @@ export function AskFlow({
 			if (s.nonTechAnswers && typeof s.nonTechAnswers === "object") {
 				setNonTechAnswers(s.nonTechAnswers as Record<string, NonTechAnswer>);
 			}
+			const targetPlatform = (s.platform as "web" | "mobile") || platform;
+			const baseTech = analysis
+				? inferTechAnswersFromCodebase(analysis, targetPlatform)
+				: {};
 			if (s.techAnswers && typeof s.techAnswers === "object") {
 				const t = s.techAnswers as Record<string, unknown>;
 				setTechAnswers({
+					...baseTech,
 					...(typeof t.frontend === "string" ? { frontend: t.frontend } : {}),
 					...(typeof t.backend === "string" ? { backend: t.backend } : {}),
 					...(typeof t.fullstackFramework === "string"
@@ -152,6 +175,8 @@ export function AskFlow({
 						? { deployment: t.deployment }
 						: {}),
 				});
+			} else if (analysis) {
+				setTechAnswers(baseTech);
 			}
 			if (Array.isArray(s.skippedTech)) {
 				setSkippedTech(
@@ -521,10 +546,19 @@ Deployment: ${tech.deployment || defaultChoice}`;
 					</div>
 				) : (
 					<div className="space-y-6 pb-8">
-						<p className="font-inter text-xs text-fog italic">
-							Pilih &ldquo;Gunakan Rekomendasi AI&rdquo; jika tidak yakin, AI
-							akan memilih stack yang paling sesuai untuk aplikasi Anda.
-						</p>
+						{analysis ? (
+							<div className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-3.5 text-xs text-emerald-200">
+								Tech stack otomatis terdeteksi dari codebase kamu (
+								{analysis.framework || analysis.language || "Existing Codebase"}
+								). Pilihan di bawah telah terisi otomatis dan siap digunakan, atau
+								dapat kamu sesuaikan bila diperlukan.
+							</div>
+						) : (
+							<p className="font-inter text-xs text-fog italic">
+								Pilih &ldquo;Gunakan Rekomendasi AI&rdquo; jika tidak yakin, AI
+								akan memilih stack yang paling sesuai untuk aplikasi Anda.
+							</p>
+						)}
 						<div className="grid gap-4 sm:grid-cols-2">
 							<StackDropdown
 								label="Frontend"

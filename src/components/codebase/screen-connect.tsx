@@ -36,7 +36,7 @@ export function ScreenConnect({
 	return (
 		<div className="w-full animate-enter flex flex-col gap-8">
 			{/* Page Head from existing-codebase-flow.html screen 02 */}
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div className="flex flex-col gap-3">
 				<div>
 					<div className="text-[11px] font-mono tracking-widest uppercase text-fog mb-2">
 						NEW PROJECT · EXISTING CODEBASE
@@ -49,10 +49,6 @@ export function ScreenConnect({
 						repository melalui AI coding agent kamu.
 					</p>
 				</div>
-				<span className="inline-flex items-center gap-2 rounded-full border border-iron bg-charcoal/80 px-3 py-1.5 text-xs text-fog backdrop-blur-md self-start sm:self-auto">
-					<span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-					Menunggu koneksi
-				</span>
 			</div>
 
 			{/* Modal-style Container from existing-codebase-flow.html */}
