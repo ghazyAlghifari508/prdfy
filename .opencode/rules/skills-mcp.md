@@ -96,6 +96,12 @@
 | `playwright-best-practices`           | Writing/debugging Playwright                            | Accessibility, API/browser, no arbitrary sleep, trace cleanup                          |
 | `web-design-guidelines`               | Reviewing UI against interface/accessibility guidelines | Audit a UI route/component against an explicit file or pattern                         |
 | `frontend-design`                     | Designing new UI or reshaping visuals                   | Deciding visual direction, type, layout, motion, and self-critique before implementing |
+| `antislop`                            | Anti-AI-slop core filter: 38 rules, Delivery Gate report| Apply core filter across UI, text, and code to eliminate cheap AI tells                |
+| `antislop-ui`                         | UI/visual filter without generic AI slop                | Layout, color, components, decoration, motion, structure for PRDFY surfaces             |
+| `antislop-copywriting`                | Anti-AI writing, copy, headlines, CTAs, tone            | Indonesian UI copy, PRD templates, marketing copy without fluff or fake statistics     |
+| `antislop-human`                      | Human accessibility and contrast validation             | Color contrast checking, keyboard traps, focus visible, interactive state clarity      |
+| `antislop-layoutmobile`               | Responsive layout & mobile adaptation                   | Seamless reflow across 320px to 1440px without horizontal scroll, mobile tap targets   |
+| `antislop-code`                       | Code comments cleanup and hygiene                       | Eliminate generic AI comments, box banners, and clutter without touching actual code   |
 | `ai-sdk`                              | Vercel AI SDK v7 streaming, tool calling, structures    | `streamText`, SSE streaming chunks, model fallback chains                             |
 | `9router`                             | 9router gateway/provider adapter                        | Model discovery, OpenAI-compatible request, key handling, retry/error classification   |
 | `integrate-midtrans-payments`         | Billing/Midtrans operation                              | Snap token creation, signature verification, webhook handler, settlement idempotency   |
