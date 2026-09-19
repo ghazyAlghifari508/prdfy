@@ -45,7 +45,7 @@ Given/When/Then block untuk validasi alur bisnis multi-langkah.
 11. JANGAN berhenti lebih awal. Sesuaikan kedalaman dengan kompleksitas PRD.
 12. Hindari instruksi operator generik — ganti spesifikasi validasi eksak di boundary kontrak.
 13. STATE COVERAGE: untuk setiap fitur dengan antarmuka UI, WAJIB ada kriteria yang mendefinisikan perilaku state loading, empty, error, dan success — termasuk pesan atau tampilan eksaknya.
-14. KONTRAK API: untuk setiap fitur yang menyentuh data/backend, WAJIB ada spesifikasi endpoint minimal: HTTP method, path, payload utama, response code sukses, dan satu skenario error dengan response code/pesan eksak.
+14. KONTRAK DATA & API: untuk fitur dengan backend internal, WAJIB ada spesifikasi endpoint minimal (HTTP method, path, payload utama, response code sukses, dan skenario error). Untuk fitur Frontend-Only / konsumsi API eksternal, WAJIB spesifikasikan endpoint API pihak ketiga atau skema client storage, status response (200, 401, 404, 429, 500), serta visual UI state (loading shimmer, empty state, error toast, success rendering); DILARANG mengarang endpoint backend internal fiktif jika PRD adalah Frontend-Only.
 
 Konteks PRD akan diberikan setelah prompt ini. Generate AC SEKARANG.`;
 

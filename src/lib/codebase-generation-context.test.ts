@@ -124,6 +124,19 @@ describe("buildAnalysisSummary", () => {
 	it("falls back to a placeholder when nothing was detected", () => {
 		expect(buildAnalysisSummary({ projectId: "p", snapshotId: "s" })).toBe("-");
 	});
+
+	it("explicitly notes when database is null (client-side only)", () => {
+		const summary = buildAnalysisSummary({
+			projectId: "p",
+			snapshotId: "s",
+			database: null,
+			framework: "Vue.js",
+		});
+		expect(summary).toContain(
+			"database None (client-side only / external API)",
+		);
+		expect(summary).toContain("framework Vue.js");
+	});
 });
 
 describe("task 8 generation-context bounds", () => {
@@ -248,6 +261,7 @@ describe("task 8 generation-context bounds", () => {
 		expect(block).toContain("Assumption to verify [Auth boundary]");
 		// Model is instructed never to invent paths/architecture.
 		expect(block).toMatch(/jangan mengarang/i);
+		expect(block).toContain("HORMATI framework dan bahasa asli codebase");
 		expect(block.length).toBeLessThanOrEqual(
 			CODEBASE_GENERATION_MAX_CONTEXT_CHARS + 1_000,
 		);

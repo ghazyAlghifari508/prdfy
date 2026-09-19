@@ -3,13 +3,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Check, Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { buildCompiledAskPrompt } from "@/lib/ask-prompt-builder";
 import {
 	type CodebaseAnalysis,
 	inferTechAnswersFromCodebase,
 } from "@/lib/codebase-analysis";
-import {
-	CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
-} from "@/lib/constants";
+import { CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS } from "@/lib/constants";
 import {
 	getAskLanguage,
 	getAskPlatform,
@@ -365,48 +364,29 @@ export function AskFlow({
 
 	const submit = async (tech: TechAnswers) => {
 		const isEn = getAskLanguage() === "en";
-		const skipLabel = isEn ? "(Let AI decide)" : "(Biarkan AI yang memilih)";
-		const defaultChoice = isEn ? "Let AI decide" : "Biarkan AI yang memilih";
-		const fullstackDefault = isEn
-			? "Not used / Let AI decide"
-			: "Tidak dipakai / Biarkan AI yang memilih";
-
-		const nonTechLines = questions.map((q) => {
+		const nonTechQuestionItems = questions.map((q) => {
 			const a = nonTechAnswers[q.id];
-			if (!a || a.skipped || !a.value) return `- ${q.question}: ${skipLabel}`;
-			return `- ${q.question}: ${a.value}`;
+			const picked =
+				a && !a.skipped
+					? Array.isArray(a.values) && a.values.length > 0
+						? a.values.join(", ")
+						: (a.value ?? "")
+					: "";
+			return {
+				question: q.question,
+				answer: picked,
+				skipped: !a || Boolean(a.skipped),
+			};
 		});
 
-		const platformLabel = platform === "mobile" ? "Mobile App" : "Web App";
-		let compiledPrompt = isEn
-			? `Please generate a PRD with the following specifications:
-
-[Platform: ${platformLabel}]
-${promptRef.current}
-
---- Non-Technical Preferences ---
-${nonTechLines.join("\n")}
-
---- Technical Preferences ---
-Frontend: ${tech.frontend || defaultChoice}
-Backend: ${tech.backend || defaultChoice}
-Fullstack Framework: ${tech.fullstackFramework || fullstackDefault}
-Database: ${tech.database || defaultChoice}
-Deployment: ${tech.deployment || defaultChoice}`
-			: `Tolong buatkan PRD dengan spesifikasi berikut:
-
-[Platform: ${platformLabel}]
-${promptRef.current}
-
---- Preferensi Non-Teknis ---
-${nonTechLines.join("\n")}
-
---- Preferensi Teknis ---
-Frontend: ${tech.frontend || defaultChoice}
-Backend: ${tech.backend || defaultChoice}
-Fullstack Framework: ${tech.fullstackFramework || fullstackDefault}
-Database: ${tech.database || defaultChoice}
-Deployment: ${tech.deployment || defaultChoice}`;
+		const compiledPrompt = buildCompiledAskPrompt({
+			platform,
+			language: isEn ? "en" : "id",
+			rawPrompt: promptRef.current,
+			nonTechQuestions: nonTechQuestionItems,
+			techAnswers: tech,
+			skippedTech,
+		});
 
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
 		// Authoritative server handoff: survives refresh and multi-device access.
@@ -553,10 +533,16 @@ Deployment: ${tech.deployment || defaultChoice}`;
 								</div>
 								<div className="flex flex-col gap-0.5">
 									<span className="text-xs font-semibold text-snow">
-										Tech stack otomatis terdeteksi ({analysis.framework || analysis.language || "Existing Codebase"})
+										Tech stack otomatis terdeteksi (
+										{analysis.framework ||
+											analysis.language ||
+											"Existing Codebase"}
+										)
 									</span>
 									<span className="text-xs text-fog leading-relaxed">
-										Pilihan di bawah telah terisi otomatis sesuai arsitektur repositori kamu dan siap digunakan, atau dapat kamu sesuaikan bila diperlukan.
+										Pilihan di bawah telah terisi otomatis sesuai arsitektur
+										repositori kamu dan siap digunakan, atau dapat kamu
+										sesuaikan bila diperlukan.
 									</span>
 								</div>
 							</div>

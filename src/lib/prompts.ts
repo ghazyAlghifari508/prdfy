@@ -17,8 +17,8 @@ const PRD_HEADINGS: Record<"id" | "en", Record<string, string>> = {
 		"6.1": "High-Level Architecture",
 		"6.2": "Tech Stack",
 		"6.3": "Struktur Folder",
-		"7.1": "Daftar Tabel / Collection",
-		"7.2": "Entity Relationship Diagram (ERD)",
+		"7.1": "Daftar Tabel / Data Models & Contracts",
+		"7.2": "Entity Relationship Diagram (ERD) / Data Flow Diagram",
 		"8.1": "Design Constraints",
 		"8.2": "Technical Constraints",
 	},
@@ -38,8 +38,8 @@ const PRD_HEADINGS: Record<"id" | "en", Record<string, string>> = {
 		"6.1": "High-Level Architecture",
 		"6.2": "Tech Stack",
 		"6.3": "Folder Structure",
-		"7.1": "Tables / Collections",
-		"7.2": "Entity Relationship Diagram (ERD)",
+		"7.1": "Tables / Collections & Data Contracts",
+		"7.2": "Entity Relationship Diagram (ERD) / Data Flow Diagram",
 		"8.1": "Design Constraints",
 		"8.2": "Technical Constraints",
 	},
@@ -102,9 +102,9 @@ const PRD_SECTION_TEMPLATE = `<!-- SECTION: Overview -->
 <!-- SECTION: Database Schema -->
 ## 7. Database Schema
 ### 7.1 {7.1}
-(Full prisma/sql schema.)
+(Jika aplikasi memiliki Database internal: full prisma/sql/drizzle schema. Jika Frontend-Only / Client-Side / tanpa database: spesifikasi interface/skema data external API payloads & client storage; DILARANG KERAS mengarang tabel SQL/Prisma fiktif.)
 ### 7.2 {7.2}
-(Mermaid erDiagram with attributes.)
+(Jika ada database: Mermaid erDiagram with attributes. Jika Frontend-Only / tanpa database: Mermaid sequenceDiagram interaksi data: User View -> Component -> State Store -> HTTP Client -> External API.)
 <!-- /SECTION -->
 
 <!-- SECTION: Design & Technical Constraints -->
@@ -134,6 +134,17 @@ export function PRD_SYSTEM_PROMPT(lang: "id" | "en" = "id"): string {
    - Untuk \`sequenceDiagram\`: Participant dengan spasi WAJIB pakai alias: \`participant "User App" as UA\`.
    - Untuk \`erDiagram\`: Entitas huruf besar tanpa spasi. Tipe data standar (\`string\`, \`int\`, \`uuid\`, \`boolean\`, \`timestamp\`). JANGAN sintaks Prisma (\`string[]\`, \`@@unique\`). Kardinalitas valid: \`||--o{\`, \`||--|{\`, \`o{--o{\`.
    - ASCII saja. JANGAN Unicode/emoji di dalam kode mermaid.
+6. **HORMATI STACK & BAHASA ASLI PROYEK (ZERO-ASSUMPTION STACK LOCK)**:
+   - Jika preferensi atau codebase menentukan framework frontend tertentu (misal: Vue.js, Svelte, Angular, Solid, React):
+     * SELURUH arsitektur, struktur file, dan contoh kode WAJIB 100% idiomatis untuk framework tersebut (misal: untuk Vue gunakan Single File Component .vue, Composable useX, Pinia/Vuex, Vue Router; untuk Svelte gunakan .svelte, runes/stores).
+     * DILARANG KERAS mengalihkan stack, mencampuradukkan sintaks (seperti menyuntikkan JSX atau React hooks useState/useEffect ke proyek Vue/Svelte), atau berasumsi bahwa frontend selalu React.
+   - Jika bahasa proyek adalah JavaScript murni (tanpa TypeScript): JANGAN memaksakan sintaks TypeScript (gunakan format interface netral, JSON Schema, atau JSDoc).
+7. **SECTION 7 ADAPTIF (ANTI-HALUSINASI DATABASE)**:
+   - Jika proyek berstatus Fullstack atau memiliki Database internal: tulis skema tabel/collection (Prisma/SQL/Drizzle) di 7.1 dan Mermaid erDiagram di 7.2.
+   - Jika proyek berstatus Frontend-Only, Client-Side Only, atau TIDAK memiliki database internal (termasuk konsumsi API publik/pihak ketiga, atau aplikasi statis):
+     * DILARANG KERAS mengarang/membuat tabel SQL atau skema Prisma fiktif.
+     * Sub-section 7.1 WAJIB berisi: **Spesifikasi Model & Kontrak Payload API Eksternal** (struktur response/request data yang dikonsumsi aplikasi dalam format netral atau interface bahasa proyek) serta **Skema Client Storage** (data yang disimpan di localStorage, sessionStorage, atau IndexedDB).
+     * Sub-section 7.2 WAJIB berisi: **Client Data Flow Diagram** menggunakan Mermaid \`sequenceDiagram\` yang menggambarkan interaksi: User View -> Component -> State Store -> HTTP Client -> External API.
 
 ## KEDALAMAN ADAPTIF:
 Sesuaikan kedalaman dan panjang setiap section dengan KOMPLEKSITAS deskripsi produk dari user. Produk simpel (1-2 fitur) → ringkas dan padat. Produk menengah (3-5 fitur) → kedalaman moderat. Produk kompleks (6+ fitur, banyak integrasi) → mendalam dan detail. SEMUA 8 section WAJIB tetap ada, tapi isinya proporsional.
@@ -174,4 +185,5 @@ Baik, pergantian tech stack dari Next.js ke Laravel telah diterapkan pada bagian
 :::END_UPDATE:::
 
 6. **PENGGUNAAN NAMA SECTION YANG TEPAT**: Pastikan nama section yang ditulis di dalam bracket \`[Nama Section Asli]\` SAMA PERSIS dengan penanda aslinya (Pilih salah satu: Overview, Goals & Success Metrics, Requirements, Core Features, User Flow, Architecture & Tech Stack, Database Schema, Design & Technical Constraints).
-7. **KONTEN LENGKAP DALAM BLOCK**: Meskipun kamu tidak menulis ulang seluruh PRD, di dalam block \`:::UPDATE_SECTION...\` kamu WAJIB menuliskan isi section tersebut secara UTUH dari awal sampai akhir section tersebut (termasuk semua sub-headingnya), jangan ada yang terpotong.`;
+7. **KONTEN LENGKAP DALAM BLOCK**: Meskipun kamu tidak menulis ulang seluruh PRD, di dalam block \`:::UPDATE_SECTION...\` kamu WAJIB menuliskan isi section tersebut secara UTUH dari awal sampai akhir section tersebut (termasuk semua sub-headingnya), jangan ada yang terpotong.
+8. **HORMATI STACK & ARSITEKTUR ASLI**: JANGAN PERNAH mengubah framework proyek (misal dari Vue ke React) atau menambahkan tabel SQL/database internal jika proyek berstatus Frontend-Only, kecuali jika pengguna secara eksplisit meminta migrasi framework atau penambahan backend/database.`;

@@ -57,7 +57,11 @@ export function buildAnalysisSummary(analysis: CodebaseAnalysis): string {
 		parts.push(`package manager ${analysis.packageManager}`);
 	if (analysis.dependencies && analysis.dependencies.length > 0)
 		parts.push(`dependencies ${analysis.dependencies.join(", ")}`);
-	if (analysis.database) parts.push(`database ${analysis.database}`);
+	if (analysis.database) {
+		parts.push(`database ${analysis.database}`);
+	} else if (analysis.database === null) {
+		parts.push("database None (client-side only / external API)");
+	}
 	if (analysis.auth) parts.push(`auth ${analysis.auth}`);
 	for (const entry of analysis.moduleMap ?? []) {
 		parts.push(`${entry.path} (${entry.summary})`);
@@ -190,7 +194,7 @@ export function buildCodebasePromptBlock(
 		CODEBASE_BLOCK_START,
 		`Snapshot sumber: ${context.snapshotId}.`,
 		body,
-		"ATURAN: JANGAN mengarang jalur file, perilaku framework, atau detail arsitektur yang tidak ada di konteks di atas. Gunakan HANYA jalur dari daftar Relevant modules/files. Setiap hal yang tidak pasti adalah asumsi yang wajib diverifikasi — tandai sebagai asumsi, jangan sajikan sebagai fakta.",
+		"ATURAN: JANGAN mengarang jalur file, perilaku framework, atau detail arsitektur yang tidak ada di konteks di atas. Gunakan HANYA jalur dari daftar Relevant modules/files. Setiap hal yang tidak pasti adalah asumsi yang wajib diverifikasi — tandai sebagai asumsi, jangan sajikan sebagai fakta. HORMATI framework dan bahasa asli codebase — JANGAN mengalihkan framework (misal Vue ke React) atau memaksakan TypeScript jika codebase menggunakan JavaScript. Jika database terdeteksi None/client-side, DILARANG membuat skema database internal/SQL.",
 		CODEBASE_BLOCK_END,
 	].join("\n");
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AC_GENERATION_PROMPT } from "../prompts-ac";
 import { extractFeatureSection } from "./ac-service";
 
 describe("extractFeatureSection", () => {
@@ -44,5 +45,22 @@ Dashboard content.
 	it("stops at end of string when it is the last feature", () => {
 		const result = extractFeatureSection(md, "Dashboard");
 		expect(result?.trim().endsWith("Dashboard content.")).toBe(true);
+	});
+});
+
+describe("AC_GENERATION_PROMPT", () => {
+	it("supports external API contracts and forbids backend invention on frontend-only", () => {
+		const prompt = AC_GENERATION_PROMPT("id");
+		expect(prompt).toContain("KONTRAK DATA & API");
+		expect(prompt).toContain("Frontend-Only");
+		expect(prompt).toMatch(
+			/DILARANG mengarang endpoint backend internal fiktif/i,
+		);
+	});
+
+	it("supports English localization", () => {
+		const prompt = AC_GENERATION_PROMPT("en");
+		expect(prompt).toContain("# Acceptance Criteria - [Project Name]");
+		expect(prompt).toContain("KONTRAK DATA & API");
 	});
 });
