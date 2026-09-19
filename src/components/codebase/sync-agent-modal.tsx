@@ -17,10 +17,24 @@ import { CODEBASE_CLI_MIN_VERSION } from "@/lib/constants";
 // the command preview, labels, errors — renders the `<token>` placeholder via
 // buildSyncCommand so the credential can never leak through a screenshot,
 // log, or accidental selection outside the copy action.
-export function buildAgentPrompt(payload: SyncPromptPayload): string {
+export function buildAgentPrompt(
+	payload: SyncPromptPayload,
+	context?: { projectName?: string },
+): string {
 	const syncCommand = `prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`;
-	return [
+	const headerLines = [
 		"Kamu adalah agen AI coding yang berjalan di komputer lokal user. Tugasmu: sinkronkan repositori lokal ke PrdFy memakai CLI resmi.",
+	];
+	if (context?.projectName) {
+		headerLines.push(
+			"",
+			"Fitur yang sedang direncanakan di PrdFy:",
+			`"${context.projectName}"`,
+		);
+	}
+
+	return [
+		...headerLines,
 		"",
 		"Langkah 1 — Cek CLI. Jalankan `prdfy --version`. Jika perintah tidak tersedia, install dulu:",
 		"npm i -g @ghazynabiel/prdfy",
@@ -30,7 +44,7 @@ export function buildAgentPrompt(payload: SyncPromptPayload): string {
 		"",
 		"Langkah 3 — Tinjau file `.prdfyignore` di root repositori. Tambahkan pola eksklusi bila perlu. File ini bersifat lokal — JANGAN commit atau push otomatis.",
 		"",
-		"Langkah 4 — Pastikan kamu berada di root repositori yang benar, lalu jalankan (token berlaku 30 menit, satu sesi):",
+		"Langkah 4 — Pastikan kamu berada di root repositori yang benar, lalu jalankan:",
 		"",
 		syncCommand,
 		"",

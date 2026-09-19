@@ -2,18 +2,8 @@
 
 import { Check, Copy, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { buildAgentPrompt } from "@/components/codebase/sync-agent-modal";
 import type { SyncPromptPayload } from "@/lib/codebase-sync";
-
-export function formatAgentPrompt(payload: SyncPromptPayload): string {
-	return [
-		"Hubungkan codebase ini ke project PrdFy saya.",
-		"",
-		"Gunakan PrdFy CLI untuk menganalisis struktur repository, mendeteksi stack, dan melakukan sync codebase:",
-		`prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`,
-		"",
-		"Jangan mengubah file aplikasi. Abaikan secrets, dependencies, build output, dan file binary. Setelah selesai, laporkan status sync kepada saya.",
-	].join("\n");
-}
 
 interface ScreenConnectProps {
 	projectName: string;
@@ -23,14 +13,14 @@ interface ScreenConnectProps {
 }
 
 export function ScreenConnect({
-	projectName: _projectName,
+	projectName,
 	payload,
 	isStarting = false,
 	onAgentStarted,
 }: ScreenConnectProps) {
 	const [copied, setCopied] = useState(false);
 
-	const promptText = payload ? formatAgentPrompt(payload) : "";
+	const promptText = payload ? buildAgentPrompt(payload, { projectName }) : "";
 
 	const handleCopy = async () => {
 		if (!promptText) return;
@@ -161,10 +151,7 @@ export function ScreenConnect({
 				</div>
 
 				{/* Modal Foot */}
-				<div className="flex items-center justify-between border-t border-graphite bg-charcoal/60 px-5 py-4 sm:px-6">
-					<span className="text-[11px] text-slate">
-						Token aktif untuk satu sesi
-					</span>
+				<div className="flex items-center justify-end border-t border-graphite bg-charcoal/60 px-5 py-4 sm:px-6">
 					<button
 						type="button"
 						onClick={onAgentStarted}

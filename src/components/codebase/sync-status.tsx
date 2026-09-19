@@ -356,40 +356,37 @@ export function SyncStatus({
 					)}
 
 					{/* Footer Bar */}
-					<div className="flex flex-wrap items-center justify-between gap-3 border-t border-graphite pt-4 text-xs text-fog">
-						<p className="text-[11px]">Progress berasal dari event CLI yang nyata.</p>
-						<div className="flex items-center gap-2">
-							{showRetry && onRetrySync && (
-								<button
-									type="button"
-									onClick={onRetrySync}
-									className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
-								>
-									Coba sync ulang
-								</button>
-							)}
+					<div className="flex flex-wrap items-center justify-end gap-2 border-t border-graphite pt-4 text-xs text-fog">
+						{showRetry && onRetrySync && (
+							<button
+								type="button"
+								onClick={onRetrySync}
+								className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
+							>
+								Sync ulang
+							</button>
+						)}
 
-							{showAnalysisRetry && onRetryAnalysis && (
-								<button
-									type="button"
-									onClick={onRetryAnalysis}
-									className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
-								>
-									Analisis ulang
-								</button>
-							)}
+						{showAnalysisRetry && onRetryAnalysis && (
+							<button
+								type="button"
+								onClick={onRetryAnalysis}
+								className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
+							>
+								Analisis ulang
+							</button>
+						)}
 
-							{isReady && onViewReview && (
-								<button
-									type="button"
-									onClick={onViewReview}
-									className="inline-flex items-center gap-1.5 rounded bg-snow px-3.5 py-1.5 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition"
-								>
-									<span>Lihat hasil analisis</span>
-									<span className="font-mono text-xs">-&gt;</span>
-								</button>
-							)}
-						</div>
+						{isReady && onViewReview && (
+							<button
+								type="button"
+								onClick={onViewReview}
+								className="inline-flex items-center gap-1.5 rounded bg-snow px-3.5 py-1.5 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition"
+							>
+								<span>Lihat hasil analisis</span>
+								<span className="font-mono text-xs">-&gt;</span>
+							</button>
+						)}
 					</div>
 				</div>
 			</div>
