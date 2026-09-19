@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { db } from "@/db";
 import { codebaseSyncSessions, projects } from "@/db/schema";
+import { saveAskHandoff } from "@/lib/codebase-generation-context";
 import {
 	buildSyncCommand,
 	type ExistingCodebaseProjectMode,
@@ -64,6 +65,29 @@ export const Route = createFileRoute("/api/projects/")({
 				// deriveProjectName (with AI) again inside the SSE stream, so the
 				// final name is AI-quality — user never sees the rough one.
 				const projectName = deriveProjectNameSync(message);
+				const platform =
+					body?.platform === "mobile" ||
+					(typeof message === "string" &&
+						message.includes("[Platform: Mobile App]"))
+						? "mobile"
+						: "web";
+
+				const initHandoff = async (projId: string) => {
+					try {
+						await saveAskHandoff(user.id, {
+							projectId: projId,
+							answers: [],
+							state: {
+								prompt: message,
+								platform,
+								session: 1,
+								questions: [],
+							},
+						});
+					} catch (e) {
+						console.error("Failed to initialize ask handoff:", e);
+					}
+				};
 
 				if (projectMode === "greenfield") {
 					const [project] = await db
@@ -84,6 +108,7 @@ export const Route = createFileRoute("/api/projects/")({
 							{ error: "Gagal membuat project" },
 							{ status: 500 },
 						);
+					await initHandoff(project.id);
 					return Response.json({
 						id: project.id,
 						name: project.name,
@@ -137,6 +162,7 @@ export const Route = createFileRoute("/api/projects/")({
 						{ error: "Gagal membuat project" },
 						{ status: 500 },
 					);
+				await initHandoff(created.project.id);
 				const sync: SyncPromptPayload = {
 					projectId: id,
 					apiBaseUrl: new URL(request.url).origin,

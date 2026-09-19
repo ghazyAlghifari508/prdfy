@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	advanceStep,
+	isPrdLocked,
 	isTruncatedGeneration,
 	isValidHistoryUrl,
 	resolveHistoryUrl,
@@ -18,6 +19,20 @@ describe("stepRank", () => {
 		expect(stepRank(null)).toBe(stepRank("prd"));
 		expect(stepRank(undefined)).toBe(stepRank("prd"));
 		expect(stepRank("bogus")).toBe(stepRank("prd"));
+	});
+});
+
+describe("isPrdLocked", () => {
+	it("returns false for question, prd, and legacy/null steps", () => {
+		expect(isPrdLocked("question")).toBe(false);
+		expect(isPrdLocked("prd")).toBe(false);
+		expect(isPrdLocked(null)).toBe(false);
+		expect(isPrdLocked(undefined)).toBe(false);
+	});
+
+	it("returns true once project reaches ac or task stages", () => {
+		expect(isPrdLocked("ac")).toBe(true);
+		expect(isPrdLocked("task")).toBe(true);
 	});
 });
 

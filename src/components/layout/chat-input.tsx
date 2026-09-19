@@ -193,6 +193,7 @@ export function ChatInput({
 					message: enrichedPrompt,
 					language,
 					projectMode,
+					platform: isMobileMode ? "mobile" : "web",
 				}),
 			});
 			const project = (await res.json().catch(() => ({}))) as {

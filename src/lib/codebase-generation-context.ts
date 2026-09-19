@@ -232,6 +232,21 @@ export const askHandoffQuestionSchema = z.object({
 	options: z.array(z.string().min(1).max(100)).max(12).optional(),
 });
 
+export const askHandoffNonTechAnswerSchema = z.object({
+	value: z.string().default(""),
+	isCustom: z.boolean().default(false),
+	skipped: z.boolean().default(false),
+	values: z.array(z.string()).optional(),
+});
+
+export const askHandoffTechAnswersSchema = z.object({
+	frontend: z.string().optional(),
+	backend: z.string().optional(),
+	fullstackFramework: z.string().optional(),
+	database: z.string().optional(),
+	deployment: z.string().optional(),
+});
+
 export const askHandoffStateSchema = z.object({
 	prompt: z
 		.string()
@@ -240,8 +255,10 @@ export const askHandoffStateSchema = z.object({
 	platform: z.enum(["web", "mobile"]).optional(),
 	session: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
 	questions: z.array(askHandoffQuestionSchema).max(24).optional(),
-	nonTechAnswers: z.record(z.string(), z.unknown()).optional(),
-	techAnswers: z.record(z.string(), z.unknown()).optional(),
+	nonTechAnswers: z
+		.record(z.string(), askHandoffNonTechAnswerSchema)
+		.optional(),
+	techAnswers: askHandoffTechAnswersSchema.optional(),
 	skippedTech: z.array(z.string().max(64)).max(12).optional(),
 });
 
@@ -251,11 +268,12 @@ export const askHandoffSchema = z.object({
 	projectId: z.string().min(1),
 	answers: z
 		.array(askHandoffAnswerSchema)
-		.max(CODEBASE_ASK_HANDOFF_MAX_ANSWERS * 2),
+		.max(CODEBASE_ASK_HANDOFF_MAX_ANSWERS * 2)
+		.default([]),
 	compiledPrompt: z
 		.string()
-		.min(1)
-		.max(CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS * 2),
+		.max(CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS * 2)
+		.optional(),
 	snapshotId: z.string().min(1).nullable().optional(),
 	state: askHandoffStateSchema.optional(),
 });
@@ -312,11 +330,15 @@ export function sanitizeAskHandoffState(
 export function sanitizeAskHandoff(input: AskHandoff): AskHandoff {
 	return {
 		projectId: input.projectId,
-		answers: input.answers.slice(0, CODEBASE_ASK_HANDOFF_MAX_ANSWERS),
-		compiledPrompt: truncateText(
-			input.compiledPrompt,
-			CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS,
-		),
+		answers: (input.answers ?? []).slice(0, CODEBASE_ASK_HANDOFF_MAX_ANSWERS),
+		...(input.compiledPrompt
+			? {
+					compiledPrompt: truncateText(
+						input.compiledPrompt,
+						CODEBASE_ASK_HANDOFF_MAX_PROMPT_CHARS,
+					),
+				}
+			: {}),
 		...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
 		...(input.state ? { state: sanitizeAskHandoffState(input.state) } : {}),
 	};
@@ -605,7 +627,7 @@ export async function saveAskHandoff(
 			userId,
 			snapshotId: clean.snapshotId ?? null,
 			answers: clean.answers,
-			compiledPrompt: clean.compiledPrompt,
+			compiledPrompt: clean.compiledPrompt ?? null,
 			state: clean.state ?? null,
 			updatedAt: new Date(),
 		})
@@ -615,7 +637,9 @@ export async function saveAskHandoff(
 				userId,
 				snapshotId: clean.snapshotId ?? null,
 				answers: clean.answers,
-				compiledPrompt: clean.compiledPrompt,
+				...(clean.compiledPrompt !== undefined
+					? { compiledPrompt: clean.compiledPrompt }
+					: {}),
 				state: clean.state ?? null,
 				updatedAt: new Date(),
 			},
@@ -646,7 +670,10 @@ export async function getAskHandoff(
 			),
 		)
 		.limit(1);
-	if (!row || typeof row.compiledPrompt !== "string" || !row.compiledPrompt) {
+	if (!row) {
+		return null;
+	}
+	if (!row.compiledPrompt && !row.state) {
 		return null;
 	}
 	const stateParsed =
@@ -656,7 +683,7 @@ export async function getAskHandoff(
 	return sanitizeAskHandoff({
 		projectId,
 		answers: parseStoredHandoffAnswers(row.answers),
-		compiledPrompt: row.compiledPrompt,
+		...(row.compiledPrompt ? { compiledPrompt: row.compiledPrompt } : {}),
 		...(row.snapshotId ? { snapshotId: row.snapshotId } : {}),
 		...(stateParsed?.success ? { state: stateParsed.data } : {}),
 	});

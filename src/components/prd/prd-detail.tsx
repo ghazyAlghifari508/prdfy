@@ -14,6 +14,7 @@ import { ChatPanel } from "@/components/chat";
 import { CreditExhaustedModal } from "@/components/chat/credit-exhausted-modal";
 import { GenerationProgress } from "@/components/shared/generation-progress";
 import { usePanelResize } from "@/hooks/use-panel-resize";
+import { isPrdLocked } from "@/lib/flow-progress";
 import { cn } from "@/lib/utils";
 import { useChatStore, useUIStore } from "@/store";
 import type { Plan, PrdVersion } from "@/types/database";
@@ -26,6 +27,7 @@ import { PrdViewer } from "./prd-viewer";
 interface PrdDetailProps {
 	projectId?: string;
 	projectName?: string;
+	step?: string | null;
 	latestVersion?: PrdVersion;
 	allVersions?: PrdVersion[];
 	conversationId?: string;
@@ -47,6 +49,7 @@ interface PrdDetailProps {
 export function PrdDetail({
 	projectId,
 	projectName,
+	step,
 	latestVersion,
 	allVersions = [],
 	conversationId,
@@ -55,6 +58,7 @@ export function PrdDetail({
 	revisionLimit: _revisionLimit,
 	initialMessages = [],
 }: PrdDetailProps) {
+	const isReadOnly = isPrdLocked(step);
 	// ── State ──
 	const [currentContent, setCurrentContent] = useState(
 		latestVersion?.content || "",
@@ -373,6 +377,7 @@ export function PrdDetail({
 							onPrdRevised={handlePrdRevised}
 							className="w-full"
 							inputDisabled={!projectId && !isGeneratingPRD}
+							isReadOnly={isReadOnly}
 							currentPrdContent={currentContent}
 							userPlan={plan}
 							selectedVersionNum={selectedVersionNum}
@@ -395,6 +400,7 @@ export function PrdDetail({
 						onPrdRevised={handlePrdRevised}
 						className="h-full w-full border-none"
 						inputDisabled={!projectId && !isGeneratingPRD}
+						isReadOnly={isReadOnly}
 						currentPrdContent={currentContent}
 						userPlan={plan}
 						selectedVersionNum={selectedVersionNum}
@@ -428,6 +434,7 @@ export function PrdDetail({
 									onPrdRevised={handlePrdRevised}
 									className="w-full border-none"
 									inputDisabled={!projectId && !isGeneratingPRD}
+									isReadOnly={isReadOnly}
 									currentPrdContent={currentContent}
 									userPlan={plan}
 									selectedVersionNum={selectedVersionNum}

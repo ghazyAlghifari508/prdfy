@@ -57,12 +57,35 @@ const loadAsk = createServerFn({ method: "GET" })
 			hasReadyAnalysis = !!analysis;
 		}
 
+		let savedHandoff = null;
+		try {
+			const { getAskHandoff } = await import(
+				"@/lib/codebase-generation-context"
+			);
+			savedHandoff = await getAskHandoff(id, user.id);
+		} catch (e) {
+			console.error("Failed to load ask handoff in loadAsk:", e);
+		}
+		if (!savedHandoff) {
+			savedHandoff = {
+				projectId: project.id,
+				answers: [],
+				state: {
+					prompt: project.name,
+					platform: "web" as const,
+					session: 1 as const,
+					questions: [],
+				},
+			};
+		}
+
 		return {
 			projectId: project.id,
 			projectName: project.name,
 			step: (project as { step?: string | null }).step ?? null,
 			projectMode: project.projectMode,
 			hasReadyAnalysis,
+			savedHandoff,
 		};
 	});
 
@@ -114,6 +137,7 @@ function AskPage() {
 				projectId={d.projectId}
 				projectName={d.projectName}
 				projectMode={d.projectMode}
+				initialHandoff={d.savedHandoff}
 			/>
 		</div>
 	);

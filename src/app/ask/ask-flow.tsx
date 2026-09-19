@@ -53,10 +53,28 @@ interface AskFlowProps {
 	/** Existing-codebase projects persist the Ask handoff server-side.
 	 *  Absent/unknown behaves as greenfield (sessionStorage only). */
 	projectMode?: string | null;
+	initialHandoff?: {
+		projectId: string;
+		answers?: Array<{ question: string; answer: string }>;
+		compiledPrompt?: string;
+		state?: {
+			prompt?: string;
+			platform?: "web" | "mobile";
+			session?: 1 | 2 | 3;
+			questions?: AskQuestion[];
+			nonTechAnswers?: Record<string, NonTechAnswer>;
+			techAnswers?: TechAnswers;
+			skippedTech?: string[];
+		};
+	} | null;
 }
 
-export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
-	const isExistingCodebase = projectMode === "existing_codebase";
+export function AskFlow({
+	projectId,
+	projectName,
+	projectMode: _projectMode,
+	initialHandoff,
+}: AskFlowProps) {
 	const navigate = useNavigate();
 	const promptRef = useRef("");
 	const hasFetched = useRef(false);
@@ -116,43 +134,46 @@ export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
 			return;
 		}
 
-		// Task 8: authoritative server handoff for existing-codebase projects.
-		// Survives refresh and multi-device access where sessionStorage cannot.
-		// Best-effort: any failure falls through to the normal flow below.
-		const restoreFromServer = async (): Promise<boolean> => {
-			if (!isExistingCodebase) return false;
-			try {
-				const res = await fetch("/api/ask/options", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ projectId, action: "get-handoff" }),
+		// Helper to apply state snapshot from server
+		const applyState = (st: unknown): boolean => {
+			if (!st || typeof st !== "object") return false;
+			const s = st as Record<string, unknown>;
+			if (typeof s.prompt === "string" && s.prompt) {
+				promptRef.current = s.prompt;
+			}
+			if (s.platform === "web" || s.platform === "mobile") {
+				setPlatform(s.platform);
+			}
+			if (s.session === 1 || s.session === 2 || s.session === 3) {
+				setSession(s.session);
+			}
+			if (s.nonTechAnswers && typeof s.nonTechAnswers === "object") {
+				setNonTechAnswers(s.nonTechAnswers as Record<string, NonTechAnswer>);
+			}
+			if (s.techAnswers && typeof s.techAnswers === "object") {
+				const t = s.techAnswers as Record<string, unknown>;
+				setTechAnswers({
+					...(typeof t.frontend === "string" ? { frontend: t.frontend } : {}),
+					...(typeof t.backend === "string" ? { backend: t.backend } : {}),
+					...(typeof t.fullstackFramework === "string"
+						? { fullstackFramework: t.fullstackFramework }
+						: {}),
+					...(typeof t.database === "string" ? { database: t.database } : {}),
+					...(typeof t.deployment === "string"
+						? { deployment: t.deployment }
+						: {}),
 				});
-				if (!res.ok) return false;
-				const data = (await res.json().catch(() => null)) as {
-					handoff?: {
-						state?: {
-							prompt?: unknown;
-							platform?: unknown;
-							session?: unknown;
-							questions?: unknown;
-							nonTechAnswers?: unknown;
-							techAnswers?: unknown;
-							skippedTech?: unknown;
-						};
-					} | null;
-				};
-				const st = data?.handoff?.state;
-				if (
-					!st ||
-					typeof st.prompt !== "string" ||
-					!st.prompt ||
-					!Array.isArray(st.questions) ||
-					st.questions.length === 0
-				) {
-					return false;
-				}
+			}
+			if (Array.isArray(s.skippedTech)) {
+				setSkippedTech(
+					new Set(
+						s.skippedTech.filter((x): x is string => typeof x === "string"),
+					),
+				);
+			}
+			if (Array.isArray(s.questions) && s.questions.length > 0) {
 				const validTypes = ["select", "text", "multiselect"];
-				const validQuestions = st.questions.filter((q): q is AskQuestion => {
+				const validQuestions = s.questions.filter((q): q is AskQuestion => {
 					if (!q || typeof q !== "object") return false;
 					const cand = q as Partial<AskQuestion>;
 					if (
@@ -168,39 +189,35 @@ export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
 					}
 					return true;
 				});
-				if (validQuestions.length === 0) return false;
-				promptRef.current = st.prompt;
-				if (st.platform === "web" || st.platform === "mobile") {
-					setPlatform(st.platform);
+				if (validQuestions.length > 0) {
+					setQuestions(validQuestions);
+					setIsLoadingQuestions(false);
+					return true;
 				}
-				if (st.session === 1 || st.session === 2 || st.session === 3) {
-					setSession(st.session);
+			}
+			return false;
+		};
+
+		// Authoritative server handoff: survives tab close, History navigation,
+		// and multi-device access where sessionStorage cannot.
+		const restoreFromServer = async (): Promise<boolean> => {
+			if (initialHandoff?.state) {
+				if (applyState(initialHandoff.state)) return true;
+			}
+			try {
+				const res = await fetch("/api/ask/options", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ projectId, action: "get-handoff" }),
+				});
+				if (!res.ok) return false;
+				const data = (await res.json().catch(() => null)) as {
+					handoff?: { state?: unknown } | null;
+				};
+				if (data?.handoff?.state) {
+					return applyState(data.handoff.state);
 				}
-				setQuestions(validQuestions);
-				if (st.nonTechAnswers && typeof st.nonTechAnswers === "object") {
-					setNonTechAnswers(st.nonTechAnswers as Record<string, NonTechAnswer>);
-				}
-				if (st.techAnswers && typeof st.techAnswers === "object") {
-					const t = st.techAnswers as Record<string, unknown>;
-					setTechAnswers({
-						...(typeof t.frontend === "string" ? { frontend: t.frontend } : {}),
-						...(typeof t.backend === "string" ? { backend: t.backend } : {}),
-						...(typeof t.fullstackFramework === "string"
-							? { fullstackFramework: t.fullstackFramework }
-							: {}),
-						...(typeof t.database === "string" ? { database: t.database } : {}),
-						...(typeof t.deployment === "string"
-							? { deployment: t.deployment }
-							: {}),
-					});
-				}
-				if (Array.isArray(st.skippedTech)) {
-					setSkippedTech(
-						new Set(st.skippedTech.filter((s) => typeof s === "string")),
-					);
-				}
-				setIsLoadingQuestions(false);
-				return true;
+				return false;
 			} catch {
 				return false;
 			}
@@ -208,9 +225,9 @@ export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
 
 		const run = async () => {
 			if (await restoreFromServer()) return;
-			// Non-consuming read: the prompt is still needed at submit time to build the
-			// final PRD prompt, and a refresh mid-flow must not lose it.
-			const prompt = getSetupPrompt();
+
+			// Prompt fallback chain: promptRef (from server handoff) -> sessionStorage -> projectName
+			const prompt = promptRef.current || getSetupPrompt() || projectName;
 			if (!prompt) {
 				navigate({ to: "/", replace: true });
 				return;
@@ -261,6 +278,35 @@ export function AskFlow({ projectId, projectName, projectMode }: AskFlowProps) {
 			skippedTech: [...skippedTech],
 			techAnswers,
 		});
+
+		// Debounced server auto-save so answers survive tab close & multi-device
+		const timer = setTimeout(() => {
+			void fetch("/api/ask/options", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					projectId,
+					action: "save-handoff",
+					handoff: {
+						projectId,
+						answers: [],
+						state: {
+							prompt: promptRef.current,
+							platform,
+							session,
+							questions,
+							nonTechAnswers,
+							techAnswers,
+							skippedTech: [...skippedTech],
+						},
+					},
+				}),
+			}).catch((err) => {
+				console.error("Auto-save ask handoff failed:", err);
+			});
+		}, 600);
+
+		return () => clearTimeout(timer);
 	}, [
 		questions,
 		nonTechAnswers,
@@ -354,68 +400,60 @@ Deployment: ${tech.deployment || defaultChoice}`;
 		}
 
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
-		// Task 8: authoritative server handoff for existing-codebase projects.
-		// sessionStorage above keeps UI continuity; this row survives refresh
-		// and multi-device access. Best-effort with a timeout (Task 9) — the
-		// save must never stall navigation: abort/timeout/failure all fall
-		// through to the warn below (same AbortController pattern as
-		// context7-client rpcWithTimeout).
-		// Greenfield skips the request entirely (no behavior change).
-		if (isExistingCodebase) {
-			const ctrl = new AbortController();
-			const timer = setTimeout(
-				() => ctrl.abort(),
-				CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
-			);
-			try {
-				const skipLabel = isEn
-					? "(Let AI decide)"
-					: "(Biarkan AI yang memilih)";
-				const answers = questions.map((q) => {
-					const a = nonTechAnswers[q.id];
-					const picked =
-						a && !a.skipped
-							? Array.isArray(a.values) && a.values.length > 0
-								? a.values.join(", ")
-								: (a.value ?? "")
-							: "";
-					return {
-						question: q.question,
-						answer: picked || skipLabel,
-					};
-				});
-				await fetch("/api/ask/options", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					signal: ctrl.signal,
-					body: JSON.stringify({
-						projectId,
-						action: "save-handoff",
-						handoff: {
-							answers,
-							compiledPrompt,
-							state: {
-								prompt: promptRef.current,
-								platform,
-								session,
-								questions: questions.map((q) => ({
-									id: q.id,
-									question: q.question,
-									type: q.type,
-									...(q.options ? { options: q.options } : {}),
-								})),
-								nonTechAnswers,
-								techAnswers: tech,
-								skippedTech: [...skippedTech],
-							},
+		// Authoritative server handoff: survives refresh and multi-device access.
+		// Best-effort with a timeout — the save must never stall navigation:
+		// abort/timeout/failure all fall through safely.
+		const ctrl = new AbortController();
+		const timer = setTimeout(
+			() => ctrl.abort(),
+			CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS,
+		);
+		try {
+			const skipLabel = isEn ? "(Let AI decide)" : "(Biarkan AI yang memilih)";
+			const answers = questions.map((q) => {
+				const a = nonTechAnswers[q.id];
+				const picked =
+					a && !a.skipped
+						? Array.isArray(a.values) && a.values.length > 0
+							? a.values.join(", ")
+							: (a.value ?? "")
+						: "";
+				return {
+					question: q.question,
+					answer: picked || skipLabel,
+				};
+			});
+			await fetch("/api/ask/options", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				signal: ctrl.signal,
+				body: JSON.stringify({
+					projectId,
+					action: "save-handoff",
+					handoff: {
+						answers,
+						compiledPrompt,
+						state: {
+							prompt: promptRef.current,
+							platform,
+							session,
+							questions: questions.map((q) => ({
+								id: q.id,
+								question: q.question,
+								type: q.type,
+								...(q.options ? { options: q.options } : {}),
+							})),
+							nonTechAnswers,
+							techAnswers: tech,
+							skippedTech: [...skippedTech],
 						},
-					}),
-				});
-			} catch (err) {
-				console.warn("Ask handoff save skipped:", err);
-			} finally {
-				clearTimeout(timer);
-			}
+					},
+				}),
+			});
+		} catch (err) {
+			console.warn("Ask handoff save skipped:", err);
+		} finally {
+			clearTimeout(timer);
 		}
 		navigate({ to: "/prd/$id", params: { id: projectId } });
 	};

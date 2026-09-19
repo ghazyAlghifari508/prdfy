@@ -149,6 +149,7 @@ export const Route = createFileRoute("/api/chat")({
 							id: projects.id,
 							language: projects.language,
 							projectMode: projects.projectMode,
+							step: projects.step,
 						})
 						.from(projects)
 						.where(
@@ -164,6 +165,23 @@ export const Route = createFileRoute("/api/chat")({
 							{ error: "Project not found or unauthorized" },
 							{ status: 403 },
 						);
+					}
+
+					if (mode === "revise") {
+						const { isPrdLocked } = await import("@/lib/flow-progress");
+						if (isPrdLocked(projCheck?.step)) {
+							const stageLabel =
+								projCheck?.step === "task"
+									? "Task / Kanban"
+									: "Acceptance Criteria";
+							return Response.json(
+								{
+									error: `Dokumen PRD telah dikunci (Read-Only) karena proyek telah mencapai tahap ${stageLabel}.`,
+									code: "PRD_LOCKED",
+								},
+								{ status: 409 },
+							);
+						}
 					}
 
 					if (projCheck?.language) {
