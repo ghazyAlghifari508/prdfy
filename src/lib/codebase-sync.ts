@@ -352,6 +352,15 @@ export function isSyncCapableProject(project: {
 	return project?.projectMode === "existing_codebase";
 }
 
+// Browser handoff for Home-created existing-codebase projects: the creation
+// response carries the one-time sync payload, the Home composer stashes it
+// under this per-project sessionStorage key, and the /codebase/$id page
+// consumes it once to open the agent modal. The key carries only the project
+// id — never credential material.
+export function getPendingSyncPayloadKey(projectId: string): string {
+	return `prdfy:sync-payload:${projectId}`;
+}
+
 // One usable credential per project: a create/retry request is honored only
 // when no usable session remains. Terminal or expired rows never block a
 // retry — the retry mints a new session instead of mutating them.

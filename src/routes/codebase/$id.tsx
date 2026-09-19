@@ -22,6 +22,7 @@ import { db } from "@/db";
 import { projects } from "@/db/schema";
 import type { AnalysisResponse } from "@/lib/codebase-analysis";
 import {
+	getPendingSyncPayloadKey,
 	type SyncPromptPayload,
 	type SyncStatusResponse,
 	syncPromptPayloadSchema,
@@ -114,6 +115,30 @@ function CodebasePage() {
 	useEffect(() => {
 		reportLastRoute(pathname);
 	}, [pathname, reportLastRoute]);
+
+	// Home-created existing-codebase projects arrive with a one-time sync
+	// payload stashed in sessionStorage. Consume it once (validated, scoped
+	// to this project) and open the agent modal immediately.
+	useEffect(() => {
+		let raw: string | null = null;
+		try {
+			const key = getPendingSyncPayloadKey(d.projectId);
+			raw = sessionStorage.getItem(key);
+			if (raw) sessionStorage.removeItem(key);
+		} catch {
+			return;
+		}
+		if (!raw) return;
+		try {
+			const parsed = syncPromptPayloadSchema.safeParse(JSON.parse(raw));
+			if (parsed.success && parsed.data.projectId === d.projectId) {
+				setPayload(parsed.data);
+				setModalOpen(true);
+			}
+		} catch {
+			// Malformed handoff — fall back to manual "Mulai sync".
+		}
+	}, [d.projectId]);
 
 	const readAnalysis = useCallback(
 		async (snapshotId: string) => {
