@@ -50,7 +50,7 @@ import type { Plan } from "@/types/database";
 // finishes; the sync credential must never leave the modal textarea, and the
 // CLI itself has no model access to run analysis. Rate limiting reuses the
 // sync `api_call` action like the neighboring /api/codebase browser routes.
-// Analysis never consumes PRD/AC/Task credits.
+// Codebase analysis uses adaptive credits (new attempts are billed; ready analysis reuse is free).
 
 type AnalysisRow = typeof codebaseAnalyses.$inferSelect;
 
@@ -454,7 +454,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					);
 				}
 
-				const idempotencyKey = `${projectId}:codebase_analysis:${snapshot.id}`;
+				const idempotencyKey = `${projectId}:codebase_analysis:${snapshot.id}:${existing.length + 1}`;
 
 				let reservation: {
 					id: string;
@@ -489,7 +489,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 				await markCreditOperationRunning({
 					userId: user.id,
 					operationId: reservation.id,
-				});
+				}).catch((err) =>
+					console.error(
+						"[codebase/analysis] markCreditOperationRunning failed:",
+						err,
+					),
+				);
 
 				try {
 					const analysis = await requestCodebaseAnalysis(
@@ -499,13 +504,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					const [row] = await db
 						.select()
 						.from(codebaseAnalyses)
-						.where(
-							and(
-								eq(codebaseAnalyses.snapshotId, snapshot.id),
-								eq(codebaseAnalyses.status, "ready"),
-							),
-						)
-						.orderBy(desc(codebaseAnalyses.createdAt))
+						.where(eq(codebaseAnalyses.id, analysis.id))
 						.limit(1);
 					const response = row ? toResponse(row) : null;
 					if (!response || !analysis) {
