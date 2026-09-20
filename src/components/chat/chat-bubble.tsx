@@ -3,14 +3,14 @@
 import { memo } from "react";
 import { cn } from "@/lib/utils";
 
-function cleanMessage(content: string): string {
+export function cleanMessage(content: string): string {
 	// Filter out the raw :::UPDATE_SECTION[...]::: blocks and their content
 	// so they are not rendered in the chat bubble UI from historical messages.
+	// Only complete blocks (terminated by :::END_UPDATE:::) are stripped; an
+	// unterminated block is left untouched so a malformed or partial message
+	// never deletes the valid text that follows it.
 	const cleaned = content
-		.replace(
-			/:::UPDATE_SECTION\[(.*?)\]:::\s*([\s\S]*?)(?::::END_UPDATE:::|$)/g,
-			"",
-		)
+		.replace(/:::UPDATE_SECTION\[(.*?)\]:::\s*[\s\S]*?:::END_UPDATE:::/g, "")
 		.trim();
 	if (!cleaned && content.includes(":::UPDATE_SECTION")) {
 		return "Telah merevisi dokumen PRD.";
