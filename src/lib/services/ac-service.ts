@@ -2,61 +2,78 @@
  * AC versions - Drizzle DB ops. Mirrors prd-service.ts.
  * New schema: ac_versions(project_id, version, content, change_summary).
  */
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { acVersions, projects } from "@/db/schema";
 import { advanceStep } from "@/lib/flow-progress";
 import { sanitizeModelOutput } from "@/lib/services/prd-service";
 
+/** Thrown when the project does not exist or belongs to another tenant. */
+export class AcProjectNotFoundError extends Error {
+	readonly code = "AC_PROJECT_NOT_FOUND" as const;
+
+	constructor() {
+		super("Project not found");
+		this.name = "AcProjectNotFoundError";
+	}
+}
+
 /**
- * Save AC content. Single row per project (version pinned to 1): regeneration
- * overwrites instead of appending a new version — AC has no revision/history
- * feature. Advances projects.step to 'ac' forward-only.
+ * Save AC content for the owning tenant. Single row per project (version
+ * pinned to 1): regeneration overwrites instead of appending a new version —
+ * AC has no revision/history feature. Ownership, the AC write, and the
+ * forward-only step advance run in one transaction with the project row
+ * locked, so a concurrent writer can neither write into a foreign project nor
+ * rewind the step from a stale read.
  */
 export async function saveAcVersion(
 	projectId: string,
+	userId: string,
 	fullResponse: string,
 	userMessage: string,
 ): Promise<{ acVersionId: string; version: number }> {
 	const cleanContent = sanitizeModelOutput(fullResponse);
 	const summary = userMessage || "Initial AC generation";
 
-	const [row] = await db
-		.insert(acVersions)
-		.values({
-			id: crypto.randomUUID(),
-			projectId,
-			version: 1,
-			content: cleanContent,
-			changeSummary: summary,
-		})
-		.onConflictDoUpdate({
-			target: [acVersions.projectId, acVersions.version],
-			set: {
+	return db.transaction(async (tx) => {
+		const [project] = await tx
+			.select({ id: projects.id, step: projects.step })
+			.from(projects)
+			.where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+			.for("update")
+			.limit(1);
+		if (!project) throw new AcProjectNotFoundError();
+
+		const [row] = await tx
+			.insert(acVersions)
+			.values({
+				id: crypto.randomUUID(),
+				projectId,
+				version: 1,
 				content: cleanContent,
 				changeSummary: summary,
-				createdAt: new Date(),
-			},
-		})
-		.returning({ id: acVersions.id });
+			})
+			.onConflictDoUpdate({
+				target: [acVersions.projectId, acVersions.version],
+				set: {
+					content: cleanContent,
+					changeSummary: summary,
+					createdAt: new Date(),
+				},
+			})
+			.returning({ id: acVersions.id });
+		if (!row) throw new Error("Failed to save AC");
 
-	if (!row) throw new Error("Failed to save AC");
-	const acVersionId = row.id;
+		const updateData: { acStatus: string; updatedAt: Date; step?: string } = {
+			acStatus: "completed",
+			updatedAt: new Date(),
+		};
+		const next = advanceStep(project.step, "ac");
+		if (next) updateData.step = next;
+		await tx.update(projects).set(updateData).where(eq(projects.id, projectId));
 
-	const updateData: { acStatus: string; updatedAt: Date; step?: string } = {
-		acStatus: "completed",
-		updatedAt: new Date(),
-	};
-	const [proj] = await db
-		.select({ step: projects.step })
-		.from(projects)
-		.where(eq(projects.id, projectId))
-		.limit(1);
-	const next = advanceStep(proj?.step, "ac");
-	if (next) updateData.step = next;
-	await db.update(projects).set(updateData).where(eq(projects.id, projectId));
-
-	return { acVersionId, version: 1 };
+		return { acVersionId: row.id, version: 1 };
+	});
 }
 
 export async function getLatestAcContent(

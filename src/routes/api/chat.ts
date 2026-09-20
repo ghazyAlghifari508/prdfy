@@ -21,6 +21,7 @@ import {
 	tryStreamWithFallback,
 } from "@/lib/services/ai-orchestrator";
 import {
+	ConversationProjectOwnershipError,
 	ensureConversation,
 	getConversationHistory,
 	rollbackStreamInserts,
@@ -138,12 +139,23 @@ export const Route = createFileRoute("/api/chat")({
 				}
 
 				if (mode === "generate" && !conversationIdToUse) {
-					const result = await ensureConversation(
-						user.id,
-						projectIdToUse,
-						deriveProjectNameSync(message),
-						preferences || null,
-					);
+					let result: Awaited<ReturnType<typeof ensureConversation>>;
+					try {
+						result = await ensureConversation(
+							user.id,
+							projectIdToUse,
+							deriveProjectNameSync(message),
+							preferences || null,
+						);
+					} catch (error) {
+						if (error instanceof ConversationProjectOwnershipError) {
+							return Response.json(
+								{ error: "Project not found or unauthorized" },
+								{ status: 403 },
+							);
+						}
+						throw error;
+					}
 					conversationIdToUse = result.conversationId;
 					projectIdToUse = result.projectId;
 					createdConversationId = result.createdConversationId;

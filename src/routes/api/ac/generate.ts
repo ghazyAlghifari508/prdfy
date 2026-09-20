@@ -18,11 +18,11 @@ import { depthDirective } from "@/lib/prompt-depth";
 import { AC_GENERATION_PROMPT } from "@/lib/prompts-ac";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { saveAcVersion } from "@/lib/services/ac-service";
-import type { CreditOperationResult } from "@/lib/services/credit-service";
 import {
 	selectModels,
 	tryStreamWithFallback,
 } from "@/lib/services/ai-orchestrator";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { sanitizeErrorForClient } from "@/lib/services/error-sanitizer";
 import { getLatestPrdContent } from "@/lib/services/prd-service";
 import { requireUser } from "@/lib/session";
@@ -335,6 +335,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 							try {
 								const savedResult = await saveAcVersion(
 									projectId,
+									user.id,
 									fullResponse,
 									"Initial AC generation",
 								);

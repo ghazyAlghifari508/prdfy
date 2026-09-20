@@ -47,6 +47,16 @@ export async function getConversationHistory(
 	};
 }
 
+/** Thrown when a supplied projectId is not owned by the caller. */
+export class ConversationProjectOwnershipError extends Error {
+	readonly code = "CONVERSATION_PROJECT_FORBIDDEN" as const;
+
+	constructor() {
+		super("Conversation project ownership mismatch");
+		this.name = "ConversationProjectOwnershipError";
+	}
+}
+
 export async function ensureConversation(
 	userId: string,
 	projectId: string | undefined,
@@ -58,38 +68,51 @@ export async function ensureConversation(
 	createdConversationId?: string;
 	createdProjectId?: string;
 }> {
-	let projectIdToUse = projectId;
-	let createdProjectId: string | undefined;
-	let _createdConversationId: string | undefined;
+	const newConversationId = crypto.randomUUID();
+	return db.transaction(async (tx) => {
+		let projectIdToUse = projectId;
+		let createdProjectId: string | undefined;
 
-	if (!projectIdToUse) {
-		const [newProject] = await db
-			.insert(projects)
-			.values({
-				id: crypto.randomUUID(),
-				userId,
-				name: projectName,
-				status: "draft",
-				mode: preferences ? "manual" : "ai_auto",
-			})
-			.returning({ id: projects.id });
-		if (!newProject?.id) throw new Error("Failed to create project");
-		projectIdToUse = newProject.id;
-		createdProjectId = newProject.id;
-	}
+		if (projectIdToUse) {
+			// Ownership gate BEFORE any insert: a foreign/stale projectId must
+			// never create an orphan conversation in another tenant.
+			const [owned] = await tx
+				.select({ id: projects.id })
+				.from(projects)
+				.where(
+					and(eq(projects.id, projectIdToUse), eq(projects.userId, userId)),
+				)
+				.limit(1);
+			if (!owned) throw new ConversationProjectOwnershipError();
+		} else {
+			const [newProject] = await tx
+				.insert(projects)
+				.values({
+					id: crypto.randomUUID(),
+					userId,
+					name: projectName,
+					status: "draft",
+					mode: preferences ? "manual" : "ai_auto",
+				})
+				.returning({ id: projects.id });
+			if (!newProject?.id) throw new Error("Failed to create project");
+			projectIdToUse = newProject.id;
+			createdProjectId = newProject.id;
+		}
 
-	const [newConv] = await db
-		.insert(conversations)
-		.values({ id: crypto.randomUUID(), userId, projectId: projectIdToUse })
-		.returning({ id: conversations.id });
-	if (!newConv?.id) throw new Error("Failed to create conversation");
+		const [newConv] = await tx
+			.insert(conversations)
+			.values({ id: newConversationId, userId, projectId: projectIdToUse })
+			.returning({ id: conversations.id });
+		if (!newConv?.id) throw new Error("Failed to create conversation");
 
-	return {
-		conversationId: newConv.id,
-		projectId: projectIdToUse,
-		createdConversationId: newConv.id,
-		createdProjectId,
-	};
+		return {
+			conversationId: newConv.id,
+			projectId: projectIdToUse,
+			createdConversationId: newConv.id,
+			createdProjectId,
+		};
+	});
 }
 
 export async function saveMessages(
