@@ -20,14 +20,26 @@ const loadSharedPrd = createServerFn({ method: "GET" })
 
 		const { subscriptions } = await import("@/db/schema");
 		const { FEATURES } = await import("@/types/database");
+		const { resolveSubscriptionState } = await import("@/lib/billing");
 		const [sub] = await db
-			.select({ plan: subscriptions.plan })
+			.select({
+				plan: subscriptions.plan,
+				status: subscriptions.status,
+				credits: subscriptions.credits,
+				creditsUsed: subscriptions.creditsUsed,
+				creditsReserved: subscriptions.creditsReserved,
+				currentPeriodStart: subscriptions.currentPeriodStart,
+				currentPeriodEnd: subscriptions.currentPeriodEnd,
+				cancelledAt: subscriptions.cancelledAt,
+			})
 			.from(subscriptions)
 			.where(eq(subscriptions.userId, project.userId))
 			.orderBy(desc(subscriptions.createdAt))
 			.limit(1);
-		const plan = (sub?.plan || "free") as "free" | "pro" | "hengker";
-		if (FEATURES[plan].shareLink === false) throw new Error("NOT_FOUND");
+		const eff = resolveSubscriptionState(sub, new Date());
+		if (FEATURES[eff.effectivePlan].shareLink === false) {
+			throw new Error("NOT_FOUND");
+		}
 
 		const [latest] = await db
 			.select({ content: prdVersions.content })
