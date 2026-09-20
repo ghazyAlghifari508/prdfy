@@ -8,6 +8,7 @@ import {
 	type SubscriptionRowLike,
 	type SubscriptionStateKind,
 } from "@/lib/billing";
+import { ADAPTIVE_CREDIT_PRICING } from "@/lib/constants";
 import { FEATURES, PLAN_CREDITS, type Plan } from "@/types/database";
 
 /** Hot-path payload consumed by /api/user/plan, chat.ts, ac/task generate. */
@@ -30,10 +31,10 @@ export function hasFullWorkflow(plan: Plan): boolean {
  * predicate — two concurrent callers can only roll over once. Missed months
  * do not stack: one rollover jumps straight to a fresh period.
  */
-async function rollOverFreeIfNeeded(
-	row: SubscriptionRowLike & { id: string },
+export async function rollOverFreeIfNeeded(
+	row: SubscriptionRowLike & { id: string; userId?: string },
 	now: Date,
-): Promise<SubscriptionRowLike & { id: string }> {
+): Promise<SubscriptionRowLike & { id: string; userId?: string }> {
 	if (!isFreeRolloverDue(row, now)) return row;
 	const period = computeFreeRolloverPeriod(now);
 	const [updated] = await db
@@ -43,6 +44,7 @@ async function rollOverFreeIfNeeded(
 			currentPeriodEnd: period.end,
 			credits: PLAN_CREDITS.free,
 			creditsUsed: 0,
+			creditsReserved: 0,
 			updatedAt: now,
 		})
 		.where(
@@ -56,25 +58,49 @@ async function rollOverFreeIfNeeded(
 		)
 		.returning({
 			id: subscriptions.id,
+			userId: subscriptions.userId,
 			plan: subscriptions.plan,
 			status: subscriptions.status,
 			credits: subscriptions.credits,
 			creditsUsed: subscriptions.creditsUsed,
+			creditsReserved: subscriptions.creditsReserved,
 			currentPeriodStart: subscriptions.currentPeriodStart,
 			currentPeriodEnd: subscriptions.currentPeriodEnd,
 			cancelledAt: subscriptions.cancelledAt,
 		});
-	return updated ?? row;
+
+	if (updated) {
+		const targetUserId = row.userId ?? updated.userId;
+		if (targetUserId) {
+			const { creditLedgerEntries } = await import("@/db/schema");
+			await db.insert(creditLedgerEntries).values({
+				id: crypto.randomUUID(),
+				userId: targetUserId,
+				operationId: null,
+				amount: PLAN_CREDITS.free,
+				entryType: "grant",
+				sourceCategory: "system_grant",
+				pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
+				metadata: {
+					reason: `free_rollover:${period.start.toISOString()}`,
+				},
+			});
+		}
+		return updated;
+	}
+	return row;
 }
 
 export async function getCreditBalance(userId: string): Promise<CreditBalance> {
 	const [sub] = await db
 		.select({
 			id: subscriptions.id,
+			userId: subscriptions.userId,
 			plan: subscriptions.plan,
 			status: subscriptions.status,
 			credits: subscriptions.credits,
 			creditsUsed: subscriptions.creditsUsed,
+			creditsReserved: subscriptions.creditsReserved,
 			currentPeriodStart: subscriptions.currentPeriodStart,
 			currentPeriodEnd: subscriptions.currentPeriodEnd,
 			cancelledAt: subscriptions.cancelledAt,

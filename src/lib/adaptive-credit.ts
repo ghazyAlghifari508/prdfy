@@ -27,7 +27,9 @@ export type CreditLedgerEntryType =
 	| "refund"
 	| "correction";
 
-export type CreditPricingVersion = typeof ADAPTIVE_CREDIT_PRICING.version;
+export type CreditPricingVersion =
+	| typeof ADAPTIVE_CREDIT_PRICING.version
+	| "2026-09-20";
 
 export interface CreditComplexityMetrics {
 	promptChars?: number;
