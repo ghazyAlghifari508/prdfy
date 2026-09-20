@@ -52,7 +52,9 @@ export function groupCardsByStatus(
 export function groupCardsByFeature(
 	cards: TaskCard[],
 ): Record<string, TaskCard[]> {
-	const groups: Record<string, TaskCard[]> = {};
+	// Null-prototype map: feature names are data-controlled, so inherited
+	// keys such as __proto__ must resolve as own groups, never the prototype.
+	const groups: Record<string, TaskCard[]> = Object.create(null);
 	for (const card of cards) {
 		const name = card.featureName || "Umum";
 		if (!groups[name]) groups[name] = [];

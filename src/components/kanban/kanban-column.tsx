@@ -2,6 +2,7 @@
 
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import type { TaskCard } from "@/hooks/use-kanban-polling";
+import { groupCardsByFeature } from "@/lib/kanban-utils";
 import { FeatureGroup } from "./feature-group";
 
 export interface KanbanColumnHandle {
@@ -28,15 +29,7 @@ export const KanbanColumn = forwardRef<KanbanColumnHandle, KanbanColumnProps>(
 			},
 		}));
 
-		// Group cards by feature
-		const featureGroups: Record<string, TaskCard[]> = {};
-		for (const card of cards) {
-			const fName = card.featureName || "Umum";
-			if (!featureGroups[fName]) {
-				featureGroups[fName] = [];
-			}
-			featureGroups[fName].push(card);
-		}
+		const featureGroups = groupCardsByFeature(cards);
 
 		const featuresList = Object.keys(featureGroups);
 		const hasInProgress = cards.some((c) => c.status === "in_progress");

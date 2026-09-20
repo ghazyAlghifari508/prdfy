@@ -70,6 +70,21 @@ describe("kanban-utils", () => {
 			const groups = groupCardsByFeature(cards);
 			expect(groups.Umum).toHaveLength(1);
 		});
+
+		it("groups prototype-named features as own data without throwing", () => {
+			const protoName = "__proto__";
+			const ctorName = "constructor";
+			const cards = [
+				mockCard({ id: "1", featureName: protoName }),
+				mockCard({ id: "2", featureName: ctorName }),
+			];
+			const groups = groupCardsByFeature(cards);
+			expect(Object.keys(groups)).toEqual(
+				expect.arrayContaining([protoName, ctorName]),
+			);
+			expect(groups[protoName]).toHaveLength(1);
+			expect(groups[ctorName]).toHaveLength(1);
+		});
 	});
 
 	describe("computeStatusCounts", () => {
