@@ -4,7 +4,6 @@ import {
 	AlertTriangle,
 	CheckCircle2,
 	Clock,
-	Info,
 	RefreshCw,
 	ShieldAlert,
 	Undo2,
@@ -40,9 +39,9 @@ export interface CreditOperationItem {
 }
 
 export interface CreditUsageProps {
-	availableCredits: number;
-	reservedCredits: number;
-	totalCreditsUsed: number;
+	availableCredits?: number;
+	reservedCredits?: number;
+	totalCreditsUsed?: number;
 	operations: CreditOperationItem[];
 	stageBreakdown?: Record<CreditOperationStage, number>;
 }
@@ -150,51 +149,12 @@ export function getStatusBadge(state: CreditOperationState) {
 	}
 }
 
-export function CreditUsageSection({
-	availableCredits,
-	reservedCredits,
-	totalCreditsUsed,
-	operations,
-	stageBreakdown: customStageBreakdown,
-}: CreditUsageProps) {
+export function CreditUsageSection({ operations }: CreditUsageProps) {
 	const [stageFilter, setStageFilter] = useState<StageFilter>("all");
 	const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 	const [selectedOp, setSelectedOp] = useState<CreditOperationItem | null>(
 		null,
 	);
-
-	const stageBreakdown = useMemo(() => {
-		const base: Record<CreditOperationStage, number> = {
-			codebase: 0,
-			prd: 0,
-			ac: 0,
-			task: 0,
-		};
-		if (customStageBreakdown) {
-			return { ...base, ...customStageBreakdown };
-		}
-		for (const op of operations) {
-			if (op.state === "settled" && typeof op.finalCharge === "number") {
-				base[op.stage] = (base[op.stage] ?? 0) + op.finalCharge;
-			}
-		}
-		return base;
-	}, [operations, customStageBreakdown]);
-
-	const stageCounts = useMemo(() => {
-		const counts: Record<CreditOperationStage, number> = {
-			codebase: 0,
-			prd: 0,
-			ac: 0,
-			task: 0,
-		};
-		for (const op of operations) {
-			if (counts[op.stage] !== undefined) {
-				counts[op.stage] += 1;
-			}
-		}
-		return counts;
-	}, [operations]);
 
 	const filteredOperations = useMemo(() => {
 		return operations.filter((op) => {
@@ -210,163 +170,82 @@ export function CreditUsageSection({
 
 	return (
 		<div className="flex flex-col gap-6">
-			{/* Policy banner required by PRDFY specification */}
-			<div className="flex items-start gap-3 rounded-xl border border-indigo/20 bg-indigo/5 p-4 text-sm text-(--text-secondary)">
-				<Info className="h-5 w-5 shrink-0 text-indigo mt-0.5" />
-				<p className="leading-relaxed">
-					Biaya kredit dihitung berdasarkan jenis operasi dan kompleksitas
-					context yang diproses. Estimasi dan batas maksimum ditampilkan sebelum
-					proses dimulai. Operasi yang gagal tidak dikenakan biaya final.
-				</p>
-			</div>
-
-			{/* Summary Stat Cards */}
-			<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-				<div className="rounded-xl border border-(--border-subtle) bg-(--bg-card) p-5">
-					<span className="text-xs font-medium uppercase tracking-wider text-(--text-secondary)">
-						Saldo Tersedia
-					</span>
-					<div className="mt-2 flex items-baseline gap-2">
-						<span className="font-inter text-3xl font-bold text-snow">
-							{availableCredits}
-						</span>
-						<span className="text-xs text-(--text-secondary)">kredit</span>
-					</div>
-				</div>
-
-				{reservedCredits > 0 && (
-					<div className="rounded-xl border border-(--border-subtle) bg-(--bg-card) p-5">
-						<span className="text-xs font-medium uppercase tracking-wider text-(--text-secondary)">
-							Sedang Direservasi
-						</span>
-						<div className="mt-2 flex items-baseline gap-2">
-							<span className="font-inter text-3xl font-bold text-amber-400">
-								{reservedCredits}
-							</span>
-							<span className="text-xs text-(--text-secondary)">kredit</span>
-						</div>
-					</div>
-				)}
-
-				<div className="rounded-xl border border-(--border-subtle) bg-(--bg-card) p-5">
-					<span className="text-xs font-medium uppercase tracking-wider text-(--text-secondary)">
-						Total Kredit Digunakan
-					</span>
-					<div className="mt-2 flex items-baseline gap-2">
-						<span className="font-inter text-3xl font-bold text-snow">
-							{totalCreditsUsed}
-						</span>
-						<span className="text-xs text-(--text-secondary)">kredit</span>
-					</div>
-				</div>
-
-				<div className="rounded-xl border border-(--border-subtle) bg-(--bg-card) p-5 sm:col-span-2 lg:col-span-1">
-					<span className="text-xs font-medium uppercase tracking-wider text-(--text-secondary)">
-						Penggunaan per Stage
-					</span>
-					<div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
-							<span className="text-(--text-secondary)">Codebase</span>
-							<span className="font-semibold text-snow">
-								{stageBreakdown.codebase} kr ({stageCounts.codebase} op)
-							</span>
-						</div>
-						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
-							<span className="text-(--text-secondary)">PRD</span>
-							<span className="font-semibold text-snow">
-								{stageBreakdown.prd} kr ({stageCounts.prd} op)
-							</span>
-						</div>
-						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
-							<span className="text-(--text-secondary)">AC</span>
-							<span className="font-semibold text-snow">
-								{stageBreakdown.ac} kr ({stageCounts.ac} op)
-							</span>
-						</div>
-						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
-							<span className="text-(--text-secondary)">Task</span>
-							<span className="font-semibold text-snow">
-								{stageBreakdown.task} kr ({stageCounts.task} op)
-							</span>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			{/* Filter Bar */}
-			<div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-(--border-subtle) bg-(--bg-card) p-4">
-				<div className="flex flex-wrap items-center gap-3">
-					<div className="flex items-center gap-2">
-						<label
-							htmlFor="filter-stage-select"
-							className="text-xs font-medium text-(--text-secondary)"
-						>
-							Tahap:
-						</label>
-						<select
-							id="filter-stage-select"
-							data-testid="filter-stage"
-							value={stageFilter}
-							onChange={(e) => setStageFilter(e.target.value as StageFilter)}
-							className="rounded-lg border border-(--border-subtle) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-snow focus:border-indigo focus:outline-none"
-						>
-							<option value="all">Semua Tahap</option>
-							<option value="codebase">Codebase</option>
-							<option value="prd">PRD</option>
-							<option value="ac">AC</option>
-							<option value="task">Task</option>
-						</select>
-					</div>
-
-					<div className="flex items-center gap-2">
-						<label
-							htmlFor="filter-status-select"
-							className="text-xs font-medium text-(--text-secondary)"
-						>
-							Status:
-						</label>
-						<select
-							id="filter-status-select"
-							data-testid="filter-status"
-							value={statusFilter}
-							onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-							className="rounded-lg border border-(--border-subtle) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-snow focus:border-indigo focus:outline-none"
-						>
-							<option value="all">Semua Status</option>
-							<option value="settled">Berhasil</option>
-							<option value="released">Dilepas</option>
-							<option value="failed">Gagal</option>
-							<option value="reserved">Direservasi</option>
-							<option value="running">Diproses</option>
-							<option value="quarantined">Dikarantina</option>
-							<option value="refunded">Dikembalikan</option>
-						</select>
-					</div>
-				</div>
-
-				{(stageFilter !== "all" || statusFilter !== "all") && (
-					<button
-						type="button"
-						onClick={() => {
-							setStageFilter("all");
-							setStatusFilter("all");
-						}}
-						className="text-xs text-indigo hover:underline"
-					>
-						Reset Filter
-					</button>
-				)}
-			</div>
-
 			{/* Usage History Table */}
 			<div className="rounded-xl border border-(--border-subtle) bg-(--bg-card) overflow-hidden">
-				<div className="p-5 pb-3">
-					<h3 className="font-inter text-lg font-bold text-snow">
-						Riwayat Operasi Kredit
-					</h3>
-					<p className="mt-0.5 text-xs text-(--text-secondary)">
-						Log detail aktivitas adaptif dan biaya per eksekusi.
-					</p>
+				<div className="p-5 pb-4 flex flex-wrap items-center justify-between gap-4 border-b border-(--border-subtle)">
+					<div>
+						<h3 className="font-inter text-lg font-bold text-snow">
+							Riwayat Penggunaan Kredit
+						</h3>
+						<p className="mt-0.5 text-xs text-(--text-secondary)">
+							Log aktivitas dan rincian kredit yang terpakai per operasi.
+						</p>
+					</div>
+
+					{/* Filter Bar */}
+					<div className="flex flex-wrap items-center gap-3">
+						<div className="flex items-center gap-2">
+							<label
+								htmlFor="filter-stage-select"
+								className="text-xs font-medium text-(--text-secondary)"
+							>
+								Tahap:
+							</label>
+							<select
+								id="filter-stage-select"
+								data-testid="filter-stage"
+								value={stageFilter}
+								onChange={(e) => setStageFilter(e.target.value as StageFilter)}
+								className="rounded-lg border border-(--border-subtle) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-snow focus:border-indigo focus:outline-none"
+							>
+								<option value="all">Semua Tahap</option>
+								<option value="codebase">Codebase</option>
+								<option value="prd">PRD</option>
+								<option value="ac">AC</option>
+								<option value="task">Task</option>
+							</select>
+						</div>
+
+						<div className="flex items-center gap-2">
+							<label
+								htmlFor="filter-status-select"
+								className="text-xs font-medium text-(--text-secondary)"
+							>
+								Status:
+							</label>
+							<select
+								id="filter-status-select"
+								data-testid="filter-status"
+								value={statusFilter}
+								onChange={(e) =>
+									setStatusFilter(e.target.value as StatusFilter)
+								}
+								className="rounded-lg border border-(--border-subtle) bg-(--bg-surface) px-3 py-1.5 text-xs font-medium text-snow focus:border-indigo focus:outline-none"
+							>
+								<option value="all">Semua Status</option>
+								<option value="settled">Berhasil</option>
+								<option value="released">Dilepas</option>
+								<option value="failed">Gagal</option>
+								<option value="reserved">Direservasi</option>
+								<option value="running">Diproses</option>
+								<option value="quarantined">Dikarantina</option>
+								<option value="refunded">Dikembalikan</option>
+							</select>
+						</div>
+
+						{(stageFilter !== "all" || statusFilter !== "all") && (
+							<button
+								type="button"
+								onClick={() => {
+									setStageFilter("all");
+									setStatusFilter("all");
+								}}
+								className="text-xs text-indigo hover:underline"
+							>
+								Reset Filter
+							</button>
+						)}
+					</div>
 				</div>
 
 				{operations.length === 0 ? (

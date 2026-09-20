@@ -402,12 +402,7 @@ function BillingPage() {
 			</div>
 
 			{/* Credit Usage Section */}
-			<CreditUsageSection
-				availableCredits={creditUsage.availableCredits}
-				reservedCredits={creditUsage.reservedCredits}
-				totalCreditsUsed={creditUsage.totalCreditsUsed}
-				operations={creditUsage.operations}
-			/>
+			<CreditUsageSection operations={creditUsage.operations} />
 
 			{/* Cancel subscription confirmation */}
 			{cancelOpen && (

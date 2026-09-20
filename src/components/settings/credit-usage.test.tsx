@@ -184,68 +184,14 @@ describe("CreditUsageSection", () => {
 		container?.remove();
 	});
 
-	it("renders policy banner with required exact Indonesian text", () => {
+	it("renders usage history table header and filter controls", () => {
 		act(() => {
-			root?.render(
-				<CreditUsageSection
-					availableCredits={25}
-					reservedCredits={4}
-					totalCreditsUsed={12}
-					operations={mockOperations}
-				/>,
-			);
+			root?.render(<CreditUsageSection operations={mockOperations} />);
 		});
 
-		expect(container.textContent).toContain(
-			"Biaya kredit dihitung berdasarkan jenis operasi dan kompleksitas context yang diproses. Estimasi dan batas maksimum ditampilkan sebelum proses dimulai. Operasi yang gagal tidak dikenakan biaya final.",
-		);
-	});
-
-	it("renders summary stat cards (available, reserved when > 0, spent, and stage summaries)", () => {
-		act(() => {
-			root?.render(
-				<CreditUsageSection
-					availableCredits={25}
-					reservedCredits={6}
-					totalCreditsUsed={14}
-					operations={mockOperations}
-				/>,
-			);
-		});
-
-		// Available credits card
-		expect(container.textContent).toContain("Saldo Tersedia");
-		expect(container.textContent).toContain("25");
-
-		// Reserved credits card (shown because > 0)
-		expect(container.textContent).toContain("Sedang Direservasi");
-		expect(container.textContent).toContain("6");
-
-		// Total credits used
-		expect(container.textContent).toContain("Total Kredit Digunakan");
-		expect(container.textContent).toContain("14");
-
-		// Stage breakdown summary
-		expect(container.textContent).toContain("Codebase");
-		expect(container.textContent).toContain("PRD");
-		expect(container.textContent).toContain("AC");
-		expect(container.textContent).toContain("Task");
-	});
-
-	it("hides reserved credits card when reserved credits is 0", () => {
-		act(() => {
-			root?.render(
-				<CreditUsageSection
-					availableCredits={30}
-					reservedCredits={0}
-					totalCreditsUsed={10}
-					operations={mockOperations}
-				/>,
-			);
-		});
-
-		expect(container.textContent).toContain("Saldo Tersedia");
-		expect(container.textContent).not.toContain("Sedang Direservasi");
+		expect(container.textContent).toContain("Riwayat Penggunaan Kredit");
+		expect(container.textContent).toContain("Tahap:");
+		expect(container.textContent).toContain("Status:");
 	});
 
 	it("renders operation rows with correct Indonesian status labels", () => {
