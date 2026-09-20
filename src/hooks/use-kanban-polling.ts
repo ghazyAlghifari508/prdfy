@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KANBAN_POLL_INTERVAL_MS } from "@/lib/constants";
 
 export interface TaskCard {
@@ -48,6 +48,7 @@ export function useKanbanTasks({
 	const [sseData, setSseData] = useState<KanbanData | null>(null);
 	const [sseFailed, setSseFailed] = useState(false);
 	const [sseLoading, setSseLoading] = useState(true);
+	const refreshInFlight = useRef<Promise<void> | null>(null);
 
 	useEffect(() => {
 		if (!enabled || !projectId) return;
@@ -71,7 +72,14 @@ export function useKanbanTasks({
 				// `setQueryData(["kanban-tasks", projectId], ...)` mutations
 				// stay visible even while SSE is the primary source.
 				queryClient.setQueryData(["kanban-tasks", projectId], parsed);
-			} catch {}
+			} catch {
+				// A malformed event means the stream protocol is broken; staying
+				// in loading would hang the board on its skeleton forever.
+				// Fail over to polling, which has error and retry handling.
+				setSseFailed(true);
+				setSseLoading(false);
+				es.close();
+			}
 		};
 
 		es.onerror = () => {
@@ -93,7 +101,7 @@ export function useKanbanTasks({
 			return res.json() as Promise<KanbanData>;
 		},
 		refetchInterval: sseFailed ? intervalMs : false,
-		refetchOnWindowFocus: sseFailed ? true : false,
+		refetchOnWindowFocus: sseFailed,
 		staleTime: 5_000,
 		enabled: enabled && !!projectId && sseFailed,
 	});
@@ -133,15 +141,29 @@ export function useKanbanTasks({
 			} else {
 				// SSE live: one-off fetch to refresh after a user-initiated retry
 				// (pull-to-refresh, banner retry). Keeps SSE as primary source
-				// but lets the retry button feel instant.
+				// but lets the retry button feel instant. Concurrent callers
+				// share one in-flight fetch so a single gesture cannot fan out
+				// into overlapping requests that resolve out of order.
+				if (refreshInFlight.current) {
+					await refreshInFlight.current;
+					return;
+				}
+				const refresh = (async () => {
+					try {
+						const res = await fetch(`/api/kanban/${projectId}`);
+						if (res.ok) {
+							const json = (await res.json()) as KanbanData;
+							setSseData(json);
+							queryClient.setQueryData(["kanban-tasks", projectId], json);
+						}
+					} catch {}
+				})();
+				refreshInFlight.current = refresh;
 				try {
-					const res = await fetch(`/api/kanban/${projectId}`);
-					if (res.ok) {
-						const json = (await res.json()) as KanbanData;
-						setSseData(json);
-						queryClient.setQueryData(["kanban-tasks", projectId], json);
-					}
-				} catch {}
+					await refresh;
+				} finally {
+					refreshInFlight.current = null;
+				}
 			}
 		},
 	};

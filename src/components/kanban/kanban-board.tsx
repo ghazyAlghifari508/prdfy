@@ -155,12 +155,17 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
 	// AC changed comes from API response (compares ac_versions.created_at vs tasks.created_at)
 	const acChanged = data?.acChanged || false;
 
-	// Pull-to-refresh for mobile
+	// Pull-to-refresh for mobile: one refresh per gesture so a single
+	// downward swipe cannot fan out into overlapping requests.
 	const [touchStart, setTouchStart] = useState(0);
-	const handleTouchStart = (e: React.TouchEvent) =>
+	const pullFired = useRef(false);
+	const handleTouchStart = (e: React.TouchEvent) => {
+		pullFired.current = false;
 		setTouchStart(e.touches[0].clientY);
+	};
 	const handleTouchMove = (e: React.TouchEvent) => {
-		if (touchStart - e.touches[0].clientY < -100) {
+		if (!pullFired.current && touchStart - e.touches[0].clientY < -100) {
+			pullFired.current = true;
 			refetch();
 		}
 	};
