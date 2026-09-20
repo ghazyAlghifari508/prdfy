@@ -4,6 +4,7 @@ import { memo, useState } from "react";
 import { updateProfile, uploadAvatar } from "@/app/actions/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PROFILE_ROLES } from "@/lib/constants";
 
 export const ProfileForm = memo(function ProfileForm({
 	profile,
@@ -12,9 +13,18 @@ export const ProfileForm = memo(function ProfileForm({
 		full_name: string | null;
 		avatar_url: string | null;
 		email: string;
+		role: string | null;
 	};
 }) {
 	const [uploading, setUploading] = useState(false);
+	const [avatarError, setAvatarError] = useState<string | null>(null);
+	// Legacy rows may carry a role outside the current list; fall back to
+	// "other" so the next save normalizes instead of failing validation.
+	const initialRole = (PROFILE_ROLES as readonly string[]).includes(
+		profile.role ?? "",
+	)
+		? (profile.role as (typeof PROFILE_ROLES)[number])
+		: "other";
 
 	return (
 		<div className="space-y-8">
@@ -44,13 +54,19 @@ export const ProfileForm = memo(function ProfileForm({
 							onChange={async (e) => {
 								const file = e.target.files?.[0];
 								if (!file) return;
-								if (file.size > 5 * 1024 * 1024) return;
+								setAvatarError(null);
+								if (file.size > 5 * 1024 * 1024) {
+									setAvatarError("Ukuran avatar maksimal 5MB.");
+									return;
+								}
 
 								setUploading(true);
 								try {
 									const fd = new FormData();
 									fd.append("avatar", file);
 									await uploadAvatar(fd);
+								} catch {
+									setAvatarError("Upload avatar belum tersedia.");
 								} finally {
 									setUploading(false);
 								}
@@ -66,13 +82,24 @@ export const ProfileForm = memo(function ProfileForm({
 					<p className="mt-1 text-sm text-(--text-secondary)">
 						{profile.email}
 					</p>
+					{avatarError && (
+						<p role="alert" className="mt-1 text-xs text-red-500">
+							{avatarError}
+						</p>
+					)}
 				</div>
 			</div>
 
 			<form action={updateProfile} className="space-y-5">
 				<div>
-					<label className="mb-1 block text-sm font-medium">Nama Lengkap</label>
+					<label
+						htmlFor="profile-full-name"
+						className="mb-1 block text-sm font-medium"
+					>
+						Nama Lengkap
+					</label>
 					<Input
+						id="profile-full-name"
 						name="full_name"
 						defaultValue={profile.full_name || ""}
 						placeholder="Nama lengkap kamu"
@@ -80,10 +107,16 @@ export const ProfileForm = memo(function ProfileForm({
 				</div>
 
 				<div>
-					<label className="mb-1 block text-sm font-medium">Peran</label>
+					<label
+						htmlFor="profile-role-select"
+						className="mb-1 block text-sm font-medium"
+					>
+						Peran
+					</label>
 					<select
+						id="profile-role-select"
 						name="role"
-						defaultValue="user"
+						defaultValue={initialRole}
 						className="h-11 w-full rounded-lg border border-(--border-subtle) bg-(--bg-card) px-4 text-sm focus:border-primary-black focus:outline-none focus:ring-2 focus:ring-primary-black/5"
 					>
 						<option value="pm">Product Manager</option>

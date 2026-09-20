@@ -10,7 +10,7 @@ import { requireUserServer } from "@/lib/session";
 const loadProfile = createServerFn({ method: "GET" }).handler(async () => {
 	const user = await requireUserServer();
 	const [profile] = await db
-		.select()
+		.select({ fullName: users.fullName, image: users.image, role: users.role })
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/settings/profile")({
 		try {
 			return await loadProfile();
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
@@ -48,6 +48,7 @@ function ProfilePage() {
 					full_name: profile?.fullName ?? null,
 					avatar_url: profile?.image ?? null,
 					email,
+					role: profile?.role ?? null,
 				}}
 			/>
 		</div>

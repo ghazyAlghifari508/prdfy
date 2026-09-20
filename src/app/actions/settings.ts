@@ -15,11 +15,13 @@ const _updateProfile = createServerFn({ method: "POST" })
 	.validator((d: { fullName: string; role: string }) => d)
 	.handler(async ({ data }) => {
 		const user = await requireUser(getRequestHeaders());
+		const { parseProfileUpdate } = await import("@/lib/profile");
+		const clean = parseProfileUpdate(data);
 		const { db } = await import("@/db");
 		const { users } = await import("@/db/schema");
 		await db
 			.update(users)
-			.set({ fullName: data.fullName, role: data.role, updatedAt: new Date() })
+			.set({ fullName: clean.fullName, role: clean.role, updatedAt: new Date() })
 			.where(eq(users.id, user.id));
 	});
 

@@ -117,6 +117,17 @@ export const CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS = 8_000;
 export const ERROR_REPORT_MAX_MESSAGE_CHARS = 2000;
 export const ERROR_REPORT_MAX_CONTEXT_CHARS = 8000;
 
+// === Profile ===
+export const PROFILE_ROLES = [
+	"pm",
+	"developer",
+	"founder",
+	"designer",
+	"student",
+	"other",
+] as const;
+export const PROFILE_MAX_NAME_CHARS = 100;
+
 // === User feedback ===
 export const FEEDBACK_TYPES = ["general", "bug", "feature"] as const;
 export const FEEDBACK_MAX_MESSAGE_CHARS = 2000;
