@@ -1,69 +1,58 @@
 export interface FaqItem {
-	q: string;
-	a: string;
-}
-export interface FaqCategory {
 	id: string;
 	title: string;
-	items: FaqItem[];
+	subtitle: string;
+	content: string;
+	icon: "spark" | "workflow" | "document" | "board" | "credit" | "feedback";
 }
-export const FAQ_CATEGORIES: FaqCategory[] = [
+
+export const FAQ_ITEMS: FaqItem[] = [
 	{
-		id: "akun-login",
-		title: "Akun & Login",
-		items: [
-			{
-				q: "Bagaimana cara login ke PrdFy?",
-				a: "PrdFy mendukung login dengan Google dan GitHub. Klik tombol di halaman login, lalu otorisasi akun kamu.",
-			},
-			{
-				q: "Apakah PrdFy mendukung login dengan email dan password?",
-				a: "Belum. Saat ini login hanya tersedia melalui Google dan GitHub OAuth.",
-			},
-		],
+		id: "product-output",
+		title: "Apa yang bisa dibuat dengan PrdFy?",
+		subtitle: "Ubah ide produk menjadi dokumen kerja",
+		content:
+			"PrdFy membantu menyusun PRD, acceptance criteria, task tree, dan Kanban dari satu ide produk. Hasilnya bisa kamu baca, revisi, dan lanjutkan sebagai dasar kerja tim.",
+		icon: "spark",
 	},
 	{
-		id: "credit-paket",
-		title: "Credit & Paket",
-		items: [
-			{
-				q: "Apa itu credit dan kapan credit terpakai?",
-				a: "1 credit = 1 generate (PRD, AC, atau Task). Revisi dokumen gratis dan tidak memakai credit.",
-			},
-			{
-				q: "Apa bedanya paket free, pro, dan hengker?",
-				a: "Free (2 credit, PRD saja). Pro (30 credit, workflow lengkap + share link). Hengker (105 credit, workflow lengkap + version history tak terbatas).",
-			},
-		],
+		id: "guided-flow",
+		title: "Bagaimana alur kerja PrdFy?",
+		subtitle: "Jawab pertanyaan yang menentukan arah produk",
+		content:
+			"Mulai dari ide produk, jawab pertanyaan klarifikasi, lalu PrdFy menyusun PRD dengan delapan bagian. Setelah itu kamu bisa melanjutkan ke acceptance criteria, task tree, dan Kanban.",
+		icon: "workflow",
 	},
 	{
-		id: "cara-kerja",
-		title: "Cara Kerja PrdFy",
-		items: [
-			{
-				q: "Bagaimana alur membuat PRD di PrdFy?",
-				a: "Masukkan ide produk → jawab pertanyaan klarifikasi → PrdFy menghasilkan PRD 8 bagian via AI → revisi sesukamu.",
-			},
-		],
+		id: "prd-revision",
+		title: "Apakah PRD bisa direvisi?",
+		subtitle: "Perbaiki bagian tertentu tanpa menulis ulang semuanya",
+		content:
+			"Bisa. Kamu dapat meminta revisi pada PRD melalui chat. Revisi hanya memperbarui bagian yang diminta dan tidak memakai credit tambahan.",
+		icon: "document",
 	},
 	{
-		id: "pembayaran",
-		title: "Pembayaran & Top-up",
-		items: [
-			{
-				q: "Metode pembayaran apa yang didukung?",
-				a: "Pembayaran diproses melalui Midtrans (Snap). Top-up credit tersedia di halaman Billing.",
-			},
-		],
+		id: "task-kanban",
+		title: "Apa hubungan PRD, Task, dan Kanban?",
+		subtitle: "Dari keputusan produk sampai pekerjaan yang bisa dilacak",
+		content:
+			"PRD menjelaskan produk, acceptance criteria merinci kondisi penerimaan, dan task tree memecah pekerjaan. Task tersebut kemudian dapat dilacak melalui board Kanban.",
+		icon: "board",
 	},
 	{
-		id: "lainnya",
-		title: "Lainnya",
-		items: [
-			{
-				q: "Di mana saya bisa melaporkan bug atau meminta fitur?",
-				a: "Buka Settings → Feedback, lalu pilih tipe laporan (bug atau fitur baru).",
-			},
-		],
+		id: "credits",
+		title: "Kapan credit digunakan?",
+		subtitle: "Satu credit untuk satu proses generate",
+		content:
+			"Satu credit digunakan untuk satu generate PRD, acceptance criteria, atau task. Revisi dokumen tetap gratis dan tidak mengurangi credit.",
+		icon: "credit",
+	},
+	{
+		id: "feedback",
+		title: "Bagaimana cara memberi masukan?",
+		subtitle: "Laporkan bug atau usulkan fitur dari Settings",
+		content:
+			"Buka Settings lalu pilih Feedback. Kamu bisa mengirim laporan bug atau usulan fitur dari halaman tersebut.",
+		icon: "feedback",
 	},
 ];

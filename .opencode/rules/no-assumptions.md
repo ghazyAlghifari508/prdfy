@@ -1,4 +1,4 @@
-# No-Assumption & Deep Analysis Rules
+# No-Assumption &amp; Deep Analysis Rules
 
 ## Core Principle
 
@@ -37,20 +37,17 @@ Replace with: "Let me verify" → then use tools.
 When the user asks a question that requires analysis, design thinking, or multiple possible approaches:
 
 1. **Identify if brainstorming is needed.** Questions like:
-   - "How should we implement X?"
-   - "What's the best approach for Y?"
-   - "Why is this happening?"
-   - "How do we fix this?"
-   - "What do you think about Z?"
-   - Any question with multiple valid answers
-
+  - "How should we implement X?"
+  - "What's the best approach for Y?"
+  - "Why is this happening?"
+  - "How do we fix this?"
+  - "What do you think about Z?"
+  - Any question with multiple valid answers
 2. **Brainstorm BEFORE responding.** Use the brainstorming skill if available. If not:
-   - List 2-3 possible approaches
-   - For each: pros, cons, effort level
-   - Recommend one with reasoning grounded in the actual codebase
-
+  - List 2-3 possible approaches
+  - For each: pros, cons, effort level
+  - Recommend one with reasoning grounded in the actual codebase
 3. **Do NOT give a single answer without exploring alternatives.** The first idea is rarely the best one.
-
 4. **Do NOT brainstorm in silence.** Show your thinking to the user. They may have context you lack.
 
 ---
@@ -90,40 +87,44 @@ Before implementing ANY change related to features, bugs, errors, design, or UX:
 
 ---
 
-## Rule 4: Use Relevant Skills & Agents
+## Rule 4: Use Relevant Skills &amp; Agents
 
 When implementing changes, ALWAYS check for and use relevant skills/agents:
 
 ### PRDFY Tech Stack Reference
 
-| Layer | Technology |
-|---|---|
-| Framework | TanStack Start + TanStack Router (file-based routing) |
-| UI | React 19, Radix UI, shadcn/ui, Tailwind CSS 4, Framer Motion |
-| State | Zustand, TanStack Query |
-| Auth | Better Auth (Google + GitHub OAuth) |
-| DB | PostgreSQL 17 (local), Drizzle ORM |
-| AI | Vercel AI SDK (`ai` package), @ai-sdk/openai |
-| Validation | Zod v4 |
-| Payments | Midtrans Snap |
-| Email | Resend |
-| Content/export | Mermaid, react-markdown, remark-gfm, rehype-highlight, DOMPurify, jsPDF, JSZip |
-| Developer tooling | TanStack Devtools, Vite, TypeScript |
-| Lint/Format | Biome |
-| Testing | Vitest (unit), Playwright (e2e) |
-| Build | Vite 8, TypeScript 6 |
-| Package Manager | pnpm |
 
-### MCP Registry & Usage Rules
+| Layer             | Technology                                                                     |
+| ----------------- | ------------------------------------------------------------------------------ |
+| Framework         | TanStack Start + TanStack Router (file-based routing)                          |
+| UI                | React 19, Radix UI, shadcn/ui, Tailwind CSS 4, Framer Motion                   |
+| State             | Zustand, TanStack Query                                                        |
+| Auth              | Better Auth (Google + GitHub OAuth)                                            |
+| DB                | PostgreSQL 17 (local), Drizzle ORM                                             |
+| AI                | Vercel AI SDK (`ai` package), @ai-sdk/openai                                   |
+| Validation        | Zod v4                                                                         |
+| Payments          | Midtrans Snap                                                                  |
+| Email             | Resend                                                                         |
+| Content/export    | Mermaid, react-markdown, remark-gfm, rehype-highlight, DOMPurify, jsPDF, JSZip |
+| Developer tooling | TanStack Devtools, Vite, TypeScript                                            |
+| Lint/Format       | Biome                                                                          |
+| Testing           | Vitest (unit), Playwright (e2e)                                                |
+| Build             | Vite 8, TypeScript 6                                                           |
+| Package Manager   | pnpm                                                                           |
+
+
+### MCP Registry &amp; Usage Rules
 
 MCP servers configured for this OpenCode environment:
 
-| MCP | Type | Use when |
-|---|---|---|
-| `sequentialthinking` | Local MCP | Complex debugging, architecture, migrations, multi-step planning, comparing alternatives, or when assumptions need to be revised. Ask the model to use `sequential_thinking`; do not fabricate progress or conclusions. |
-| `context7` | Remote MCP | Current documentation and API examples for libraries, frameworks, SDKs, and CLI tools. Resolve the library ID before querying documentation. |
-| `chrome-devtools` | Local MCP | Browser inspection, live frontend QA, console/network investigation, screenshots, and responsive verification. |
-| `supabase` | Remote MCP | Only when a task explicitly concerns Supabase. PRDFY's application database is PostgreSQL + Drizzle, so do not substitute Supabase patterns for Drizzle patterns. |
+
+| MCP                  | Type       | Use when                                                                                                                                                                                                                |
+| -------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sequentialthinking` | Local MCP  | Complex debugging, architecture, migrations, multi-step planning, comparing alternatives, or when assumptions need to be revised. Ask the model to use `sequential_thinking`; do not fabricate progress or conclusions. |
+| `context7`           | Remote MCP | Current documentation and API examples for libraries, frameworks, SDKs, and CLI tools. Resolve the library ID before querying documentation.                                                                            |
+| `chrome-devtools`    | Local MCP  | Browser inspection, live frontend QA, console/network investigation, screenshots, and responsive verification.                                                                                                          |
+| `supabase`           | Remote MCP | Only when a task explicitly concerns Supabase. PRDFY's application database is PostgreSQL + Drizzle, so do not substitute Supabase patterns for Drizzle patterns.                                                       |
+
 
 MCP rules:
 
@@ -134,46 +135,48 @@ MCP rules:
 5. Use `supabase` only for Supabase-specific work. Do not introduce Supabase into PRDFY's PostgreSQL + Drizzle architecture.
 6. If an MCP is unavailable or fails to connect, state that fact and continue with an appropriate verified fallback; never pretend the MCP was used.
 
-### Skills & Tools Map — Match to Task (OpenCode)
+### Skills &amp; Tools Map — Match to Task (OpenCode)
 
-Available resources di opencode ini: **superpowers skills**, **personal skills** (`~/.claude/skills` & `~/.agents/skills`), dan **MCP servers** (context7, chrome-devtools). Gunakan native `skill` tool untuk memuat skill.
+Available resources di opencode ini: **superpowers skills**, **personal skills** (`~/.claude/skills` &amp; `~/.agents/skills`), dan **MCP servers** (context7, chrome-devtools). Gunakan native `skill` tool untuk memuat skill.
 
-| Task Type | Skill / Tool | Notes |
-|---|---|---|
-| **New feature** | `brainstorming` → `writing-plans` (superpowers) | Always brainstorm first, then plan, then implement |
-| **Complex analysis / architecture** | `sequentialthinking` MCP | Use structured, revisable analysis before choosing an approach; verify every conclusion |
-| **React/TSX change** | `vercel-react-best-practices` skill | Performance patterns untuk React; verify dengan `pnpm lint` + tsc |
-| **TypeScript change** | `pnpm typecheck` / Biome | Verify types via command, bukan asumsi |
-| **Build error** | `systematic-debugging` (superpowers) | Root cause analysis sebelum fix |
-| **Bug fix** | `systematic-debugging` (superpowers) + `explore` agent | Systematic debugging skill first, then explore codebase |
-| **UI/UX change** | `ui-design-system`, `ui-ux-pro-max`, `shadcn-component-discovery` skills | A11y + component patterns untuk UI changes |
-| **Frontend visual design** | `frontend-design`, `high-end-visual-design`, `ui-ux-pro-max` skills | Use only when creating or substantially reshaping UI; preserve existing PRDFY design language when modifying existing screens |
-| **Anti-AI-Slop Filter (Core)** | `antislop` skill | Core filter: 38 rules (R-01–R-38), Hard Gate, Liveliness Toolkit, Delivery Gate PASS/FAIL audit report |
-| **Anti-Slop UI / Visual** | `antislop-ui` skill | UI layout, color, components, decoration, motion, structure without generic AI slop |
-| **Anti-Slop Copywriting** | `antislop-copywriting` skill | Headlines, CTAs, tone, anti-AI-writing patterns, markdown hygiene, no fake numbers/stats |
-| **Anti-Slop Human / A11y** | `antislop-human` skill | Contrast checker, keyboard navigation, focus rings, interactive states |
-| **Anti-Slop Responsive / Mobile** | `antislop-layoutmobile` skill | Responsive reflow (320px mobile to 1440px desktop), breakpoints, grids, tap targets, no horizontal overflow |
-| **Anti-Slop Code Cleanliness** | `antislop-code` skill | Remove generic AI comments & box banners, preserve valuable invariant explanations, no code tampering |
-| **Database/schema/query change** | `drizzle` skill + `supabase-postgres-best-practices` skill + context7 MCP | PostgreSQL 17 lokal + Drizzle (`drizzle-kit`), BUKAN Supabase — jangan pakai tool/pattern Supabase |
-| **Security** | `better-auth-security-best-practices` skill | MUST USE after auth/API endpoint changes |
-| **Performance** | `vercel-react-best-practices` skill | Bundle size, render perf |
-| **Code review** | `requesting-code-review` (superpowers) | After significant code changes |
-| **Testing / unit test** | `test-driven-development` (superpowers) | Vitest untuk unit; write the failing test before implementation when applicable |
-| **E2E / QA testing** | `playwright-best-practices`, `webapp-testing` skills atau `chrome-devtools` MCP | Playwright scripts atau live browser automation |
-| **Payment/Midtrans** | `integrate-midtrans-payments` skill | Snap, webhook, signature verification |
-| **Email / Resend** | `context7` MCP | Fetch current Resend API documentation; no dedicated Resend skill is installed |
-| **Library docs** | `context7` MCP (`resolve-library-id` + `query-docs`) atau `nia` skill | Fetch current docs, never guess API. `nia` untuk package comparison/deep research |
-| **TanStack Start/Router** | `tanstack-start-best-practices`, `tanstack-router-best-practices` skills + context7 MCP | Fetch current TanStack docs, never guess API |
-| **TanStack Query** | `tanstack-query-best-practices` skill + context7 MCP | Data fetching, caching, mutations, invalidation, and server state |
-| **Tailwind CSS** | `tailwind-4-docs` skill + context7 MCP | Tailwind v4 syntax and migration details |
-| **Better Auth** | `better-auth-authentication`, `better-auth-security-best-practices` skills + context7 MCP | Authentication flows, sessions, OAuth, CSRF, cookies, and security |
-| **Vercel AI SDK / AI features** | `ai-sdk` skill + context7 MCP | AI SDK usage, streaming, tools, structured output, and model config |
-| **9router** | `9router` skill | 9router configuration, OpenAI-compatible endpoints, model selection, web search/fetch, and AI gateway integration |
-| **Radix UI / shadcn** | `shadcn-component-discovery`, `ui-design-system` skills | Component discovery, variants, accessibility, and composition |
-| **Markdown / Mermaid / export** | `document-pdf` skill when PDF work is involved + context7 MCP | PDF generation/parsing or current library API; verify sanitization and rendering behavior |
-| **Environment configuration** | `dotenv` skill | Any `.env`, environment variable, secret, or config-loading task |
-| **TanStack Devtools** | TanStack Intent guidance in `AGENTS.md` + context7 MCP | Devtools setup, plugins, event client, Vite integration, and production stripping |
-| **Web research / external URLs** | `tavily-search`, `tavily-research`, `tavily-extract`, or `tavily-crawl` skills | Use only when current external information is needed; do not use for local repository search |
+
+| Task Type                           | Skill / Tool                                                                              | Notes                                                                                                                         |
+| ----------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **New feature**                     | `brainstorming` → `writing-plans` (superpowers)                                           | Always brainstorm first, then plan, then implement                                                                            |
+| **Complex analysis / architecture** | `sequentialthinking` MCP                                                                  | Use structured, revisable analysis before choosing an approach; verify every conclusion                                       |
+| **React/TSX change**                | `vercel-react-best-practices` skill                                                       | Performance patterns untuk React; verify dengan `pnpm lint` + tsc                                                             |
+| **TypeScript change**               | `pnpm typecheck` / Biome                                                                  | Verify types via command, bukan asumsi                                                                                        |
+| **Build error**                     | `systematic-debugging` (superpowers)                                                      | Root cause analysis sebelum fix                                                                                               |
+| **Bug fix**                         | `systematic-debugging` (superpowers) + `explore` agent                                    | Systematic debugging skill first, then explore codebase                                                                       |
+| **UI/UX change**                    | `ui-design-system`, `ui-ux-pro-max`, `shadcn-component-discovery` skills                  | A11y + component patterns untuk UI changes                                                                                    |
+| **Frontend visual design**          | `frontend-design`, `high-end-visual-design`, `ui-ux-pro-max` skills                       | Use only when creating or substantially reshaping UI; preserve existing PRDFY design language when modifying existing screens |
+| **Anti-AI-Slop Filter (Core)**      | `antislop` skill                                                                          | Core filter: 38 rules (R-01–R-38), Hard Gate, Liveliness Toolkit, Delivery Gate PASS/FAIL audit report                        |
+| **Anti-Slop UI / Visual**           | `antislop-ui` skill                                                                       | UI layout, color, components, decoration, motion, structure without generic AI slop                                           |
+| **Anti-Slop Copywriting**           | `antislop-copywriting` skill                                                              | Headlines, CTAs, tone, anti-AI-writing patterns, markdown hygiene, no fake numbers/stats                                      |
+| **Anti-Slop Human / A11y**          | `antislop-human` skill                                                                    | Contrast checker, keyboard navigation, focus rings, interactive states                                                        |
+| **Anti-Slop Responsive / Mobile**   | `antislop-layoutmobile` skill                                                             | Responsive reflow (320px mobile to 1440px desktop), breakpoints, grids, tap targets, no horizontal overflow                   |
+| **Anti-Slop Code Cleanliness**      | `antislop-code` skill                                                                     | Remove generic AI comments &amp; box banners, preserve valuable invariant explanations, no code tampering                     |
+| **Database/schema/query change**    | `drizzle` skill + `supabase-postgres-best-practices` skill + context7 MCP                 | PostgreSQL 17 lokal + Drizzle (`drizzle-kit`), BUKAN Supabase — jangan pakai tool/pattern Supabase                            |
+| **Security**                        | `better-auth-security-best-practices` skill                                               | MUST USE after auth/API endpoint changes                                                                                      |
+| **Performance**                     | `vercel-react-best-practices` skill                                                       | Bundle size, render perf                                                                                                      |
+| **Code review**                     | `requesting-code-review` (superpowers)                                                    | After significant code changes                                                                                                |
+| **Testing / unit test**             | `test-driven-development` (superpowers)                                                   | Vitest untuk unit; write the failing test before implementation when applicable                                               |
+| **E2E / QA testing**                | `playwright-best-practices`, `webapp-testing` skills atau `chrome-devtools` MCP           | Playwright scripts atau live browser automation                                                                               |
+| **Payment/Midtrans**                | `integrate-midtrans-payments` skill                                                       | Snap, webhook, signature verification                                                                                         |
+| **Email / Resend**                  | `context7` MCP                                                                            | Fetch current Resend API documentation; no dedicated Resend skill is installed                                                |
+| **Library docs**                    | `context7` MCP (`resolve-library-id` + `query-docs`) atau `nia` skill                     | Fetch current docs, never guess API. `nia` untuk package comparison/deep research                                             |
+| **TanStack Start/Router**           | `tanstack-start-best-practices`, `tanstack-router-best-practices` skills + context7 MCP   | Fetch current TanStack docs, never guess API                                                                                  |
+| **TanStack Query**                  | `tanstack-query-best-practices` skill + context7 MCP                                      | Data fetching, caching, mutations, invalidation, and server state                                                             |
+| **Tailwind CSS**                    | `tailwind-4-docs` skill + context7 MCP                                                    | Tailwind v4 syntax and migration details                                                                                      |
+| **Better Auth**                     | `better-auth-authentication`, `better-auth-security-best-practices` skills + context7 MCP | Authentication flows, sessions, OAuth, CSRF, cookies, and security                                                            |
+| **Vercel AI SDK / AI features**     | `ai-sdk` skill + context7 MCP                                                             | AI SDK usage, streaming, tools, structured output, and model config                                                           |
+| **9router**                         | `9router` skill                                                                           | 9router configuration, OpenAI-compatible endpoints, model selection, web search/fetch, and AI gateway integration             |
+| **Radix UI / shadcn**               | `shadcn-component-discovery`, `ui-design-system` skills                                   | Component discovery, variants, accessibility, and composition                                                                 |
+| **Markdown / Mermaid / export**     | `document-pdf` skill when PDF work is involved + context7 MCP                             | PDF generation/parsing or current library API; verify sanitization and rendering behavior                                     |
+| **Environment configuration**       | `dotenv` skill                                                                            | Any `.env`, environment variable, secret, or config-loading task                                                              |
+| **TanStack Devtools**               | TanStack Intent guidance in `AGENTS.md` + context7 MCP                                    | Devtools setup, plugins, event client, Vite integration, and production stripping                                             |
+| **Web research / external URLs**    | `tavily-search`, `tavily-research`, `tavily-extract`, or `tavily-crawl` skills            | Use only when current external information is needed; do not use for local repository search                                  |
+
 
 Skills verified as available in the current environment include the named entries above. The following relevant package areas do not have a dedicated specialized skill identified in the current skill inventory: Resend, Mermaid, `react-markdown`, `remark-gfm`, `rehype-highlight`, DOMPurify, jsPDF, JSZip, Vite, TypeScript, Zod, Zustand, Radix UI, and Biome. For those areas, use repository patterns, package typings, tests, and `context7` documentation rather than inventing a skill name.
 
@@ -191,14 +194,16 @@ Skills verified as available in the current environment include the named entrie
 
 Before stating ANY fact about the codebase, verify it:
 
-| You Want to Say | Verify With |
-|---|---|
-| "File X does Y" | `read` the file |
-| "Function Z is called by..." | `grep` for callers |
-| "This component uses..." | `read` the component |
-| "The error comes from..." | `grep` for the error message |
-| "This pattern is used in..." | `grep` for the pattern |
-| "No files depend on this" | `grep` for imports/references |
+
+| You Want to Say              | Verify With                   |
+| ---------------------------- | ----------------------------- |
+| "File X does Y"              | `read` the file               |
+| "Function Z is called by..." | `grep` for callers            |
+| "This component uses..."     | `read` the component          |
+| "The error comes from..."    | `grep` for the error message  |
+| "This pattern is used in..." | `grep` for the pattern        |
+| "No files depend on this"    | `grep` for imports/references |
+
 
 **If you cannot verify a claim, state the uncertainty explicitly.**
 
@@ -280,20 +285,22 @@ No exceptions unless user explicitly says otherwise.
 
 ## Anti-Patterns
 
-| Anti-Pattern | Why It's Wrong | Correct Behavior |
-|---|---|---|
-| Answering "I think it's because..." | Guessing, may mislead | "Let me check" → tools |
-| Fixing without reading callers | May break other code | Grep for all callers first |
-| Assuming file contents | Files change, memory is stale | Read the file |
-| Skipping brainstorm | First idea often wrong | List alternatives, compare |
-| Implementing without skill check | Missing established workflows | Check skills first |
-| "This is a simple change" | Simple changes break things too | Still do impact assessment |
-| Claiming "no dependencies" without searching | May have hidden imports | Grep for references |
-| Empty glob/grep → "X doesn't exist" | Search miss ≠ proof of absence; coverage unknown | Run Rule 5A protocol, then hedge |
-| Searching only repo root in a monorepo | Code often lives in `packages/`, `apps/`, `tools/` | Map workspace roots FIRST (Rule 5A step 1–2) |
-| Absolute phrasing for negative results ("tidak ada", "no such") | Sounds authoritative, is unverified | Coverage phrasing: "not found in [paths × patterns]" |
-| Apologizing vaguely when corrected | Same failure recurs next session | Name exact search gap + re-verify with broader scope |
-| Using training data for library APIs | APIs change, training data is old | Use Context7 or docs |
+
+| Anti-Pattern                                                    | Why It's Wrong                                     | Correct Behavior                                     |
+| --------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------- |
+| Answering "I think it's because..."                             | Guessing, may mislead                              | "Let me check" → tools                               |
+| Fixing without reading callers                                  | May break other code                               | Grep for all callers first                           |
+| Assuming file contents                                          | Files change, memory is stale                      | Read the file                                        |
+| Skipping brainstorm                                             | First idea often wrong                             | List alternatives, compare                           |
+| Implementing without skill check                                | Missing established workflows                      | Check skills first                                   |
+| "This is a simple change"                                       | Simple changes break things too                    | Still do impact assessment                           |
+| Claiming "no dependencies" without searching                    | May have hidden imports                            | Grep for references                                  |
+| Empty glob/grep → "X doesn't exist"                             | Search miss ≠ proof of absence; coverage unknown   | Run Rule 5A protocol, then hedge                     |
+| Searching only repo root in a monorepo                          | Code often lives in `packages/`, `apps/`, `tools/` | Map workspace roots FIRST (Rule 5A step 1–2)         |
+| Absolute phrasing for negative results ("tidak ada", "no such") | Sounds authoritative, is unverified                | Coverage phrasing: "not found in [paths × patterns]" |
+| Apologizing vaguely when corrected                              | Same failure recurs next session                   | Name exact search gap + re-verify with broader scope |
+| Using training data for library APIs                            | APIs change, training data is old                  | Use Context7 or docs                                 |
+
 
 ---
 
@@ -323,3 +330,4 @@ Pattern: penjelasan → Bahasa Indonesia. Kode/teknis → English as-is.
 7. **No hallucinated code** — read before write
 8. **Explain before implement** — state findings and plan
 9. **Commit + push** — every task, no exceptions
+
