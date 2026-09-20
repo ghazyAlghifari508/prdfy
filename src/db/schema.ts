@@ -123,6 +123,7 @@ export const subscriptions = pgTable(
 		// Hot path: credits.ts getCreditBalance/consumeCredit query
 		// WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
 		index("subscriptions_user_id_created_at_idx").on(t.userId, t.createdAt),
+		uniqueIndex("subscriptions_user_id_id_unique").on(t.userId, t.id),
 		check(
 			"subscriptions_credits_reserved_non_negative_check",
 			sql`credits_reserved >= 0`,
