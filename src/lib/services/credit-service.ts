@@ -14,9 +14,11 @@ import {
 
 export {
 	type BuildAcMetricsInput,
+	type BuildCodebaseMetricsInput,
 	type BuildPrdMetricsInput,
 	type BuildTaskMetricsInput,
 	buildAcMetrics,
+	buildCodebaseMetrics,
 	buildPrdMetrics,
 	buildTaskMetrics,
 	formatInsufficientCreditsError,

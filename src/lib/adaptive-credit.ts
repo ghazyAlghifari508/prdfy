@@ -303,6 +303,37 @@ export function buildTaskMetrics(
 	};
 }
 
+export interface BuildCodebaseMetricsInput {
+	fileCount?: number;
+	contentSize?: number;
+	sourceBytes?: number;
+	languageCount?: number;
+	dependencyCount?: number;
+	relationshipCount?: number;
+}
+
+export function buildCodebaseMetrics(
+	input?: BuildCodebaseMetricsInput | null,
+): CreditComplexityMetrics {
+	const codebase = normalizeCodebaseMetrics(
+		input
+			? {
+					fileCount: input.fileCount,
+					sourceBytes:
+						input.sourceBytes !== undefined
+							? input.sourceBytes
+							: input.contentSize,
+					languageCount: input.languageCount,
+					dependencyCount: input.dependencyCount,
+					relationshipCount: input.relationshipCount,
+				}
+			: undefined,
+	);
+	return {
+		...(codebase ? { codebase } : {}),
+	};
+}
+
 export function formatInsufficientCreditsError(input: {
 	quote: CreditQuote;
 	availableCredits: number;

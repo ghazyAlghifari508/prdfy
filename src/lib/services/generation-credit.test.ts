@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildAcMetrics,
+	buildCodebaseMetrics,
 	buildPrdMetrics,
 	buildTaskMetrics,
 	estimateCreditQuote,
 	formatInsufficientCreditsError,
 	formatSubscriptionPausedError,
 } from "@/lib/adaptive-credit";
+import { decideAnalysisRequest } from "@/lib/codebase-analysis";
 import {
 	type CreditServiceStore,
 	createCreditService,
@@ -159,6 +161,42 @@ describe("metric builders", () => {
 					fileCount: 80,
 				},
 			});
+		});
+	});
+
+	describe("buildCodebaseMetrics", () => {
+		it("calculates codebase complexity metrics from snapshot fileCount and contentSize", () => {
+			const metrics = buildCodebaseMetrics({
+				fileCount: 150,
+				contentSize: 500_000,
+			});
+
+			expect(metrics).toEqual({
+				codebase: {
+					fileCount: 150,
+					sourceBytes: 500_000,
+				},
+			});
+		});
+
+		it("prefers explicit sourceBytes over contentSize if both are provided", () => {
+			const metrics = buildCodebaseMetrics({
+				fileCount: 80,
+				sourceBytes: 250_000,
+				contentSize: 200_000,
+			});
+
+			expect(metrics).toEqual({
+				codebase: {
+					fileCount: 80,
+					sourceBytes: 250_000,
+				},
+			});
+		});
+
+		it("handles empty or zero snapshot metrics safely", () => {
+			expect(buildCodebaseMetrics({})).toEqual({});
+			expect(buildCodebaseMetrics(null)).toEqual({});
 		});
 	});
 });
@@ -551,5 +589,221 @@ describe("generation credit lifecycle integration", () => {
 
 		expect(quote.estimatedCredits).toBe(6);
 		expect(quote.maximumCredits).toBe(8);
+	});
+
+	describe("codebase analysis credit lifecycle integration", () => {
+		it("ready analysis reuse causes zero credit reservations or debits", () => {
+			const store = makeStore();
+			const decision = decideAnalysisRequest(
+				{ id: "snap-1", status: "uploaded" },
+				[{ id: "an-1", status: "ready" }],
+			);
+			expect(decision).toEqual({ action: "reuse", analysisId: "an-1" });
+
+			// Under reuse, credit service is never invoked
+			const subscription = store.subscriptions.get("sub-1");
+			expect(store.operations.size).toBe(0);
+			expect(store.ledger).toHaveLength(0);
+			expect(subscription?.creditsReserved).toBe(0);
+			expect(subscription?.creditsUsed).toBe(0);
+		});
+
+		it("new analysis reserves before execution and settles on success with artifact ID", () => {
+			const store = makeStore();
+			const subscription = store.subscriptions.get("sub-1");
+			if (!subscription) throw new Error("Missing test fixture");
+			subscription.credits = 20;
+
+			const service = createCreditService(store);
+			const decision = decideAnalysisRequest(
+				{ id: "snap-new", status: "uploaded" },
+				[],
+			);
+			expect(decision).toEqual({ action: "create" });
+
+			const metrics = buildCodebaseMetrics({
+				fileCount: 150,
+				contentSize: 300_000,
+			});
+			const quote = service.createCreditQuote({
+				userId: "user-1",
+				projectId: "project-1",
+				stage: "codebase",
+				operation: "codebase_analysis",
+				metrics,
+			});
+
+			expect(quote.operation).toBe("codebase_analysis");
+			expect(quote.maximumCredits).toBe(12);
+			expect(quote.estimatedCredits).toBeGreaterThanOrEqual(2);
+
+			const reservation = service.reserveCreditOperation({
+				userId: "user-1",
+				projectId: "project-1",
+				stage: "codebase",
+				operation: "codebase_analysis",
+				metrics,
+				idempotencyKey: "project-1:codebase_analysis:snap-new",
+				quote,
+			});
+
+			expect(reservation.state).toBe("reserved");
+			expect(subscription.creditsReserved).toBe(12);
+			expect(store.ledger).toHaveLength(1);
+			expect(store.ledger[0].entryType).toBe("reservation");
+			expect(store.ledger[0].amount).toBe(-12);
+
+			service.markCreditOperationRunning({
+				userId: "user-1",
+				operationId: reservation.id,
+			});
+
+			const settled = service.settleCreditOperation({
+				userId: "user-1",
+				operationId: reservation.id,
+				artifactId: "analysis-art-123",
+				actualMetrics: metrics,
+			});
+
+			expect(settled.state).toBe("settled");
+			expect(settled.finalCharge).toBe(quote.estimatedCredits);
+			expect(subscription.creditsReserved).toBe(0);
+			expect(subscription.creditsUsed).toBe(quote.estimatedCredits);
+
+			const op = store.operations.get(reservation.id);
+			expect(op?.artifactReference).toBe("analysis-art-123");
+			expect(op?.state).toBe("settled");
+
+			expect(store.ledger.map((e) => e.entryType)).toEqual([
+				"reservation",
+				"release",
+				"debit",
+			]);
+		});
+
+		it("analysis failure releases reservation with 0 debit", () => {
+			const store = makeStore();
+			const subscription = store.subscriptions.get("sub-1");
+			if (!subscription) throw new Error("Missing test fixture");
+			subscription.credits = 20;
+
+			const service = createCreditService(store);
+			const metrics = buildCodebaseMetrics({
+				fileCount: 50,
+				contentSize: 100_000,
+			});
+			const quote = service.createCreditQuote({
+				userId: "user-1",
+				projectId: "project-1",
+				stage: "codebase",
+				operation: "codebase_analysis",
+				metrics,
+			});
+
+			const reservation = service.reserveCreditOperation({
+				userId: "user-1",
+				projectId: "project-1",
+				stage: "codebase",
+				operation: "codebase_analysis",
+				metrics,
+				idempotencyKey: "project-1:codebase_analysis:snap-fail",
+				quote,
+			});
+
+			service.markCreditOperationRunning({
+				userId: "user-1",
+				operationId: reservation.id,
+			});
+
+			const released = service.releaseCreditOperation({
+				userId: "user-1",
+				operationId: reservation.id,
+				reason: "Analysis model generation timed out",
+			});
+
+			expect(released.state).toBe("released");
+			expect(released.finalCharge).toBeNull();
+			expect(subscription.creditsReserved).toBe(0);
+			expect(subscription.creditsUsed).toBe(0);
+
+			expect(store.ledger.map((e) => e.entryType)).toEqual([
+				"reservation",
+				"release",
+			]);
+			expect(store.ledger[1].amount).toBe(12);
+			expect(store.ledger.reduce((sum, e) => sum + e.amount, 0)).toBe(0);
+		});
+
+		it("insufficient credits rejects with 403 before model execution", () => {
+			const store = makeStore();
+			const subscription = store.subscriptions.get("sub-1");
+			if (!subscription) throw new Error("Missing test fixture");
+			subscription.credits = 5; // Available is 5, but codebase_analysis maximum is 12
+
+			const metrics = buildCodebaseMetrics({
+				fileCount: 10,
+				contentSize: 20_000,
+			});
+			const quote = estimateCreditQuote({
+				operation: "codebase_analysis",
+				metrics,
+			});
+
+			const availableCredits = Math.max(
+				0,
+				subscription.credits -
+					subscription.creditsUsed -
+					subscription.creditsReserved,
+			);
+
+			expect(availableCredits).toBe(5);
+			expect(quote.maximumCredits).toBe(12);
+			expect(availableCredits < quote.maximumCredits).toBe(true);
+
+			const err = formatInsufficientCreditsError({
+				quote,
+				availableCredits,
+				stageLabel: "analisis codebase",
+			});
+
+			expect(err).toEqual({
+				error:
+					"Kredit kamu tidak mencukupi untuk analisis codebase. Dibutuhkan maksimal 12 kredit, saldo tersedia: 5 kredit.",
+				code: "NO_CREDITS",
+				quote,
+				requiredCredits: 12,
+				availableCredits: 5,
+				topUpInstructions:
+					"Silakan top up kredit atau upgrade paket Anda melalui menu Billing.",
+			});
+		});
+
+		it("paused subscription rejects with 403 before model execution", () => {
+			const metrics = buildCodebaseMetrics({
+				fileCount: 10,
+				contentSize: 20_000,
+			});
+			const quote = estimateCreditQuote({
+				operation: "codebase_analysis",
+				metrics,
+			});
+
+			const err = formatSubscriptionPausedError({
+				quote,
+				availableCredits: 10,
+				stageLabel: "analisis codebase",
+			});
+
+			expect(err).toEqual({
+				error:
+					"Masa aktif langgananmu sudah habis. Perpanjang di halaman Pricing untuk analisis codebase.",
+				code: "SUBSCRIPTION_PAUSED",
+				quote,
+				requiredCredits: 12,
+				availableCredits: 10,
+				topUpInstructions:
+					"Perpanjang paket langganan Anda melalui menu Billing.",
+			});
+		});
 	});
 });
