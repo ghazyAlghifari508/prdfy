@@ -125,6 +125,18 @@ export function StackDropdown({
 		[onChange, isCustomValue, value],
 	);
 
+	// Options are focusable but live outside the trigger, so they need
+	// their own keyboard activation: without this, keyboard users who tab
+	// onto an option cannot select it with Enter or Space.
+	const handleOptionKeyDown = useCallback(
+		(e: React.KeyboardEvent, opt: string) => {
+			if (e.key !== "Enter" && e.key !== " ") return;
+			e.preventDefault();
+			selectOption(opt);
+		},
+		[selectOption],
+	);
+
 	const handleKeyDown = (e: React.KeyboardEvent) => {
 		if (disabled) return;
 
@@ -336,15 +348,16 @@ export function StackDropdown({
 							const selected = opt === value;
 							const iconUrl = stackIconUrl(opt);
 							return (
-								<div
-									key={opt}
-									role="option"
-									tabIndex={0}
-									aria-selected={selected}
-									onPointerDown={(e) => {
-										e.preventDefault();
-										selectOption(opt);
-									}}
+							<div
+								key={opt}
+								role="option"
+								tabIndex={0}
+								aria-selected={selected}
+								onPointerDown={(e) => {
+									e.preventDefault();
+									selectOption(opt);
+								}}
+								onKeyDown={(e) => handleOptionKeyDown(e, opt)}
 									className={cn(
 										"flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 min-h-[44px] font-inter text-sm transition-colors",
 										i === highlightIdx
@@ -410,6 +423,7 @@ export function StackDropdown({
 									e.preventDefault();
 									selectOption("__custom__");
 								}}
+								onKeyDown={(e) => handleOptionKeyDown(e, "__custom__")}
 								className={cn(
 									"flex cursor-pointer items-center gap-2 px-4 py-2.5 font-inter text-sm transition-colors",
 									highlightIdx === filtered.length
