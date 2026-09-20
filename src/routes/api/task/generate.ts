@@ -228,7 +228,8 @@ export const Route = createFileRoute("/api/task/generate")({
 						idempotencyKey,
 						quote,
 					});
-				} catch (_err) {
+				} catch (err) {
+					console.error("[task/generate] reserveCreditOperation failed:", err);
 					return Response.json(
 						formatInsufficientCreditsError({
 							quote,

@@ -221,7 +221,8 @@ export const Route = createFileRoute("/api/ac/generate")({
 						idempotencyKey,
 						quote,
 					});
-				} catch (_err) {
+				} catch (err) {
+					console.error("[ac/generate] reserveCreditOperation failed:", err);
 					return Response.json(
 						formatInsufficientCreditsError({
 							quote,

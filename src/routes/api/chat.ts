@@ -334,7 +334,8 @@ export const Route = createFileRoute("/api/chat")({
 							idempotencyKey,
 							quote: creditQuote,
 						});
-					} catch (_err) {
+					} catch (err) {
+						console.error("[chat] reserveCreditOperation failed:", err);
 						if (createdProjectId) {
 							await rollbackStreamInserts(
 								user.id,
