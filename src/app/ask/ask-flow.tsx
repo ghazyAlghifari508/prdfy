@@ -1,7 +1,15 @@
 "use client";
 
 import { useNavigate } from "@tanstack/react-router";
-import { Check, Cloud, Database, Layers, Palette, Rocket } from "lucide-react";
+import {
+	ArrowRight,
+	Check,
+	Cloud,
+	Database,
+	Layers,
+	Palette,
+	Rocket,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { buildCompiledAskPrompt } from "@/lib/ask-prompt-builder";
 import {
@@ -9,6 +17,7 @@ import {
 	inferTechAnswersFromCodebase,
 } from "@/lib/codebase-analysis";
 import { CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS } from "@/lib/constants";
+import { getFlowStepCta, stepToRoute } from "@/lib/flow-step";
 import {
 	getAskLanguage,
 	getAskPlatform,
@@ -66,6 +75,8 @@ interface AskFlowProps {
 			skippedTech?: string[];
 		};
 	} | null;
+	step?: string | null;
+	hasPrd?: boolean;
 }
 
 export function AskFlow({
@@ -74,10 +85,20 @@ export function AskFlow({
 	projectMode: _projectMode,
 	analysis,
 	initialHandoff,
+	step,
+	hasPrd,
 }: AskFlowProps) {
 	const navigate = useNavigate();
 	const promptRef = useRef("");
 	const hasFetched = useRef(false);
+
+	const flowCta = getFlowStepCta("question", step, hasPrd);
+	const isNavigateOnly = flowCta?.kind === "navigate";
+
+	const handleReturnToStage = () => {
+		const targetStep = flowCta?.targetStep ?? "prd";
+		navigate({ to: stepToRoute(targetStep, projectId) as never });
+	};
 	const [session, setSession] = useState<1 | 2>(1);
 	const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
 	const [loadError, setLoadError] = useState("");
@@ -652,14 +673,25 @@ export function AskFlow({
 							>
 								Kembali
 							</button>
-							<button
-								type="button"
-								disabled={!allTechAnswered}
-								onClick={() => void submit(techAnswers)}
-								className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510] disabled:opacity-40 disabled:cursor-not-allowed"
-							>
-								Generate PRD
-							</button>
+							{isNavigateOnly ? (
+								<button
+									type="button"
+									onClick={handleReturnToStage}
+									className="btn-primary flex items-center gap-1.5 rounded-md px-6 py-2.5 font-inter text-sm font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
+								>
+									<span>{flowCta?.label}</span>
+									<ArrowRight size={14} />
+								</button>
+							) : (
+								<button
+									type="button"
+									disabled={!allTechAnswered}
+									onClick={() => void submit(techAnswers)}
+									className="btn-primary rounded-md px-6 py-2.5 font-inter text-sm font-[510] disabled:opacity-40 disabled:cursor-not-allowed"
+								>
+									Generate PRD
+								</button>
+							)}
 						</div>
 					</div>
 				)}

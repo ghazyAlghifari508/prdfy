@@ -23,7 +23,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useUserPlan } from "@/hooks/use-user-plan";
 import { authClient } from "@/lib/auth-client";
 import { useChatStore, useUIStore } from "@/store";
-import { FlowStepNav, routeToStep } from "./flow-step-nav";
+import { FlowStepNav, getFlowStepCta, routeToStep } from "./flow-step-nav";
 
 export function Navbar() {
 	const { data: session, isPending: isLoading } = authClient.useSession();
@@ -66,6 +66,7 @@ export function Navbar() {
 			return null;
 		},
 	});
+	const flowCta = getFlowStepCta(routeStep, projectNavData?.step);
 	const { data: userPlanData } = useUserPlan();
 	const plan = userPlanData?.plan ?? "free";
 	const isFree = plan === "free";
@@ -138,8 +139,19 @@ export function Navbar() {
 	return (
 		<nav className="fixed left-0 right-0 top-0 z-40 h-14 border-b border-graphite bg-charcoal/95">
 			<div className="mx-auto flex h-full max-w-[1200px] items-center px-6">
-				{/* Left: logo */}
-				<div className="flex shrink-0 md:w-[220px]">
+				{/* Left: Project Menu (on Task route) + logo */}
+				<div className="flex items-center gap-2.5 shrink-0 md:w-[220px]">
+					{routeStep === "task" && projectId && (
+						<button
+							type="button"
+							onClick={() => useUIStore.getState().setProjectDrawerOpen(true)}
+							className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-graphite/60 bg-transparent text-fog transition-colors hover:border-steel hover:bg-white/5 hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
+							aria-label="Menu dokumen proyek"
+							title="Dokumen Proyek"
+						>
+							<Menu size={16} />
+						</button>
+					)}
 					<Logo height={28} />
 				</div>
 
@@ -211,6 +223,7 @@ export function Navbar() {
 					{/* Mobile hamburger */}
 					{!isFlowStepRoute && (
 						<button
+							type="button"
 							className="md:hidden p-2 text-fog hover:text-snow transition-colors shrink-0"
 							onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
 							aria-label="Toggle menu"
@@ -221,9 +234,35 @@ export function Navbar() {
 					{/* Workspace action buttons - visible all screens */}
 					{isFlowStepRoute ? (
 						<>
+							{routeStep === "question" &&
+								projectId &&
+								flowCta?.kind === "navigate" && (
+									<button
+										type="button"
+										onClick={() => {
+											startTransition(() => {
+												const targetPath =
+													flowCta.targetStep === "task"
+														? "/task/$id"
+														: flowCta.targetStep === "ac"
+															? "/ac/$id"
+															: "/prd/$id";
+												navigate({
+													to: targetPath,
+													params: { id: projectId },
+												});
+											});
+										}}
+										className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
+									>
+										<span className="whitespace-nowrap">{flowCta.label}</span>
+										<ArrowRight size={12} />
+									</button>
+								)}
 							{routeStep === "prd" && projectId && (
 								<>
 									<button
+										type="button"
 										onClick={() => useUIStore.getState().toggleChatPanel()}
 										className="hidden md:flex items-center gap-1.5 rounded-md bg-charcoal px-3 py-1.5 text-xs font-[510] text-fog shadow-[var(--shadow-inset)] transition-colors hover:bg-white/5 hover:text-snow"
 										aria-label="Buka/tutup chat"
@@ -239,8 +278,28 @@ export function Navbar() {
 											<span className="whitespace-nowrap">Upgrade ke Pro</span>
 											<ArrowRight size={12} />
 										</Link>
+									) : flowCta?.kind === "navigate" ? (
+										<button
+											type="button"
+											onClick={() => {
+												startTransition(() => {
+													navigate({
+														to:
+															flowCta.targetStep === "task"
+																? "/task/$id"
+																: "/ac/$id",
+														params: { id: projectId },
+													});
+												});
+											}}
+											className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
+										>
+											<span className="whitespace-nowrap">{flowCta.label}</span>
+											<ArrowRight size={12} />
+										</button>
 									) : (
 										<button
+											type="button"
 											onClick={handleStepAc}
 											disabled={
 												isStepLoading ||
@@ -271,8 +330,25 @@ export function Navbar() {
 										<span className="whitespace-nowrap">Upgrade ke Pro</span>
 										<ArrowRight size={12} />
 									</Link>
+								) : flowCta?.kind === "navigate" ? (
+									<button
+										type="button"
+										onClick={() => {
+											startTransition(() => {
+												navigate({
+													to: "/task/$id",
+													params: { id: projectId },
+												});
+											});
+										}}
+										className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
+									>
+										<span className="whitespace-nowrap">{flowCta.label}</span>
+										<ArrowRight size={12} />
+									</button>
 								) : (
 									<button
+										type="button"
 										onClick={handleStepTask}
 										disabled={
 											isStepLoading ||

@@ -11,6 +11,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { syncPaymentStatus } from "@/app/actions/payment";
 import { CreditExhaustedModal } from "@/components/chat/credit-exhausted-modal";
+import { DocumentReviewModal } from "@/components/project/document-review-modal";
+import { ProjectDocumentsDrawer } from "@/components/project/project-documents-drawer";
 import { GUARD_WAIT_MS } from "@/lib/constants";
 import {
 	consumeResumeIntent,
@@ -29,6 +31,8 @@ interface TaskDetailProps {
 	taskTree: TaskTree | null;
 	hasAc: boolean;
 	taskStatus?: string | null;
+	latestPrdContent?: string | null;
+	latestAcContent?: string | null;
 }
 
 // ponytail: honest status per no-hardcode.md Rule 7 — while generating, the
@@ -51,8 +55,14 @@ export function TaskDetail({
 	taskTree,
 	hasAc,
 	taskStatus,
+	latestPrdContent,
+	latestAcContent,
 }: TaskDetailProps) {
 	const showToast = useUIStore((s) => s.showToast);
+	const isProjectDrawerOpen = useUIStore((s) => s.isProjectDrawerOpen);
+	const setProjectDrawerOpen = useUIStore((s) => s.setProjectDrawerOpen);
+	const activeReviewModal = useUIStore((s) => s.activeReviewModal);
+	const setActiveReviewModal = useUIStore((s) => s.setActiveReviewModal);
 	const navigate = useNavigate();
 	const setTaskGenerated = useChatStore((s) => s.setTaskGenerated);
 	const creditsExhausted = useChatStore((s) => s.creditsExhausted);
@@ -477,6 +487,31 @@ export function TaskDetail({
 				errorMessage={creditsExhausted?.message || ""}
 				projectId={projectId}
 				stage="task"
+			/>
+
+			{/* Project Resources Drawer & Document Review Modal */}
+			<ProjectDocumentsDrawer
+				isOpen={isProjectDrawerOpen}
+				onClose={() => setProjectDrawerOpen(false)}
+				projectName={projectName}
+				hasPrd={Boolean(latestPrdContent)}
+				hasAc={Boolean(hasAc || latestAcContent)}
+				onSelectDocument={(docType) => {
+					setProjectDrawerOpen(false);
+					setActiveReviewModal(docType);
+				}}
+			/>
+
+			<DocumentReviewModal
+				isOpen={activeReviewModal !== null}
+				onClose={() => setActiveReviewModal(null)}
+				type={activeReviewModal}
+				projectName={projectName}
+				content={
+					activeReviewModal === "prd"
+						? (latestPrdContent ?? null)
+						: (latestAcContent ?? null)
+				}
 			/>
 		</>
 	);

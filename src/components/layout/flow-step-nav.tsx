@@ -1,16 +1,16 @@
 "use client";
 
-import { Link, useLocation } from "@tanstack/react-router";
+import { useLocation } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { stepRank } from "@/lib/flow-progress";
-import { type FlowStep, routeToStep, stepToRoute } from "@/lib/flow-step";
+import { type FlowStep, routeToStep } from "@/lib/flow-step";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store";
 
 // ponytail: pure step<->route logic extracted to @/lib/flow-step so server
 // code + tests can use it without next/navigation. Re-export keeps existing
 // `import { routeToStep } from "./flow-step-nav"` call sites working.
-export { type FlowStep, routeToStep } from "@/lib/flow-step";
+export { type FlowStep, getFlowStepCta, routeToStep } from "@/lib/flow-step";
 
 export type StepId = FlowStep;
 
@@ -21,6 +21,10 @@ const STEPS: Array<{ id: FlowStep; label: string }> = [
 	{ id: "task", label: "Task" },
 ];
 
+/**
+ * Pure visual status indicator showing project progress.
+ * Non-clickable: conveys "where the project is", not "where to navigate".
+ */
 export function FlowStepNav(props?: {
 	step?: FlowStep | string | null;
 	taskStatus?: string | null;
@@ -35,11 +39,11 @@ export function FlowStepNav(props?: {
 	const isTaskDone =
 		isKanbanRoute || isTaskGenerated || props?.taskStatus === "completed";
 
-	// Extract project id from URL (e.g. /prd/123 -> 123)
-	const projectId = (pathname ?? "").split("/")[2];
-
 	return (
-		<ol aria-label="Flow step" className="flex items-center gap-1.5 md:gap-2">
+		<ol
+			aria-label="Progress alur proyek"
+			className="flex items-center gap-1.5 md:gap-2 select-none"
+		>
 			{STEPS.map((s, idx) => {
 				const isCurrentRoute = s.id === currentRouteStep;
 
@@ -54,40 +58,6 @@ export function FlowStepNav(props?: {
 
 				const connectorActive =
 					idx <= routeRank || (props?.step ? idx <= dbRank : false);
-
-				const stepContent = (
-					<div
-						className={cn(
-							"flex items-center gap-1.5",
-							(isCompleted || isActive) && projectId
-								? "cursor-pointer"
-								: "cursor-default",
-						)}
-					>
-						<span
-							className={cn(
-								"flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-[510] transition-colors duration-300",
-								isCompleted && "bg-emerald text-charcoal",
-								isActive && "bg-indigo text-white",
-								isLocked && "border border-graphite text-fog",
-							)}
-						>
-							{isCompleted ? <Check size={12} strokeWidth={3} /> : idx + 1}
-						</span>
-						<span
-							className={cn(
-								"hidden font-inter text-sm transition-colors duration-300 md:block",
-								isActive
-									? "font-[510] text-snow"
-									: isCompleted
-										? "font-normal text-snow hover:text-mist"
-										: "font-normal text-fog",
-							)}
-						>
-							{s.label}
-						</span>
-					</div>
-				);
 
 				return (
 					<li
@@ -104,16 +74,33 @@ export function FlowStepNav(props?: {
 								)}
 							/>
 						)}
-						{projectId && (isCompleted || isActive) ? (
-							<Link
-								to={stepToRoute(s.id, projectId)}
-								className="transition-opacity hover:opacity-90 focus:outline-none"
+						<div className="flex items-center gap-1.5 cursor-default">
+							<span
+								className={cn(
+									"flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-[510] transition-colors duration-300",
+									isCompleted && "bg-emerald text-charcoal",
+									isActive && "bg-indigo text-white",
+									isLocked && "border border-graphite text-fog",
+								)}
+								aria-hidden="true"
 							>
-								{stepContent}
-							</Link>
-						) : (
-							stepContent
-						)}
+								{isCompleted ? <Check size={12} strokeWidth={3} /> : idx + 1}
+							</span>
+							<span
+								className={cn(
+									"hidden font-inter text-sm transition-colors duration-300 md:block",
+									isActive
+										? "font-[510] text-snow"
+										: isCompleted
+											? "font-normal text-snow"
+											: "font-normal text-fog",
+								)}
+							>
+								{s.label}
+								{isCompleted && <span className="sr-only"> (Selesai)</span>}
+								{isActive && <span className="sr-only"> (Tahap saat ini)</span>}
+							</span>
+						</div>
 					</li>
 				);
 			})}

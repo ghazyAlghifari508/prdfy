@@ -6,6 +6,7 @@ import { TaskDetail } from "@/components/task/task-detail";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { getLatestAcContent } from "@/lib/services/ac-service";
+import { getLatestPrdContent } from "@/lib/services/prd-service";
 import { getTaskTree } from "@/lib/services/task-service";
 import { requireUserServer } from "@/lib/session";
 import { useLastRoute } from "@/lib/use-last-route";
@@ -15,7 +16,7 @@ const loadTask = createServerFn({ method: "GET" })
 	.validator((id: string) => id)
 	.handler(async ({ data: id }) => {
 		const user = await requireUserServer();
-		const [project, acContent, taskTree] = await Promise.all([
+		const [project, prdContent, acContent, taskTree] = await Promise.all([
 			// ponytail: select only needed cols — name + taskStatus used downstream.
 			// Avoids pulling description/shareToken/lastUrl jsonb on every Task page load.
 			db
@@ -28,6 +29,7 @@ const loadTask = createServerFn({ method: "GET" })
 				.from(projects)
 				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
 				.limit(1),
+			getLatestPrdContent(id).catch(() => null),
 			getLatestAcContent(id).catch(() => null),
 			getTaskTree(id).catch(() => null),
 		]);
@@ -40,6 +42,8 @@ const loadTask = createServerFn({ method: "GET" })
 			taskTree,
 			hasAc: Boolean(acContent),
 			taskStatus: project[0].taskStatus,
+			latestPrdContent: prdContent ?? null,
+			latestAcContent: acContent ?? null,
 		};
 	});
 
@@ -91,6 +95,8 @@ function TaskPage() {
 			taskTree={d.taskTree as never}
 			hasAc={d.hasAc}
 			taskStatus={d.taskStatus}
+			latestPrdContent={d.latestPrdContent}
+			latestAcContent={d.latestAcContent}
 		/>
 	);
 }

@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { useEffect } from "react";
 import { AskFlow } from "@/app/ask/ask-flow";
 import { db } from "@/db";
-import { codebaseAnalyses, projects } from "@/db/schema";
+import { codebaseAnalyses, prdVersions, projects } from "@/db/schema";
 import type { CodebaseAnalysis } from "@/lib/codebase-analysis";
 import { requireUserServer } from "@/lib/session";
 import { useLastRoute } from "@/lib/use-last-route";
@@ -30,18 +30,27 @@ const loadAsk = createServerFn({ method: "GET" })
 	.handler(async ({ data: id }) => {
 		const user = await requireUserServer();
 
-		const [project] = await db
-			.select({
-				id: projects.id,
-				name: projects.name,
-				step: projects.step,
-				projectMode: projects.projectMode,
-			})
-			.from(projects)
-			.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
-			.limit(1);
+		const [projectRows, prdRow] = await Promise.all([
+			db
+				.select({
+					id: projects.id,
+					name: projects.name,
+					step: projects.step,
+					projectMode: projects.projectMode,
+				})
+				.from(projects)
+				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+				.limit(1),
+			db
+				.select({ id: prdVersions.id })
+				.from(prdVersions)
+				.where(eq(prdVersions.projectId, id))
+				.limit(1),
+		]);
 
+		const project = projectRows[0];
 		if (!project) throw new Error("NOT_FOUND");
+		const hasPrd = Boolean(prdRow[0]);
 
 		let hasReadyAnalysis = false;
 		let readyAnalysis: CodebaseAnalysis | null = null;
@@ -96,6 +105,7 @@ const loadAsk = createServerFn({ method: "GET" })
 			hasReadyAnalysis,
 			readyAnalysis,
 			savedHandoff,
+			hasPrd,
 		};
 	});
 
@@ -149,6 +159,8 @@ function AskPage() {
 				projectMode={d.projectMode}
 				initialHandoff={d.savedHandoff}
 				analysis={d.readyAnalysis}
+				step={d.step}
+				hasPrd={d.hasPrd}
 			/>
 		</div>
 	);

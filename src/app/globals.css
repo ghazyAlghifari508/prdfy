@@ -447,3 +447,68 @@ a {
 @utility animate-delay-1400 {
 	animation-delay: 1400ms;
 }
+
+/* ============================================
+   Project Documents Drawer - Smooth Slide & Fade
+   ============================================ */
+@keyframes drawerSlideIn {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(0);
+	}
+}
+
+@keyframes drawerSlideOut {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(-100%);
+	}
+}
+
+@keyframes drawerOverlayFadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes drawerOverlayFadeOut {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+.drawer-overlay[data-state="open"] {
+	animation: drawerOverlayFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.drawer-overlay[data-state="closed"] {
+	animation: drawerOverlayFadeOut 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.drawer-content[data-state="open"] {
+	animation: drawerSlideIn 260ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.drawer-content[data-state="closed"] {
+	animation: drawerSlideOut 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.drawer-overlay[data-state="open"],
+	.drawer-overlay[data-state="closed"],
+	.drawer-content[data-state="open"],
+	.drawer-content[data-state="closed"] {
+		animation: none;
+		transition: none;
+	}
+}

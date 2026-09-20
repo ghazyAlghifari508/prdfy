@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	computeKanbanProgress,
 	computeStatusCounts,
 	detectAcChanged,
+	extractPhases,
+	filterColumnsByPhase,
 	groupCardsByFeature,
 	groupCardsByStatus,
 	type TaskCard,
@@ -112,6 +115,120 @@ describe("kanban-utils", () => {
 
 		it("returns false when either is undefined", () => {
 			expect(detectAcChanged(undefined, undefined)).toBe(false);
+		});
+	});
+
+	describe("extractPhases", () => {
+		it("extracts distinct phases preserving order with 1-based numbering", () => {
+			const columns = {
+				pending: [
+					mockCard({ id: "1", featureName: "Auth" }),
+					mockCard({ id: "2", featureName: "Dashboard" }),
+				],
+				in_progress: [mockCard({ id: "3", featureName: "Auth" })],
+				completed: [mockCard({ id: "4", featureName: "Billing" })],
+				failed: [],
+			};
+
+			const phases = extractPhases(columns);
+			expect(phases).toHaveLength(3);
+			expect(phases[0]).toEqual({
+				id: "Auth",
+				name: "Auth",
+				phaseNumber: 1,
+				label: "Fase 1: Auth",
+			});
+			expect(phases[1]).toEqual({
+				id: "Dashboard",
+				name: "Dashboard",
+				phaseNumber: 2,
+				label: "Fase 2: Dashboard",
+			});
+			expect(phases[2]).toEqual({
+				id: "Billing",
+				name: "Billing",
+				phaseNumber: 3,
+				label: "Fase 3: Billing",
+			});
+		});
+
+		it("falls back to 'Umum' if featureName is empty", () => {
+			const cards = [mockCard({ id: "1", featureName: "" })];
+			const phases = extractPhases(cards);
+			expect(phases).toHaveLength(1);
+			expect(phases[0]?.name).toBe("Umum");
+			expect(phases[0]?.label).toBe("Fase 1: Umum");
+		});
+
+		it("returns empty array when there are no tasks", () => {
+			expect(extractPhases([])).toEqual([]);
+		});
+	});
+
+	describe("filterColumnsByPhase", () => {
+		const columns = {
+			pending: [
+				mockCard({ id: "1", status: "pending", featureName: "Auth" }),
+				mockCard({ id: "2", status: "pending", featureName: "Dashboard" }),
+			],
+			in_progress: [
+				mockCard({ id: "3", status: "in_progress", featureName: "Auth" }),
+			],
+			completed: [
+				mockCard({ id: "4", status: "completed", featureName: "Billing" }),
+			],
+			failed: [],
+		};
+
+		it("returns all columns unchanged when phase is null, undefined, or 'all'", () => {
+			expect(filterColumnsByPhase(columns, null)).toEqual(columns);
+			expect(filterColumnsByPhase(columns, undefined)).toEqual(columns);
+			expect(filterColumnsByPhase(columns, "all")).toEqual(columns);
+		});
+
+		it("filters tasks by selected phase across all columns", () => {
+			const filtered = filterColumnsByPhase(columns, "Auth");
+			expect(filtered.pending).toHaveLength(1);
+			expect(filtered.pending[0]?.id).toBe("1");
+			expect(filtered.in_progress).toHaveLength(1);
+			expect(filtered.in_progress[0]?.id).toBe("3");
+			expect(filtered.completed).toHaveLength(0);
+			expect(filtered.failed).toHaveLength(0);
+		});
+
+		it("returns empty columns when selected phase has no tasks", () => {
+			const filtered = filterColumnsByPhase(columns, "Nonexistent");
+			expect(filtered.pending).toHaveLength(0);
+			expect(filtered.in_progress).toHaveLength(0);
+			expect(filtered.completed).toHaveLength(0);
+			expect(filtered.failed).toHaveLength(0);
+		});
+	});
+
+	describe("computeKanbanProgress", () => {
+		it("computes total, done, and percentage correctly", () => {
+			const columns = {
+				pending: [mockCard({ status: "pending" })],
+				in_progress: [mockCard({ status: "in_progress" })],
+				completed: [mockCard({ status: "completed" })],
+				failed: [mockCard({ status: "failed" })],
+			};
+			const progress = computeKanbanProgress(columns);
+			expect(progress.total).toBe(4);
+			expect(progress.done).toBe(2); // completed + failed
+			expect(progress.pct).toBe(50);
+		});
+
+		it("returns 0 pct for 0 total tasks", () => {
+			const progress = computeKanbanProgress({
+				pending: [],
+				in_progress: [],
+				completed: [],
+				failed: [],
+			});
+			expect(progress.total).toBe(0);
+			expect(progress.done).toBe(0);
+			expect(progress.pct).toBe(0);
 		});
 	});
 });

@@ -15,7 +15,7 @@ export interface TaskCard {
 	status: TaskCardStatus;
 	subtaskCount?: number;
 	subtaskCompleted?: number;
-	subtasks?: Array<{ id: string; name: string; status: string }>;
+	subtasks?: Array<{ id?: string; name: string; status: string }>;
 	dependencies: string[];
 	startedAt: string | null;
 	completedAt: string | null;
@@ -84,4 +84,92 @@ export function detectAcChanged(
 ): boolean {
 	if (!latestAcAt || !tasksCreatedAt) return false;
 	return new Date(latestAcAt) > new Date(tasksCreatedAt);
+}
+
+export interface KanbanPhase {
+	id: string;
+	name: string;
+	phaseNumber: number;
+	label: string;
+}
+
+/**
+ * Extract all distinct project phases (feature groups) from columns or flat card list.
+ * Preserves initial appearance order and numbers them 1-based (Fase 1, Fase 2, etc.).
+ */
+export function extractPhases(
+	source: Record<string, TaskCard[]> | TaskCard[],
+): KanbanPhase[] {
+	const allCards = Array.isArray(source)
+		? source
+		: [
+				...(source.pending || []),
+				...(source.in_progress || []),
+				...(source.completed || []),
+				...(source.failed || []),
+			];
+
+	const seen = new Set<string>();
+	const phases: KanbanPhase[] = [];
+
+	for (const card of allCards) {
+		const name = card.featureName?.trim() || "Umum";
+		if (!seen.has(name)) {
+			seen.add(name);
+			const phaseNumber = phases.length + 1;
+			phases.push({
+				id: name,
+				name,
+				phaseNumber,
+				label: `Fase ${phaseNumber}: ${name}`,
+			});
+		}
+	}
+
+	return phases;
+}
+
+/**
+ * Filter columns by selected phase id (featureName).
+ * If phaseId is null, undefined, or "all", returns all columns unchanged.
+ */
+export function filterColumnsByPhase(
+	columns: Record<TaskCardStatus, TaskCard[]>,
+	selectedPhaseId: string | null | undefined,
+): Record<TaskCardStatus, TaskCard[]> {
+	if (!selectedPhaseId || selectedPhaseId === "all") {
+		return columns;
+	}
+
+	return {
+		pending: columns.pending.filter(
+			(c) => (c.featureName?.trim() || "Umum") === selectedPhaseId,
+		),
+		in_progress: columns.in_progress.filter(
+			(c) => (c.featureName?.trim() || "Umum") === selectedPhaseId,
+		),
+		completed: columns.completed.filter(
+			(c) => (c.featureName?.trim() || "Umum") === selectedPhaseId,
+		),
+		failed: columns.failed.filter(
+			(c) => (c.featureName?.trim() || "Umum") === selectedPhaseId,
+		),
+	};
+}
+
+/**
+ * Compute progress metrics (total, done, percentage) from columns.
+ */
+export function computeKanbanProgress(
+	columns: Record<TaskCardStatus, TaskCard[]>,
+): { total: number; done: number; pct: number } {
+	const total =
+		(columns.pending?.length || 0) +
+		(columns.in_progress?.length || 0) +
+		(columns.completed?.length || 0) +
+		(columns.failed?.length || 0);
+	const done = (columns.completed?.length || 0) + (columns.failed?.length || 0);
+	const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+	return { total, done, pct };
 }
