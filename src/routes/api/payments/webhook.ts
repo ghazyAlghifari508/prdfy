@@ -59,20 +59,31 @@ export const Route = createFileRoute("/api/payments/webhook")({
 					}
 				}
 
-				if (
-					transaction_status === "expire" ||
-					transaction_status === "cancel"
-				) {
-					await db
-						.update(payments)
-						.set({ status: "failed" })
-						.where(
-							and(
-								eq(payments.orderId, order_id),
-								ne(payments.status, "success"),
-							),
-						);
-				}
+			// Terminal non-success states, including post-settlement
+			// reversals (deny/refund/chargeback). Only non-success rows move,
+			// so a delayed reversal can never overwrite a settled grant's
+			// success marker; grant compensation stays a manual step.
+			if (
+				[
+					"expire",
+					"cancel",
+					"deny",
+					"refund",
+					"chargeback",
+					"partial_refund",
+					"partial_chargeback",
+				].includes(transaction_status)
+			) {
+				await db
+					.update(payments)
+					.set({ status: "failed" })
+					.where(
+						and(
+							eq(payments.orderId, order_id),
+							ne(payments.status, "success"),
+						),
+					);
+			}
 
 				return Response.json({ status: "ok" });
 			},

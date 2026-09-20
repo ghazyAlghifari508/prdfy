@@ -58,6 +58,19 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 
 		const statusData = await response.json();
 		if (["settlement", "capture"].includes(statusData.transaction_status)) {
+			// Mirror the webhook guards: the notified amount must match the
+			// stored order, and a capture still under fraud review must not
+			// grant until Midtrans confirms it.
+			if (Number(statusData.gross_amount) !== payment.amount) {
+				throw new Error("Amount mismatch with payment provider");
+			}
+			if (
+				statusData.transaction_status === "capture" &&
+				statusData.fraud_status &&
+				statusData.fraud_status !== "accept"
+			) {
+				return { success: false, status: statusData.transaction_status as string };
+			}
 			const result = await applyOrderSuccess(orderId);
 			return { success: true, updated: true, plan: result?.plan };
 		}

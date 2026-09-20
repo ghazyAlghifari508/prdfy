@@ -1,10 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { and, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { payments } from "@/db/schema";
-import { canPurchaseTopUp, remainingTopUpQuota } from "@/lib/billing";
+import { payments, subscriptions } from "@/db/schema";
+import {
+	canPurchaseTopUp,
+	remainingTopUpQuota,
+	resolveSubscriptionState,
+} from "@/lib/billing";
 import { TOPUP_SKU } from "@/lib/constants";
 import { getCreditBalance } from "@/lib/credits";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
@@ -120,17 +124,78 @@ export const Route = createFileRoute("/api/payments/create")({
 						),
 					);
 
-				const orderId = `${isTopUp ? "TOPUP" : "ORDER"}-${Date.now()}-${randomBytes(4).toString("hex")}`;
-				await db.insert(payments).values({
-					id: crypto.randomUUID(),
-					userId: user.id,
-					orderId,
-					// Stored SKU doubles as the completion router (see
-					// applyOrderSuccess) and the per-period cap counter input.
-					plan: isTopUp ? TOPUP_SKU.id : planId,
-					amount,
-					status: "pending",
-				});
+			const orderId = `${isTopUp ? "TOPUP" : "ORDER"}-${Date.now()}-${randomBytes(4).toString("hex")}`;
+			const paymentRow = {
+				id: crypto.randomUUID(),
+				userId: user.id,
+				orderId,
+				// Stored SKU doubles as the completion router (see
+				// applyOrderSuccess) and the per-period cap counter input.
+				plan: isTopUp ? TOPUP_SKU.id : planId,
+				amount,
+				status: "pending",
+			};
+			if (isTopUp) {
+				// Re-check quota atomically under a lock on the latest
+				// subscription row so two concurrent checkouts serialize:
+				// the second one counts the first one's order before
+				// inserting instead of both observing the same usage.
+				let quotaCapCredits = 0;
+				try {
+					await db.transaction(async (tx) => {
+						const [locked] = await tx
+							.select({
+								plan: subscriptions.plan,
+								status: subscriptions.status,
+								credits: subscriptions.credits,
+								creditsUsed: subscriptions.creditsUsed,
+								creditsReserved: subscriptions.creditsReserved,
+								currentPeriodStart: subscriptions.currentPeriodStart,
+								currentPeriodEnd: subscriptions.currentPeriodEnd,
+								cancelledAt: subscriptions.cancelledAt,
+							})
+							.from(subscriptions)
+							.where(eq(subscriptions.userId, user.id))
+							.orderBy(desc(subscriptions.createdAt))
+							.limit(1)
+							.for("update");
+						const eff = resolveSubscriptionState(locked, new Date());
+						if (!locked || eff.state !== "active_paid")
+							throw new Error("TOPUP_NOT_ELIGIBLE");
+						quotaCapCredits = PLAN_CREDITS[eff.effectivePlan];
+						const used = await getTopUpCreditsUsedThisPeriod(user.id);
+						if (
+							remainingTopUpQuota({
+								plan: eff.effectivePlan,
+								usedThisPeriod: used,
+							}) < TOPUP_SKU.credits
+						)
+							throw new Error("TOPUP_QUOTA_EXCEEDED");
+						await tx.insert(payments).values(paymentRow);
+					});
+				} catch (e) {
+					if (e instanceof Error && e.message === "TOPUP_QUOTA_EXCEEDED") {
+						return Response.json(
+							{
+								error: `Kuota top-up periode ini sudah habis (maksimal ${quotaCapCredits} kredit). Kuota reset saat periode berikutnya.`,
+							},
+							{ status: 400 },
+						);
+					}
+					if (e instanceof Error && e.message === "TOPUP_NOT_ELIGIBLE") {
+						return Response.json(
+							{
+								error:
+									"Top up hanya tersedia untuk langganan Pro/Hengker yang sedang aktif.",
+							},
+							{ status: 403 },
+						);
+					}
+					throw e;
+				}
+			} else {
+				await db.insert(payments).values(paymentRow);
+			}
 
 			const origin = request.headers.get("origin") || "";
 			const safeOrigin = ALLOWED_ORIGINS.includes(origin)
