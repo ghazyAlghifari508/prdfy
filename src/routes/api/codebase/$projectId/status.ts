@@ -22,7 +22,7 @@ import {
 	sanitizeSyncErrorMessage,
 	syncStatusResponseSchema,
 } from "@/lib/codebase-sync";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
@@ -68,8 +68,6 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
-
 				const [project] = await db
 					.select({ id: projects.id, projectMode: projects.projectMode })
 					.from(projects)

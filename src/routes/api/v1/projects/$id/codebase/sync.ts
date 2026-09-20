@@ -18,7 +18,7 @@ import {
 	requireSupportedCliVersion,
 } from "@/lib/codebase-sync";
 import { hashSyncToken } from "@/lib/codebase-sync.server";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { Plan } from "@/types/database";
 
 function bearerToken(request: Request): string | null {
@@ -183,7 +183,6 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/sync")({
 						{ error: "Too many requests", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(session.userId, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				// waiting_for_cli -> connected exactly once; later handshakes
 				// (CLI retries) keep the state and only refresh metadata.

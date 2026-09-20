@@ -24,7 +24,7 @@ import {
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
 	isSyncCapableProject,
 } from "@/lib/codebase-sync";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import {
 	buildCodebaseMetrics,
 	createCreditQuote,
@@ -123,7 +123,6 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				const [project] = await db
 					.select({ id: projects.id, projectMode: projects.projectMode })
@@ -264,7 +263,6 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				const [project] = await db
 					.select({ id: projects.id, projectMode: projects.projectMode })

@@ -16,7 +16,7 @@ import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
 import { AC_GENERATION_PROMPT } from "@/lib/prompts-ac";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { saveAcVersion } from "@/lib/services/ac-service";
 import {
 	selectModels,
@@ -101,8 +101,6 @@ export const Route = createFileRoute("/api/ac/generate")({
 						{ error: "Too many requests", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, "api_call");
-
 				const [project] = await db
 					.select({
 						id: projects.id,

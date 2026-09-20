@@ -19,7 +19,7 @@ import {
 	CODEBASE_CLI_MIN_VERSION,
 	CODEBASE_SYNC_SESSION_EXPIRY_MS,
 } from "@/lib/constants";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
@@ -76,7 +76,6 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				const project = await getGuardedProject(user.id, projectId);
 				if (!project)
@@ -155,7 +154,6 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				const project = await getGuardedProject(user.id, projectId);
 				if (!project)
@@ -293,7 +291,6 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 
 				const project = await getGuardedProject(user.id, projectId);
 				if (!project)

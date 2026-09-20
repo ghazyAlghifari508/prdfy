@@ -15,7 +15,7 @@ import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
 import { PRD_REVISION_PROMPT, PRD_SYSTEM_PROMPT } from "@/lib/prompts";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import {
 	selectModels,
 	tryStreamWithFallback,
@@ -500,7 +500,6 @@ export const Route = createFileRoute("/api/chat")({
 									undefined,
 									enqueueThinking,
 								);
-							await recordRequest(user.id, "ai_generate");
 
 							if (!conversationIdToUse) {
 								const result = await ensureConversation(

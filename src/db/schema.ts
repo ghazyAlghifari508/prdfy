@@ -500,7 +500,13 @@ export const rateLimits = pgTable(
 		windowStart: timestamp("window_start").notNull(),
 		count: integer("count").default(1),
 	},
-	(t) => [index("rate_limits_user_id_action_idx").on(t.userId, t.action)],
+	(t) => [
+		uniqueIndex("rate_limits_user_id_action_window_start_unique").on(
+			t.userId,
+			t.action,
+			t.windowStart,
+		),
+	],
 );
 
 // Notification Preferences

@@ -13,7 +13,7 @@ import {
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { ASK_OPTIONS_GENERATION_PROMPT } from "@/lib/prompts-ask";
-import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
 import {
 	selectModels,
 	tryStreamWithFallback,
@@ -86,8 +86,6 @@ export const Route = createFileRoute("/api/ask/options")({
 						{ error: "Too many requests", retryAfter: 60 },
 						{ status: 429 },
 					);
-				await recordRequest(user.id, "api_call");
-
 				const [project] = await db
 					.select({
 						id: projects.id,

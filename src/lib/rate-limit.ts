@@ -1,9 +1,16 @@
-import { and, eq, gte } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { rateLimits } from "@/db/schema";
 import { RATE_LIMIT_WINDOW_MS, RATE_LIMITS } from "@/lib/constants";
 
 export type RateLimitAction = "ai_generate" | "api_call";
+
+export function getRateLimitWindowStart(
+	date: Date,
+	windowSizeMs: number = RATE_LIMIT_WINDOW_MS,
+): Date {
+	return new Date(Math.floor(date.getTime() / windowSizeMs) * windowSizeMs);
+}
 
 export async function checkRateLimit(
 	userId: string,
@@ -15,39 +22,30 @@ export async function checkRateLimit(
 			? RATE_LIMITS.general
 			: RATE_LIMITS[plan as keyof typeof RATE_LIMITS] || RATE_LIMITS.free;
 
-	const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+	const windowStart = getRateLimitWindowStart(new Date());
 
 	try {
-		const rows = await db
-			.select({ count: rateLimits.count })
-			.from(rateLimits)
-			.where(
-				and(
-					eq(rateLimits.userId, userId),
-					eq(rateLimits.action, action),
-					gte(rateLimits.windowStart, windowStart),
-				),
-			);
+		const [row] = await db
+			.insert(rateLimits)
+			.values({
+				id: crypto.randomUUID(),
+				userId,
+				action,
+				windowStart,
+				count: 1,
+			})
+			.onConflictDoUpdate({
+				target: [rateLimits.userId, rateLimits.action, rateLimits.windowStart],
+				set: { count: sql`${rateLimits.count} + 1` },
+				where: sql`${rateLimits.count} < ${limit}`,
+			})
+			.returning({ count: rateLimits.count });
 
-		const used = rows.reduce((sum, r) => sum + (r.count ?? 0), 0);
-		const remaining = Math.max(0, limit - used);
-		return { allowed: used < limit, remaining };
+		const used = row?.count ?? limit;
+		return { allowed: Boolean(row), remaining: Math.max(0, limit - used) };
 	} catch (error) {
 		// Fail closed: DB down → don't let users bypass rate limits.
 		console.error("Rate limit check error:", error);
 		return { allowed: false, remaining: 0 };
 	}
-}
-
-export async function recordRequest(
-	userId: string,
-	action: RateLimitAction,
-): Promise<void> {
-	await db.insert(rateLimits).values({
-		id: crypto.randomUUID(),
-		userId,
-		action,
-		windowStart: new Date(),
-		count: 1,
-	});
 }

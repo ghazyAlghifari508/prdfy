@@ -37,7 +37,7 @@ import {
 } from "./codebase-sync";
 import { hashSyncToken } from "./codebase-sync.server";
 import { CODEBASE_MAX_CHUNK_BYTES } from "./constants";
-import { checkRateLimit, recordRequest } from "./rate-limit";
+import { checkRateLimit } from "./rate-limit";
 
 export interface SyncUploadContext {
 	session: typeof codebaseSyncSessions.$inferSelect;
@@ -213,7 +213,6 @@ export async function guardSyncUpload(
 					},
 				},
 			};
-		await recordRequest(session.userId, CODEBASE_SYNC_RATE_LIMIT_ACTION);
 	}
 
 	// Fail-closed CLI version gate: the minimum version is enforced
