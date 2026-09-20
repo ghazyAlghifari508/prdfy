@@ -1,0 +1,1 @@
+ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_credits_reserved_non_negative_check" CHECK (credits_reserved >= 0);
