@@ -75,15 +75,11 @@ const loadAsk = createServerFn({ method: "GET" })
 			}
 		}
 
-		let savedHandoff = null;
-		try {
-			const { getAskHandoff } = await import(
-				"@/lib/codebase-generation-context"
-			);
-			savedHandoff = await getAskHandoff(id, user.id);
-		} catch (e) {
-			console.error("Failed to load ask handoff in loadAsk:", e);
-		}
+		const { getAskHandoff } = await import(
+			"@/lib/codebase-generation-context"
+		);
+		const loadedHandoff = await getAskHandoff(id, user.id);
+		let savedHandoff = loadedHandoff;
 		if (!savedHandoff) {
 			savedHandoff = {
 				projectId: project.id,

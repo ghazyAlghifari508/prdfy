@@ -29,9 +29,9 @@ const loadTask = createServerFn({ method: "GET" })
 				.from(projects)
 				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
 				.limit(1),
-			getLatestPrdContent(id).catch(() => null),
-			getLatestAcContent(id).catch(() => null),
-			getTaskTree(id).catch(() => null),
+			getLatestPrdContent(id),
+			getLatestAcContent(id),
+			getTaskTree(id),
 		]);
 
 		if (!project[0]) throw new Error("NOT_FOUND");
@@ -66,7 +66,7 @@ export const Route = createFileRoute("/task/$id")({
 		try {
 			return await loadTask({ data: params.id });
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
