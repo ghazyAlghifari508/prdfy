@@ -2881,27 +2881,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "subscriptions_user_id_id_unique": {
-          "name": "subscriptions_user_id_id_unique",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -2920,7 +2899,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "subscriptions_user_id_id_unique": {
+          "name": "subscriptions_user_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "subscriptions_credits_reserved_non_negative_check": {

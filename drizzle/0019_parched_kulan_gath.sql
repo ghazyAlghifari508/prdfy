@@ -19,5 +19,4 @@ WHERE duplicate."user_id" = keepers."user_id"
 	AND duplicate."window_start" = keepers."window_start"
 	AND duplicate."id" <> keepers.keeper_id;--> statement-breakpoint
 DROP INDEX "rate_limits_user_id_action_idx";--> statement-breakpoint
-CREATE UNIQUE INDEX "rate_limits_user_id_action_window_start_unique" ON "rate_limits" USING btree ("user_id","action","window_start");--> statement-breakpoint
-CREATE UNIQUE INDEX "subscriptions_user_id_id_unique" ON "subscriptions" USING btree ("user_id","id");
+CREATE UNIQUE INDEX "rate_limits_user_id_action_window_start_unique" ON "rate_limits" USING btree ("user_id","action","window_start");

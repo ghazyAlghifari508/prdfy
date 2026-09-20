@@ -36,5 +36,8 @@ describe("rate limit window", () => {
 		expect(migration).toContain(
 			'CREATE UNIQUE INDEX "rate_limits_user_id_action_window_start_unique"',
 		);
+		expect(migration).not.toContain(
+			'CREATE UNIQUE INDEX "subscriptions_user_id_id_unique"',
+		);
 	});
 });
