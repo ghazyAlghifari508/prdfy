@@ -28,6 +28,7 @@ import {
 	sanitizeModelOutput,
 } from "@/lib/services/prd-service";
 import { parseTaskJson, saveTaskTree } from "@/lib/services/task-service";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { requireUser } from "@/lib/session";
 
 export const Route = createFileRoute("/api/task/generate")({
@@ -42,10 +43,12 @@ export const Route = createFileRoute("/api/task/generate")({
 				);
 				const {
 					createCreditQuote,
-					reserveCreditOperation,
+					reserveActiveCreditOperation,
+					isReleasableReservation,
 					markCreditOperationRunning,
 					settleCreditOperation,
 					releaseCreditOperation,
+					quarantineCreditOperation,
 				} = await import("@/lib/services/credit-service");
 
 				const body = await request
@@ -207,13 +210,13 @@ export const Route = createFileRoute("/api/task/generate")({
 				const idempotencyKey =
 					callerIdempotencyKey || `${projectId}:task:${callerAttempt ?? 1}`;
 
-				let reservation: {
-					id: string;
-					state: string;
-					finalCharge: number | null;
-				};
+				let reservation: CreditOperationResult;
 				try {
-					reservation = await reserveCreditOperation({
+					// A reused key whose operation already terminated cannot
+					// generate again: mint a fresh attempt instead of
+					// regenerating for free (settled) or against a dead
+					// reservation. Genuine in-flight retries keep joining.
+					reservation = await reserveActiveCreditOperation({
 						userId: user.id,
 						projectId,
 						stage: "task",
@@ -258,11 +261,15 @@ export const Route = createFileRoute("/api/task/generate")({
 						if (claimed.length) break;
 					}
 					if (!claimed.length) {
-						await releaseCreditOperation({
-							userId: user.id,
-							operationId: reservation.id,
-							reason: "Task generation conflict",
-						}).catch(() => {});
+						// Never release a running operation: it belongs to the
+						// concurrent request that owns the claim.
+						if (isReleasableReservation(reservation.state)) {
+							await releaseCreditOperation({
+								userId: user.id,
+								operationId: reservation.id,
+								reason: "Task generation conflict",
+							}).catch(() => {});
+						}
 						return Response.json(
 							{ error: "Task sedang digenerate. Tunggu hingga selesai." },
 							{ status: 409 },
@@ -279,11 +286,15 @@ export const Route = createFileRoute("/api/task/generate")({
 						let eventErrored = false;
 						let isSettled = false;
 						let isReleased = false;
+						let isQuarantined = false;
 						let fullResponse = "";
 
 						const safeRelease = async (reason: string) => {
 							if (isSettled || isReleased || !reservation) return;
 							isReleased = true;
+							// A running operation is owned by a concurrent
+							// request sharing this key: never cancel it here.
+							if (!isReleasableReservation(reservation.state)) return;
 							try {
 								await releaseCreditOperation({
 									userId: user.id,
@@ -292,6 +303,21 @@ export const Route = createFileRoute("/api/task/generate")({
 								});
 							} catch (e) {
 								console.error("Failed to release Task credit reservation:", e);
+							}
+						};
+
+						const safeQuarantine = async (reason: string) => {
+							if (isSettled || isReleased || isQuarantined || !reservation)
+								return;
+							isQuarantined = true;
+							try {
+								await quarantineCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to quarantine Task credit operation:", e);
 							}
 						};
 
@@ -312,7 +338,6 @@ export const Route = createFileRoute("/api/task/generate")({
 								);
 								return;
 							}
-							eventDone = true;
 							try {
 								const taskTree = parseTaskJson(
 									extractJson(sanitizeModelOutput(fullResponse)),
@@ -355,10 +380,14 @@ export const Route = createFileRoute("/api/task/generate")({
 										actualMetrics,
 									});
 									isSettled = true;
+									eventDone = true;
 									emit({ type: "done", taskTree });
 								} catch (settleErr) {
+									// The tree is durable but unpaid: quarantine
+									// for manual reconciliation instead of
+									// releasing the charge into thin air.
 									console.error("Task credit settlement failed:", settleErr);
-									await safeRelease("settlement error");
+									await safeQuarantine("settlement error");
 									await safeError(
 										"Task tersimpan, namun settlement kredit gagal. Hubungi dukungan.",
 									);
@@ -406,10 +435,32 @@ export const Route = createFileRoute("/api/task/generate")({
 							await markCreditOperationRunning({
 								userId: user.id,
 								operationId: reservation.id,
-							}).catch((err) =>
-								console.error("markCreditOperationRunning error:", err),
-							);
+							});
+						} catch (err) {
+							// The reservation is not ours to run (a concurrent
+							// request owns it, or it died): do not generate
+							// against it and do not release it either.
+							console.error("markCreditOperationRunning error:", err);
+							eventErrored = true;
+							try {
+								await db
+									.update(projects)
+									.set({ taskStatus: "pending" })
+									.where(eq(projects.id, projectId));
+							} catch (e) {
+								console.error("task_status reset failed:", e);
+							}
+							emit({
+								type: "error",
+								error: "Task sedang digenerate. Tunggu hingga selesai.",
+							});
+							try {
+								controller.close();
+							} catch {}
+							return;
+						}
 
+						try {
 							emit({ type: "started", model: modelsToTry[0], quote });
 							emit({ type: "quote", quote });
 
