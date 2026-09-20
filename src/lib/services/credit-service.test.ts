@@ -3,6 +3,9 @@ import { estimateCreditQuote } from "@/lib/adaptive-credit";
 import {
 	type CreditServiceStore,
 	createCreditService,
+	freshRetryKey,
+	isReleasableReservation,
+	reservationLifecycle,
 } from "@/lib/services/credit-service";
 
 function makeStore(): CreditServiceStore {
@@ -521,5 +524,45 @@ describe("credit service lifecycle", () => {
 			}),
 		);
 		expect(store.subscriptions.get("sub-1")?.creditsUsed).toBe(0);
+	});
+});
+
+describe("reservation lifecycle", () => {
+	it("treats live attempts as active and finished ones as terminal", () => {
+		for (const state of ["quoted", "reserved", "running", "settling"] as const) {
+			expect(reservationLifecycle(state)).toBe("active");
+		}
+		for (const state of [
+			"settled",
+			"released",
+			"failed",
+			"quarantined",
+			"refunded",
+		] as const) {
+			expect(reservationLifecycle(state)).toBe("terminal");
+		}
+	});
+
+	it("only allows releasing unstarted reservations", () => {
+		expect(isReleasableReservation("reserved")).toBe(true);
+		expect(isReleasableReservation("quoted")).toBe(true);
+		for (const state of [
+			"running",
+			"settling",
+			"settled",
+			"released",
+			"failed",
+			"quarantined",
+			"refunded",
+		] as const) {
+			expect(isReleasableReservation(state)).toBe(false);
+		}
+	});
+
+	it("mints distinct retry keys derived from the original key", () => {
+		const first = freshRetryKey("project-1:ac:1");
+		const second = freshRetryKey("project-1:ac:1");
+		expect(first).not.toBe(second);
+		expect(first.startsWith("project-1:ac:1:retry:")).toBe(true);
 	});
 });

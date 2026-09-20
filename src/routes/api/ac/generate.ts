@@ -18,6 +18,7 @@ import { depthDirective } from "@/lib/prompt-depth";
 import { AC_GENERATION_PROMPT } from "@/lib/prompts-ac";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { saveAcVersion } from "@/lib/services/ac-service";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import {
 	selectModels,
 	tryStreamWithFallback,
@@ -38,10 +39,12 @@ export const Route = createFileRoute("/api/ac/generate")({
 				);
 				const {
 					createCreditQuote,
-					reserveCreditOperation,
+					reserveActiveCreditOperation,
+					isReleasableReservation,
 					markCreditOperationRunning,
 					settleCreditOperation,
 					releaseCreditOperation,
+					quarantineCreditOperation,
 				} = await import("@/lib/services/credit-service");
 
 				const body = await request
@@ -200,13 +203,13 @@ export const Route = createFileRoute("/api/ac/generate")({
 				const idempotencyKey =
 					callerIdempotencyKey || `${projectId}:ac:${callerAttempt ?? 1}`;
 
-				let reservation: {
-					id: string;
-					state: string;
-					finalCharge: number | null;
-				};
+				let reservation: CreditOperationResult;
 				try {
-					reservation = await reserveCreditOperation({
+					// A reused key whose operation already terminated cannot
+					// generate again: mint a fresh attempt instead of
+					// regenerating for free (settled) or against a dead
+					// reservation. Genuine in-flight retries keep joining.
+					reservation = await reserveActiveCreditOperation({
 						userId: user.id,
 						projectId,
 						stage: "ac",
@@ -251,11 +254,15 @@ export const Route = createFileRoute("/api/ac/generate")({
 						if (claimed.length) break;
 					}
 					if (!claimed.length) {
-						await releaseCreditOperation({
-							userId: user.id,
-							operationId: reservation.id,
-							reason: "AC generation conflict",
-						}).catch(() => {});
+						// Never release a running operation: it belongs to the
+						// concurrent request that owns the claim.
+						if (isReleasableReservation(reservation.state)) {
+							await releaseCreditOperation({
+								userId: user.id,
+								operationId: reservation.id,
+								reason: "AC generation conflict",
+							}).catch(() => {});
+						}
 						return Response.json(
 							{ error: "AC sedang digenerate. Tunggu hingga selesai." },
 							{ status: 409 },
@@ -272,11 +279,15 @@ export const Route = createFileRoute("/api/ac/generate")({
 						let eventErrored = false;
 						let isSettled = false;
 						let isReleased = false;
+						let isQuarantined = false;
 						let fullResponse = "";
 
 						const safeRelease = async (reason: string) => {
 							if (isSettled || isReleased || !reservation) return;
 							isReleased = true;
+							// A running operation is owned by a concurrent
+							// request sharing this key: never cancel it here.
+							if (!isReleasableReservation(reservation.state)) return;
 							try {
 								await releaseCreditOperation({
 									userId: user.id,
@@ -285,6 +296,21 @@ export const Route = createFileRoute("/api/ac/generate")({
 								});
 							} catch (e) {
 								console.error("Failed to release AC credit reservation:", e);
+							}
+						};
+
+						const safeQuarantine = async (reason: string) => {
+							if (isSettled || isReleased || isQuarantined || !reservation)
+								return;
+							isQuarantined = true;
+							try {
+								await quarantineCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to quarantine AC credit operation:", e);
 							}
 						};
 
@@ -305,7 +331,6 @@ export const Route = createFileRoute("/api/ac/generate")({
 								);
 								return;
 							}
-							eventDone = true;
 							let saved = false;
 							try {
 								const savedResult = await saveAcVersion(
@@ -334,6 +359,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 									actualMetrics,
 								});
 								isSettled = true;
+								eventDone = true;
 								emit({ type: "done" });
 							} catch (e) {
 								if (!saved) {
@@ -351,8 +377,11 @@ export const Route = createFileRoute("/api/ac/generate")({
 										error: "Gagal menyimpan AC. Coba generate ulang.",
 									});
 								} else {
+									// The artifact is durable but unpaid: quarantine
+									// for manual reconciliation instead of
+									// releasing the charge into thin air.
 									console.error("AC credit settlement failed:", e);
-									await safeRelease("settlement error");
+									await safeQuarantine("settlement error");
 									emit({
 										type: "error",
 										error:
@@ -397,10 +426,32 @@ export const Route = createFileRoute("/api/ac/generate")({
 							await markCreditOperationRunning({
 								userId: user.id,
 								operationId: reservation.id,
-							}).catch((err) =>
-								console.error("markCreditOperationRunning error:", err),
-							);
+							});
+						} catch (err) {
+							// The reservation is not ours to run (a concurrent
+							// request owns it, or it died): do not generate
+							// against it and do not release it either.
+							console.error("markCreditOperationRunning error:", err);
+							eventErrored = true;
+							try {
+								await db
+									.update(projects)
+									.set({ acStatus: "pending" })
+									.where(eq(projects.id, projectId));
+							} catch (e) {
+								console.error("ac_status reset failed:", e);
+							}
+							emit({
+								type: "error",
+								error: "AC sedang digenerate. Tunggu hingga selesai.",
+							});
+							try {
+								controller.close();
+							} catch {}
+							return;
+						}
 
+						try {
 							emit({ type: "started", model: modelsToTry[0], quote });
 							emit({ type: "quote", quote });
 
@@ -461,7 +512,9 @@ export const Route = createFileRoute("/api/ac/generate")({
 
 							await safeDone(outcome.finishReason);
 						} catch (err: unknown) {
-							await safeRelease((err as Error)?.message || "stream error");
+							await safeRelease(
+								err instanceof Error ? err.message : "stream error",
+							);
 							const isAbort =
 								(err instanceof DOMException && err.name === "AbortError") ||
 								(err instanceof Error && err.name === "AbortError") ||

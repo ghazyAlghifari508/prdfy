@@ -619,6 +619,57 @@ export function createCreditQuote(input: CreditQuoteInput): CreditQuote {
 	});
 }
 
+export type CreditOperationLifecycle = "active" | "terminal";
+
+/**
+ * Whether a reservation can still generate: quoted/reserved/running/
+ * settling operations are live attempts, everything else (settled,
+ * released, failed, quarantined, refunded) is terminal.
+ */
+export function reservationLifecycle(
+	state: CreditOperationState,
+): CreditOperationLifecycle {
+	return state === "quoted" ||
+		state === "reserved" ||
+		state === "running" ||
+		state === "settling"
+		? "active"
+		: "terminal";
+}
+
+/**
+ * Whether this request may release the reservation. Only unstarted
+ * operations (never transitioned to running) are safe: releasing a
+ * running operation owned by a concurrent request would cancel a live
+ * generation out from under it.
+ */
+export function isReleasableReservation(state: CreditOperationState): boolean {
+	return state === "quoted" || state === "reserved";
+}
+
+export function freshRetryKey(idempotencyKey: string): string {
+	return `${idempotencyKey}:retry:${crypto.randomUUID()}`;
+}
+
+/**
+ * Reserve a credit operation that is guaranteed active. A terminal
+ * operation returned for a reused idempotency key (settled, released,
+ * failed, ...) cannot generate again, so mint a fresh attempt key
+ * instead of letting the caller regenerate for free (settled) or
+ * against a dead reservation. Genuine in-flight retries keep joining
+ * the existing active operation.
+ */
+export async function reserveActiveCreditOperation(
+	input: ReserveCreditOperationInput,
+): Promise<CreditOperationResult> {
+	const existing = await reserveCreditOperation(input);
+	if (reservationLifecycle(existing.state) === "active") return existing;
+	return reserveCreditOperation({
+		...input,
+		idempotencyKey: freshRetryKey(input.idempotencyKey),
+	});
+}
+
 async function getDatabase() {
 	const { db } = await import("@/db");
 	const schema = await import("@/db/schema");
