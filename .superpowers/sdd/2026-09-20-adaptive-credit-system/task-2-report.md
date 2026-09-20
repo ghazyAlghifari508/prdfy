@@ -34,3 +34,16 @@
 - `pnpm exec biome check src/db/schema.ts src/lib/credit-ledger.ts src/lib/credit-ledger.test.ts`: PASS.
 - `pnpm exec tsc --noEmit`: BLOCKED only by baseline `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.`
 - Bypass scan over changed TypeScript files: PASS, no forbidden type bypass patterns found.
+
+## Remaining Review Fixes
+
+- Added Zod v4 strict runtime parsing for ledger metadata before persistence. It rejects unknown keys, non-finite or negative `measuredUnits`, oversized reasons, and unsafe provider/source/token/secret content while returning the project-owned `CreditLedgerMetadata` shape.
+- The repository has no configured PostgreSQL test harness. Live verification found `DATABASE_URL=UNSET`, `.env=NOT_FOUND`, `.env.local=NOT_FOUND`; `.env.example` is only a template and no test-specific database script/configuration exists. The PostgreSQL integration requirement is therefore explicitly blocked, not represented as satisfied by source/configuration inspections.
+- Pure deterministic coverage now exercises metadata rejection and confirms invalid metadata never reaches the append persistence callback. Existing pure coverage remains for ownership predicates, bounds metadata, source categories, and trigger migration presence; these are not substitutes for live database enforcement.
+
+## Final Follow-up Verification
+
+- `pnpm exec vitest run src/lib/credit-ledger.test.ts`: PASS, 12 tests.
+- `pnpm exec biome check src/db/schema.ts src/lib/credit-ledger.ts src/lib/credit-ledger.test.ts`: PASS.
+- `pnpm exec tsc --noEmit`: BLOCKED by baseline `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.`
+- Bypass scan over changed TypeScript files: PASS, no forbidden type bypass patterns found.

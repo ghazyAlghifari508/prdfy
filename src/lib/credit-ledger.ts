@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import type { db } from "@/db";
 import type {
 	CreditLedgerMetadata,
@@ -38,7 +39,7 @@ export interface CreditLedgerAppendInput {
 	entryType: CreditLedgerEntryType;
 	source: CreditLedgerSourceCategory;
 	pricingVersion: CreditPricingVersion;
-	metadata: CreditLedgerMetadata;
+	metadata: unknown;
 }
 
 export interface CreditUsageQuery {
@@ -72,6 +73,28 @@ export interface CreditLedgerPersistence {
 		entry: CreditLedgerEntryInsert,
 	) => Promise<CreditLedgerEntryRow>;
 	listUsage: (query: CreditUsageQuery) => Promise<CreditUsageRow[]>;
+}
+
+const unsafeMetadataContent =
+	/(https?:\/\/|api[_ -]?key|secret|token|provider)/i;
+
+export const creditLedgerMetadataSchema = z
+	.object({
+		reason: z
+			.string()
+			.max(256)
+			.refine((value) => !unsafeMetadataContent.test(value), {
+				message: "Credit ledger metadata contains unsafe content",
+			}),
+		measuredUnits: z.number().finite().nonnegative(),
+	})
+	.partial()
+	.strict();
+
+export function parseCreditLedgerMetadata(
+	value: unknown,
+): CreditLedgerMetadata {
+	return creditLedgerMetadataSchema.parse(value);
 }
 
 export function parseCreditLedgerSource(
@@ -229,7 +252,7 @@ export async function appendCreditLedgerEntry(
 		entryType: input.entryType,
 		sourceCategory: parseCreditLedgerSource(input.source),
 		pricingVersion: input.pricingVersion,
-		metadata: input.metadata,
+		metadata: parseCreditLedgerMetadata(input.metadata),
 	});
 }
 

@@ -11,6 +11,7 @@ import {
 	createCreditOperation,
 	findCreditOperationByIdempotencyKey,
 	listCreditUsage,
+	parseCreditLedgerMetadata,
 	parseCreditLedgerSource,
 } from "@/lib/credit-ledger";
 
@@ -172,6 +173,39 @@ describe("credit ledger persistence contracts", () => {
 		expect(() => parseCreditLedgerSource("provider")).toThrow(
 			"Unsupported credit ledger source category",
 		);
+	});
+
+	it("rejects unknown ledger metadata keys", () => {
+		expect(() =>
+			parseCreditLedgerMetadata({ reason: "reservation", provider: "secret" }),
+		).toThrow();
+	});
+
+	it("rejects invalid measured units and unsafe metadata content", () => {
+		expect(() =>
+			parseCreditLedgerMetadata({ measuredUnits: Number.POSITIVE_INFINITY }),
+		).toThrow();
+		expect(() =>
+			parseCreditLedgerMetadata({ reason: "https://provider.example/secret" }),
+		).toThrow();
+	});
+
+	it("validates metadata before appending a ledger entry", async () => {
+		const append = vi.fn();
+		await expect(
+			appendCreditLedgerEntry(
+				{ appendLedgerEntry: append },
+				{
+					userId: "user-1",
+					amount: -1,
+					entryType: "reservation",
+					source: "adaptive_credit",
+					pricingVersion: "adaptive-v1",
+					metadata: { measuredUnits: -1 },
+				},
+			),
+		).rejects.toThrow();
+		expect(append).not.toHaveBeenCalled();
 	});
 
 	it("ships a database trigger for ledger immutability", () => {
