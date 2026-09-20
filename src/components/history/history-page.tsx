@@ -256,48 +256,47 @@ export function HistoryPage({ items }: { items: HistoryItem[] }) {
 										</p>
 									</div>
 
-									<ArrowRight
-										size={16}
-										className="shrink-0 text-fog opacity-0 transition-opacity group-hover:opacity-100"
-										aria-hidden
-									/>
-									<button
-										type="button"
-										onClick={(e) => {
-											e.preventDefault();
-											e.stopPropagation();
-											openDelete(item.id);
-										}}
-										className="shrink-0 rounded-md p-1.5 text-crimson transition-colors hover:bg-crimson/10"
-										aria-label={`Hapus proyek ${item.name}`}
-									>
-										<Trash2 size={16} />
-									</button>
-								</>
-							);
+								<ArrowRight
+									size={16}
+									className="shrink-0 text-fog opacity-0 transition-opacity group-hover:opacity-100"
+									aria-hidden
+								/>
+							</>
+						);
 
-							return (
-								<li key={item.id}>
-									{link ? (
-										<Link
-											to={link.to}
-											params={link.params}
-											onClick={handleClick}
-											className="group flex items-center gap-4 rounded-xl border border-graphite bg-charcoal/60 p-4 transition-colors hover:border-fog/40 hover:bg-charcoal"
-										>
-											{cardInner}
-										</Link>
-									) : (
-										<a
-											href={href}
-											onClick={handleClick}
-											className="group flex items-center gap-4 rounded-xl border border-graphite bg-charcoal/60 p-4 transition-colors hover:border-fog/40 hover:bg-charcoal"
-										>
-											{cardInner}
-										</a>
-									)}
-								</li>
-							);
+						return (
+							<li
+								key={item.id}
+								className="group flex items-center gap-4 rounded-xl border border-graphite bg-charcoal/60 p-4 transition-colors hover:border-fog/40 hover:bg-charcoal"
+							>
+								{link ? (
+									<Link
+										to={link.to}
+										params={link.params}
+										onClick={handleClick}
+										className="flex min-w-0 flex-1 items-center gap-4"
+									>
+										{cardInner}
+									</Link>
+								) : (
+									<a
+										href={href}
+										onClick={handleClick}
+										className="flex min-w-0 flex-1 items-center gap-4"
+									>
+										{cardInner}
+									</a>
+								)}
+								<button
+									type="button"
+									onClick={() => openDelete(item.id)}
+									className="shrink-0 rounded-md p-1.5 text-crimson transition-colors hover:bg-crimson/10"
+									aria-label={`Hapus proyek ${item.name}`}
+								>
+									<Trash2 size={16} />
+								</button>
+							</li>
+						);
 						})}
 					</ul>
 				)}
