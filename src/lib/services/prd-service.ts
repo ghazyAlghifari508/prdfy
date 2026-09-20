@@ -40,6 +40,31 @@ export function generateShareToken(): string {
 }
 
 /**
+ * Count unique PRD section markers in sanitized content.
+ */
+export function countPrdSectionMarkers(content: string): number {
+	return (content.match(/<!--\s*SECTION:\s*([^-\n]+?)\s*-->/gi) || []).filter(
+		(m, i, arr) => arr.indexOf(m) === i,
+	).length;
+}
+
+/**
+ * A generate must carry all 8 unique section markers. Fewer markers is a
+ * truncated/aborted generation (providers report finish_reason "stop" even for
+ * premature ends), so it is rejected before any write — including the share
+ * token rotation, which must never revoke a working public link for output
+ * that was never persisted. Revisions patch into existing content and may
+ * legitimately ship a single block, so they are exempt.
+ */
+export function assertCompletePrdOutput(content: string): void {
+	if (content.trim() && countPrdSectionMarkers(content) < 8) {
+		throw new Error(
+			"PRD output tidak lengkap (kurang dari 8 section). Tidak disimpan. Coba lagi.",
+		);
+	}
+}
+
+/**
  * Strip known PRD prompt boilerplate so name heuristics see only user content.
  */
 function stripPrdBoilerplate(message: string): string {
@@ -417,98 +442,72 @@ export async function savePrdVersion(
 		return undefined;
 	}
 
-	if (mode === "generate" && allowShareLink) {
-		await db
-			.update(projects)
-			.set({ shareToken: generateShareToken() })
-			.where(eq(projects.id, projectId));
-	}
-
-	// Enforce the PRD contract before persist: a generate must carry all 8
-	// section markers. HTML-page output (a model that ignored the markdown
-	// instruction) is unwrapped to text when possible; a document with fewer
-	// than all 8 unique markers is a truncated/aborted generation (a model that
-	// stopped early with finish_reason "stop") and is rejected rather than saved
-	// as a broken version — the truncation guard can't rely on finishReason
-	// alone because providers report "stop" even for premature ends. Revisions
-	// patch into existing content, so they may legitimately ship a single block.
+	// HTML-page output (a model that ignored the markdown instruction) is
+	// unwrapped to text when possible, then the section contract is enforced
+	// before any write.
 	const cleanContent = sanitizeModelOutput(fullResponse);
-	const sectionMarkerCount = (
-		cleanContent.match(/<!--\s*SECTION:\s*([^-\n]+?)\s*-->/gi) || []
-	).filter((m, i, arr) => arr.indexOf(m) === i).length;
-	if (mode === "generate" && cleanContent.trim() && sectionMarkerCount < 8) {
-		throw new Error(
-			"PRD output tidak lengkap (kurang dari 8 section). Tidak disimpan. Coba lagi.",
-		);
-	}
+	if (mode === "generate") assertCompletePrdOutput(cleanContent);
 
-	let nextVersion = 1;
-	if (mode === "revise") {
-		const [latest] = await db
-			.select({ version: prdVersions.version })
-			.from(prdVersions)
-			.where(eq(prdVersions.projectId, projectId))
-			.orderBy(desc(prdVersions.version))
+	const changeSummary =
+		mode === "generate"
+			? "Initial PRD generation"
+			: `${userMessage.substring(0, 50)}...`;
+
+	// One transaction per project: the row lock serializes concurrent writers
+	// so version allocation is atomic (no read-then-insert race and no
+	// message-string retry), and the share token only rotates once the output
+	// has passed validation above — a rejected generation must not revoke the
+	// existing public link.
+	return db.transaction(async (tx) => {
+		const [project] = await tx
+			.select({ step: projects.step })
+			.from(projects)
+			.where(eq(projects.id, projectId))
+			.for("update")
 			.limit(1);
-		if (latest) nextVersion = latest.version + 1;
-	}
+		if (!project) throw new Error("Project not found for PRD save");
 
-	let prdVersionId = crypto.randomUUID();
-	await db
-		.insert(prdVersions)
-		.values({
-			id: prdVersionId,
-			projectId,
-			version: nextVersion,
-			content: cleanContent,
-			changeSummary:
-				mode === "generate"
-					? "Initial PRD generation"
-					: `${userMessage.substring(0, 50)}...`,
-		})
-		.catch(async (err: unknown) => {
-			// unique (project_id, version) violation — another writer took this number.
-			// re-read the new max and retry once.
-			const msg = err instanceof Error ? err.message : String(err);
-			if (!msg.includes("23505")) throw err;
-			const [latest] = await db
+		let nextVersion = 1;
+		if (mode === "revise") {
+			const [latest] = await tx
 				.select({ version: prdVersions.version })
 				.from(prdVersions)
 				.where(eq(prdVersions.projectId, projectId))
 				.orderBy(desc(prdVersions.version))
 				.limit(1);
-			nextVersion = (latest?.version ?? nextVersion) + 1;
-			prdVersionId = crypto.randomUUID();
-			await db.insert(prdVersions).values({
-				id: prdVersionId,
-				projectId,
-				version: nextVersion,
-				content: cleanContent,
-				changeSummary:
-					mode === "generate"
-						? "Initial PRD generation"
-						: `${userMessage.substring(0, 50)}...`,
-			});
+			if (latest) nextVersion = latest.version + 1;
+		}
+
+		const prdVersionId = crypto.randomUUID();
+		await tx.insert(prdVersions).values({
+			id: prdVersionId,
+			projectId,
+			version: nextVersion,
+			content: cleanContent,
+			changeSummary,
 		});
 
-	// Advance step to 'prd' — forward only (mirrors saveAcVersion). A generate
-	// marks the project furthest point reached; History sends the user to /prd.
-	const [proj] = await db
-		.select({ step: projects.step })
-		.from(projects)
-		.where(eq(projects.id, projectId))
-		.limit(1);
-	const nextStep = advanceStep(proj?.step, "prd");
-	await db
-		.update(projects)
-		.set(
-			nextStep
-				? { status: "completed", step: nextStep, updatedAt: new Date() }
-				: { status: "completed", updatedAt: new Date() },
-		)
-		.where(eq(projects.id, projectId));
+		// Advance step to 'prd' — forward only (mirrors saveAcVersion). A
+		// generate marks the project furthest point reached; History sends the
+		// user to /prd.
+		const nextStep = advanceStep(project.step, "prd");
+		const projectUpdate: {
+			status: string;
+			updatedAt: Date;
+			step?: string;
+			shareToken?: string;
+		} = { status: "completed", updatedAt: new Date() };
+		if (nextStep) projectUpdate.step = nextStep;
+		if (mode === "generate" && allowShareLink) {
+			projectUpdate.shareToken = generateShareToken();
+		}
+		await tx
+			.update(projects)
+			.set(projectUpdate)
+			.where(eq(projects.id, projectId));
 
-	return { prdVersionId, version: nextVersion };
+		return { prdVersionId, version: nextVersion };
+	});
 }
 
 export async function getPrdVersionContent(
