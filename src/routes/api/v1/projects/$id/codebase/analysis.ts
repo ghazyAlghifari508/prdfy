@@ -30,11 +30,13 @@ import {
 	createCreditQuote,
 	formatInsufficientCreditsError,
 	formatSubscriptionPausedError,
+	isReleasableReservation,
 	markCreditOperationRunning,
 	releaseCreditOperation,
-	reserveCreditOperation,
+	reserveActiveCreditOperation,
 	settleCreditOperation,
 } from "@/lib/services/credit-service";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
@@ -454,22 +456,22 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 
 				const idempotencyKey = `${projectId}:codebase_analysis:${snapshot.id}:${existing.length + 1}`;
 
-				let reservation: {
-					id: string;
-					state: string;
-					finalCharge: number | null;
-				};
-				try {
-					reservation = await reserveCreditOperation({
-						userId: user.id,
-						projectId,
-						stage: "codebase",
-						operation: "codebase_analysis",
-						metrics,
-						idempotencyKey,
-						quote,
-					});
-				} catch (err) {
+			let reservation: CreditOperationResult;
+			try {
+				// A reused key whose operation already terminated cannot
+				// analyze again: mint a fresh attempt instead of running
+				// the model for free (settled) or against a dead
+				// reservation. Genuine in-flight retries keep joining.
+				reservation = await reserveActiveCreditOperation({
+					userId: user.id,
+					projectId,
+					stage: "codebase",
+					operation: "codebase_analysis",
+					metrics,
+					idempotencyKey,
+					quote,
+				});
+			} catch (err) {
 					console.error(
 						"[codebase/analysis] reserveCreditOperation failed:",
 						err,
@@ -484,15 +486,31 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					);
 				}
 
+			try {
 				await markCreditOperationRunning({
 					userId: user.id,
 					operationId: reservation.id,
-				}).catch((err) =>
-					console.error(
-						"[codebase/analysis] markCreditOperationRunning failed:",
-						err,
-					),
+				});
+			} catch (err) {
+				// The reservation is not ours to run (a concurrent request
+				// owns it, or it died): stop instead of analyzing against
+				// it, and never release a running operation here.
+				console.error(
+					"[codebase/analysis] markCreditOperationRunning failed:",
+					err,
 				);
+				if (isReleasableReservation(reservation.state)) {
+					await releaseCreditOperation({
+						userId: user.id,
+						operationId: reservation.id,
+						reason: "Analysis reservation not runnable",
+					}).catch(() => {});
+				}
+				return Response.json(
+					{ error: "Analisis sedang berjalan. Tunggu hingga selesai." },
+					{ status: 409 },
+				);
+			}
 
 				try {
 					const analysis = await requestCodebaseAnalysis(
@@ -505,17 +523,19 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						.where(eq(codebaseAnalyses.id, analysis.id))
 						.limit(1);
 					const response = row ? toResponse(row) : null;
-					if (!response || !analysis) {
+				if (!response || !analysis) {
+					if (isReleasableReservation(reservation.state)) {
 						await releaseCreditOperation({
 							userId: user.id,
 							operationId: reservation.id,
 							reason: "Hasil analisis rusak",
 						}).catch(() => {});
-						return Response.json(
-							{ error: "Hasil analisis rusak", code: "SYNC_FAILED" },
-							{ status: 500 },
-						);
 					}
+					return Response.json(
+						{ error: "Hasil analisis rusak", code: "SYNC_FAILED" },
+						{ status: 500 },
+					);
+				}
 
 					await settleCreditOperation({
 						userId: user.id,
