@@ -172,6 +172,43 @@ describe("SyncStatus", () => {
 		expect(onRetryAnalysis).toHaveBeenCalledTimes(1);
 	});
 
+	it("does not poll when the parent controls the status", async () => {
+		const fetchMock = mockFetchSequence([statusResponse()]);
+		const c = renderStatus({ status: statusResponse({ status: "ready" }) });
+		await settle();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(c.textContent).toMatch(/siap/i);
+	});
+
+	it("does not report ready for a failed session with a stale ready analysis", async () => {
+		mockFetchSequence([
+			statusResponse({ status: "failed", analysisStatus: "ready" }),
+		]);
+		const c = renderStatus();
+		await settle();
+		expect(c.textContent).not.toMatch(/sync selesai/i);
+		expect(c.textContent).toMatch(/sync gagal/i);
+	});
+
+	it("keeps one request in flight so slow responses cannot overlap", async () => {
+		let resolveFirst!: (value: unknown) => void;
+		const gate = new Promise((resolve) => {
+			resolveFirst = resolve;
+		});
+		const fetchMock = vi.fn(async () => {
+			await gate;
+			return { ok: true, status: 200, json: async () => statusResponse() };
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		renderStatus();
+		await settle(60);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			resolveFirst(null);
+		});
+		await settle();
+	});
+
 	it("notifies the parent of status updates for analysis wiring", async () => {
 		const onStatus = vi.fn();
 		mockFetchSequence([statusResponse({ status: "analyzing" })]);

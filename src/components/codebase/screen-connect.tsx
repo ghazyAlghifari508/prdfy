@@ -151,7 +151,8 @@ export function ScreenConnect({
 					<button
 						type="button"
 						onClick={onAgentStarted}
-						className="inline-flex items-center justify-center rounded-md bg-snow px-4 py-2 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition"
+						disabled={!payload || isStarting}
+						className="inline-flex items-center justify-center rounded-md bg-snow px-4 py-2 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition disabled:cursor-not-allowed disabled:opacity-50"
 					>
 						Saya sudah menjalankan agent
 					</button>

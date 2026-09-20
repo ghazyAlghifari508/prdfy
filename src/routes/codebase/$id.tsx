@@ -97,11 +97,11 @@ function CodebasePage() {
 	const reportLastRoute = useLastRoute(d.projectId);
 
 	const [payload, setPayload] = useState<SyncPromptPayload | null>(null);
-	const [_pageError, setPageError] = useState<string | null>(null);
+	const [pageError, setPageError] = useState<string | null>(null);
 	const [isStarting, setIsStarting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-	const [_failedAnalysis, setFailedAnalysis] = useState<{
+	const [failedAnalysis, setFailedAnalysis] = useState<{
 		snapshotId: string;
 		analysisId: string | null;
 		message: string;
@@ -109,6 +109,8 @@ function CodebasePage() {
 	const [latestStatus, setLatestStatus] = useState<SyncStatusResponse | null>(
 		null,
 	);
+	const sessionFailedRef = useRef(false);
+	const pollInFlightRef = useRef(false);
 	const [currentSnapshotId, setCurrentSnapshotId] = useState<string | null>(
 		null,
 	);
@@ -273,10 +275,21 @@ function CodebasePage() {
 		[analysis, currentSnapshotId, readAnalysis, triggerAnalysis],
 	);
 
-	// Continuous background status polling across all screens
+	// Continuous background status polling across all screens. Stops once
+	// the session reaches a failed/expired terminal state (the user must
+	// retry explicitly); a ready session keeps polling so analysis progress
+	// stays visible.
 	useEffect(() => {
+		if (
+			latestStatus?.status === "failed" ||
+			latestStatus?.status === "expired"
+		) {
+			return;
+		}
 		let cancelled = false;
 		const fetchStatus = async () => {
+			if (pollInFlightRef.current) return;
+			pollInFlightRef.current = true;
 			try {
 				const query = latestStatus?.sessionId
 					? `?sessionId=${encodeURIComponent(latestStatus.sessionId)}`
@@ -292,6 +305,8 @@ function CodebasePage() {
 				}
 			} catch {
 				// Handled gracefully
+			} finally {
+				pollInFlightRef.current = false;
 			}
 		};
 
@@ -301,7 +316,12 @@ function CodebasePage() {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [d.projectId, latestStatus?.sessionId, handleStatus]);
+	}, [
+		d.projectId,
+		latestStatus?.sessionId,
+		latestStatus?.status,
+		handleStatus,
+	]);
 
 	const startSession = useCallback(
 		async (retry: boolean) => {
@@ -319,13 +339,29 @@ function CodebasePage() {
 				const json = (await res.json().catch(() => null)) as unknown;
 				const parsed = syncPromptPayloadSchema.safeParse(json);
 				if (res.ok && parsed.success) {
+					// A retry mints a new session: drop the obsolete poll
+					// target, analysis, and snapshot bindings so nothing
+					// keeps observing the revoked previous session.
+					sessionFailedRef.current = false;
+					setLatestStatus(null);
+					setAnalysis(null);
+					setFailedAnalysis(null);
+					setCurrentSnapshotId(null);
+					triggeredForRef.current = null;
 					setPayload(parsed.data);
 					userSelectedStepRef.current = false;
 					setActiveStep(1);
 					return;
 				}
+				const message =
+					json && typeof json === "object" && "error" in json
+						? String((json as { error: unknown }).error)
+						: "Gagal menyiapkan sesi sync.";
+				setPageError(message);
+				sessionFailedRef.current = true;
 			} catch {
-				// Handled gracefully
+				setPageError("Gagal menghubungi server.");
+				sessionFailedRef.current = true;
 			} finally {
 				setIsStarting(false);
 			}
@@ -333,9 +369,16 @@ function CodebasePage() {
 		[d.projectId],
 	);
 
-	// Auto-mint active session credentials on Step 1 if payload missing
+	// Auto-mint active session credentials on Step 1 if payload missing.
+	// Stops after a failure (explicit retry only) instead of looping.
 	useEffect(() => {
-		if (!payload && !analysis && activeStep === 1 && !isStarting) {
+		if (
+			!payload &&
+			!analysis &&
+			activeStep === 1 &&
+			!isStarting &&
+			!sessionFailedRef.current
+		) {
 			void startSession(true);
 		}
 	}, [payload, analysis, activeStep, isStarting, startSession]);
@@ -344,7 +387,7 @@ function CodebasePage() {
 	const maxAchievedStep: 1 | 2 | 3 = analysis?.output
 		? 3
 		: latestStatus &&
-			  (latestStatus.status === "connected" ||
+				(latestStatus.status === "connected" ||
 					latestStatus.status === "scanning" ||
 					latestStatus.status === "filtering" ||
 					latestStatus.status === "uploading" ||
@@ -361,8 +404,30 @@ function CodebasePage() {
 		}
 	}, [maxAchievedStep]);
 
+	const retryMessage = pageError ?? failedAnalysis?.message ?? null;
+
 	return (
 		<main className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 animate-enter flex flex-col gap-6">
+			{retryMessage && (
+				<div
+					role="alert"
+					className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-crimson/30 bg-crimson/10 p-4 text-sm text-crimson"
+				>
+					<span>{retryMessage}</span>
+					<button
+						type="button"
+						onClick={() => {
+							setPageError(null);
+							setFailedAnalysis(null);
+							sessionFailedRef.current = false;
+							void startSession(true);
+						}}
+						className="rounded-lg border border-crimson/40 px-3 py-1.5 text-xs font-medium hover:bg-crimson/10"
+					>
+						Coba lagi
+					</button>
+				</div>
+			)}
 			{/* Flowline Navigation matching existing-codebase-flow.html */}
 			<div className="flex items-center gap-2 text-xs text-fog border-b border-graphite/60 pb-3">
 				<button
@@ -422,6 +487,7 @@ function CodebasePage() {
 				<ScreenConnect
 					projectName={d.projectName}
 					payload={payload}
+					isStarting={isStarting}
 					onAgentStarted={() => {
 						userSelectedStepRef.current = true;
 						setActiveStep(2);

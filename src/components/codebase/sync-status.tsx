@@ -3,25 +3,11 @@
 import { AlertCircle, Check, Circle, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-	type CodebaseSyncStatus,
 	isTerminalSyncStatus,
 	type SyncStatusResponse,
 	syncStatusResponseSchema,
 } from "@/lib/codebase-sync";
 import { CODEBASE_SYNC_POLL_INTERVAL_MS } from "@/lib/constants";
-
-const STATUS_LABEL: Record<CodebaseSyncStatus, string> = {
-	waiting_for_cli: "Menunggu CLI",
-	connected: "CLI terhubung",
-	scanning: "Memindai repositori",
-	filtering: "Memfilter file",
-	uploading: "Mengupload snapshot",
-	uploaded: "Snapshot terupload",
-	analyzing: "Menganalisis codebase",
-	ready: "Siap",
-	failed: "Sync gagal",
-	expired: "Sesi kedaluwarsa",
-};
 
 interface SyncStatusProps {
 	projectId: string;
@@ -53,15 +39,23 @@ export function SyncStatus({
 	);
 	const status = propStatus !== undefined ? propStatus : polledStatus;
 	const [error, setError] = useState<string | null>(null);
-	const [isLoading, setIsLoading] = useState(propStatus === undefined);
 	const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const inFlightRef = useRef(false);
 	const onStatusRef = useRef(onStatus);
 	onStatusRef.current = onStatus;
+	// A controlled parent owns polling and passes every update down; an
+	// internal poller here would double every request.
+	const pollInternally = propStatus === undefined;
 
 	useEffect(() => {
+		if (!pollInternally) return;
 		let cancelled = false;
 
 		const fetchStatus = async () => {
+			// One request at a time: a slow response must never be
+			// overwritten by (or overwrite) a newer tick out of order.
+			if (inFlightRef.current) return;
+			inFlightRef.current = true;
 			try {
 				const query = sessionId
 					? `?sessionId=${encodeURIComponent(sessionId)}`
@@ -77,20 +71,17 @@ export function SyncStatus({
 							? String((json as { error: unknown }).error)
 							: "Gagal membaca status sync.";
 					setError(message);
-					setIsLoading(false);
 					onStatusRef.current?.(null);
 					return;
 				}
 				const parsed = syncStatusResponseSchema.safeParse(json);
 				if (!parsed.success) {
 					setError("Gagal membaca status sync.");
-					setIsLoading(false);
 					onStatusRef.current?.(null);
 					return;
 				}
 				setPolledStatus(parsed.data);
 				setError(null);
-				setIsLoading(false);
 				onStatusRef.current?.(parsed.data);
 				if (isTerminalSyncStatus(parsed.data.status) && timerRef.current) {
 					clearInterval(timerRef.current);
@@ -99,8 +90,9 @@ export function SyncStatus({
 			} catch {
 				if (cancelled) return;
 				setError("Gagal menghubungi server.");
-				setIsLoading(false);
 				onStatusRef.current?.(null);
+			} finally {
+				inFlightRef.current = false;
 			}
 		};
 
@@ -115,12 +107,19 @@ export function SyncStatus({
 				timerRef.current = null;
 			}
 		};
-	}, [projectId, sessionId, pollIntervalMs]);
+	}, [projectId, sessionId, pollIntervalMs, pollInternally]);
 
 	const s = status?.status ?? "waiting_for_cli";
 	const isFailed = s === "failed";
 	const isExpired = s === "expired";
-	const isReady = s === "ready" || status?.analysisStatus === "ready";
+	// Ready means the sync session itself completed with a usable
+	// analysis: a ready analysis attached to a failed/expired session is
+	// stale, not a success.
+	const isReady =
+		s === "ready" &&
+		(status?.analysisStatus === undefined ||
+			status.analysisStatus === "ready" ||
+			status.analysisStatus === "pending");
 	const isAnalyzing =
 		s === "analyzing" ||
 		status?.analysisStatus === "pending" ||
@@ -215,9 +214,15 @@ export function SyncStatus({
 							}`}
 						>
 							{isConnected || isReady || isUploading || isAnalyzing ? (
-								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+								<Check
+									size={14}
+									className="text-emerald-400 font-bold shrink-0"
+								/>
 							) : (
-								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+								<Loader2
+									size={14}
+									className="text-blue-400 animate-spin shrink-0"
+								/>
 							)}
 							<span className="font-medium">
 								{isConnected || isReady || isUploading || isAnalyzing
@@ -241,9 +246,15 @@ export function SyncStatus({
 							{status?.fileCount !== undefined ||
 							status?.excludedCount !== undefined ||
 							isReady ? (
-								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+								<Check
+									size={14}
+									className="text-emerald-400 font-bold shrink-0"
+								/>
 							) : isConnected ? (
-								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+								<Loader2
+									size={14}
+									className="text-blue-400 animate-spin shrink-0"
+								/>
 							) : (
 								<Circle size={14} className="text-slate shrink-0" />
 							)}
@@ -263,9 +274,15 @@ export function SyncStatus({
 							}`}
 						>
 							{status?.excludedCount !== undefined ? (
-								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+								<Check
+									size={14}
+									className="text-emerald-400 font-bold shrink-0"
+								/>
 							) : isConnected ? (
-								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+								<Loader2
+									size={14}
+									className="text-blue-400 animate-spin shrink-0"
+								/>
 							) : (
 								<Circle size={14} className="text-slate shrink-0" />
 							)}
@@ -283,8 +300,10 @@ export function SyncStatus({
 						<div
 							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
 								isReady ||
-								(status?.fileCount !== undefined &&
-									status?.status !== "uploading")
+								(
+									status?.fileCount !== undefined &&
+										status?.status !== "uploading"
+								)
 									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
 									: isUploading
 										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
@@ -294,9 +313,15 @@ export function SyncStatus({
 							{isReady ||
 							(status?.fileCount !== undefined &&
 								status?.status !== "uploading") ? (
-								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+								<Check
+									size={14}
+									className="text-emerald-400 font-bold shrink-0"
+								/>
 							) : isUploading ? (
-								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+								<Loader2
+									size={14}
+									className="text-blue-400 animate-spin shrink-0"
+								/>
 							) : (
 								<Circle size={14} className="text-slate shrink-0" />
 							)}
@@ -323,9 +348,15 @@ export function SyncStatus({
 							}`}
 						>
 							{isReady ? (
-								<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+								<Check
+									size={14}
+									className="text-emerald-400 font-bold shrink-0"
+								/>
 							) : isAnalyzing ? (
-								<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+								<Loader2
+									size={14}
+									className="text-blue-400 animate-spin shrink-0"
+								/>
 							) : showAnalysisRetry ? (
 								<AlertCircle size={14} className="text-crimson shrink-0" />
 							) : (
