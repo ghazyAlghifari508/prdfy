@@ -4,6 +4,7 @@ import { useLocation } from "@tanstack/react-router";
 import { useState } from "react";
 import { Logo } from "@/components/ui/logo";
 import { authClient } from "@/lib/auth-client";
+import { getSafeRedirectPath } from "@/lib/redirect";
 
 const GoogleIcon = () => (
 	<svg
@@ -46,7 +47,7 @@ const GitHubIcon = () => (
 export function LoginForm() {
 	const searchStr = useLocation({ select: (l) => l.searchStr });
 	const searchParams = new URLSearchParams(searchStr);
-	const redirectTo = searchParams.get("redirect") || "/";
+	const redirectTo = getSafeRedirectPath(searchParams.get("redirect"));
 	const [loading, setLoading] = useState<"google" | "github" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
@@ -66,7 +67,14 @@ export function LoginForm() {
 		}
 
 		try {
-			await authClient.signIn.social({ provider, callbackURL: redirectTo });
+			const result = await authClient.signIn.social({
+				provider,
+				callbackURL: redirectTo,
+			});
+			if (result && typeof result === "object" && "error" in result && result.error) {
+				setError("Gagal login. Coba lagi.");
+				setLoading(null);
+			}
 		} catch {
 			setError("Gagal login. Coba lagi.");
 			setLoading(null);
