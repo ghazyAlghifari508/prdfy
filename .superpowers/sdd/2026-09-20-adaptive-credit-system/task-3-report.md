@@ -86,3 +86,27 @@ Migration `0016` does not infer a historical subscription from `user_id`, timest
 - Changed-file Biome passed after formatting.
 - `pnpm exec drizzle-kit check` passed with `Everything's fine`.
 - Production build, full typecheck, bypass scan, and `git diff --check` are run as the final gate; the known unrelated `commander` typecheck blocker remains documented if reproduced.
+
+## Final Hardening Round
+
+### Fixes
+
+- Added typed `quarantined` terminal state and nullable `subscriptionId` domain contract for historical/unresolved operations.
+- Added durable in-memory and database quarantine resolution: active reservation is zeroed, a compensating `manual_correction`/`correction` ledger entry is appended with operation linkage, pricing version, reconciliation code, and manual-accounting metadata, and the terminal operation records resolved reconciliation metadata.
+- Kept transient reconciliation failures in `settling`; permanent missing, invalid, or expired subscription ownership failures resolve through quarantine and are not reported as successful releases.
+- Updated migration `0016` to deterministically record and clear active historical reservation holds, quarantine them, preserve existing reconciliation JSON, and mark unresolved non-active rows pending without guessing subscription ownership.
+- Moved in-memory quote validation after user/project idempotency lookup, matching the existing database lookup-before-validation behavior.
+- Expanded exact conservation assertions for reservation hold, unused release, final debit, refund compensation, `creditsUsed`, `creditsReserved`, operation linkage, pricing version, usage, cap state, and ledger metadata.
+
+### Verification
+
+- TDD RED: focused all-credit Vitest failed with the four intended missing-behavior regressions before production changes.
+- Focused GREEN: `pnpm exec vitest run src/lib/services/credit-service.test.ts src/lib/services/credit-service.contract.test.ts src/lib/credit-ledger.test.ts src/lib/adaptive-credit.test.ts` passed: `4 files, 39 tests`.
+- Changed-file Biome passed for all seven changed TypeScript files.
+- `pnpm exec drizzle-kit check` passed with `Everything's fine`.
+- `pnpm exec drizzle-kit generate` reported `No schema changes, nothing to migrate`; no unintended migration artifact was generated.
+- `pnpm build` passed for client and SSR bundles; existing externalization and large-chunk messages remain informational.
+- Bypass scan produced no matches in the changed Task 3 files. Repository-wide output contains only pre-existing unrelated matches, including generated `src/routeTree.gen.ts`, which was not modified.
+- `git diff --check` passed.
+- Full typecheck remains blocked by the pre-existing unrelated `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.` No new Task 3 type error remains after the quarantine insert correction.
+- Live PostgreSQL migration, transaction, and concurrency execution remains unavailable because no configured database test environment exists; this is not represented as passing coverage.

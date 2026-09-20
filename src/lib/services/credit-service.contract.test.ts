@@ -17,7 +17,7 @@ describe("adaptive credit database contracts", () => {
 		expect(mutationSections).toHaveLength(3);
 		expect(source).toContain("state} IN ('reserved', 'running', 'settling')");
 		expect(source).toContain(
-			"Keep the durable settling state for a later retry.",
+			"Other failures remain in settling for a later retry.",
 		);
 		expect(source).toContain('eq(schema.creditOperations.state, "settling")');
 	});
@@ -31,5 +31,21 @@ describe("adaptive credit database contracts", () => {
 		expect(migration).not.toContain(
 			'ALTER COLUMN "subscription_id" SET NOT NULL',
 		);
+		expect(migration).toContain("jsonb_build_object");
+		expect(migration).toContain("jsonb_strip_nulls");
+		expect(migration).toContain("historical_active_reservation_quarantined");
+		expect(migration).toContain('"reserved_credits" = CASE');
+		expect(migration).toContain("COALESCE(\"reconciliation\", '{}'::jsonb)");
+		expect(migration).toContain("\"reconciliation\" ? 'status'");
+	});
+
+	it("models nullable origins and terminal reconciliation outcomes", async () => {
+		const source = await readFile(servicePath, "utf8");
+		expect(source).toContain("subscriptionId: string | null");
+		expect(source).toContain('state: "quarantined"');
+		expect(source).toContain('accounting: "manual_correction_required"');
+		expect(source).toContain("if (existing) return operationResult(existing);");
+		expect(source).toContain("export async function quarantineCreditOperation");
+		expect(source).toContain('state: "quarantined"');
 	});
 });

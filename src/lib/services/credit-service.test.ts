@@ -80,6 +80,31 @@ describe("credit service lifecycle", () => {
 		).toHaveLength(1);
 	});
 
+	it("returns an idempotent operation before validating a replacement quote", async () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const input = {
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd" as const,
+			...reservationDetails,
+			idempotencyKey: "request-1",
+			quote,
+		};
+		const first = await service.reserveCreditOperation(input);
+
+		const replay = service.reserveCreditOperation({
+			...input,
+			operation: "ac_generation",
+			quote: {
+				...quote,
+				operation: "ac_generation",
+			},
+		});
+
+		expect(replay).toEqual(first);
+	});
+
 	it("allows only one competing reservation to consume the available balance", async () => {
 		const store = makeStore();
 		const subscription = store.subscriptions.get("sub-1");
@@ -370,6 +395,41 @@ describe("credit service lifecycle", () => {
 		expect(stored.state).toBe("released");
 	});
 
+	it("quarantines a permanently unresolvable expired reservation with compensation", async () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const operation = await service.reserveCreditOperation({
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd",
+			...reservationDetails,
+			idempotencyKey: "quarantine-missing-subscription",
+			quote,
+			expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+		});
+		store.subscriptions.delete("sub-1");
+
+		const result = await service.reconcileExpiredCreditOperations({
+			userId: "user-1",
+			now: new Date("2001-01-01T00:00:00.000Z"),
+		});
+		const stored = store.operations.get(operation.id);
+
+		expect(result.releasedOperationIds).toEqual([]);
+		expect(stored?.state).toBe("quarantined");
+		expect(stored?.reservedCredits).toBe(0);
+		expect(stored?.reconciliation).toMatchObject({
+			status: "resolved",
+			code: "subscription_origin_unresolvable",
+			accounting: "manual_correction_required",
+		});
+		expect(store.ledger.at(-1)).toMatchObject({
+			entryType: "correction",
+			amount: quote.maximumCredits,
+			operationId: operation.id,
+		});
+	});
+
 	it("reconciles expired reservations and leaves unrelated users untouched", async () => {
 		const store = makeStore();
 		const service = createCreditService(store);
@@ -390,5 +450,76 @@ describe("credit service lifecycle", () => {
 
 		expect(result).toEqual({ releasedOperationIds: [expect.any(String)] });
 		expect(store.subscriptions.get("sub-1")?.creditsReserved).toBe(0);
+	});
+
+	it("keeps reservation, release, debit, and refund conservation separate", async () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const operation = await service.reserveCreditOperation({
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd",
+			...reservationDetails,
+			idempotencyKey: "conservation",
+			quote,
+		});
+		await service.settleCreditOperation({
+			userId: "user-1",
+			operationId: operation.id,
+			finalCharge: 2,
+			artifactReference: "artifact-1",
+			measuredUnits: 2,
+		});
+
+		expect(store.ledger).toEqual([
+			expect.objectContaining({
+				amount: -quote.maximumCredits,
+				entryType: "reservation",
+				operationId: operation.id,
+				pricingVersion: quote.pricingVersion,
+				reason: "credit reservation",
+			}),
+			expect.objectContaining({
+				amount: quote.maximumCredits - 2,
+				entryType: "release",
+				operationId: operation.id,
+				pricingVersion: quote.pricingVersion,
+				reason: "unused credit reservation released",
+			}),
+			expect.objectContaining({
+				amount: -2,
+				entryType: "debit",
+				operationId: operation.id,
+				pricingVersion: quote.pricingVersion,
+				reason: "credit operation settled",
+			}),
+		]);
+		expect(store.subscriptions.get("sub-1")).toMatchObject({
+			creditsUsed: 2,
+			creditsReserved: 0,
+		});
+		expect(store.operations.get(operation.id)).toMatchObject({
+			subscriptionId: "sub-1",
+			pricingVersion: quote.pricingVersion,
+			metrics: quote.metrics,
+			usage: { measuredUnits: 2 },
+			capApplied: false,
+		});
+
+		await service.refundCreditOperation({
+			userId: "user-1",
+			operationId: operation.id,
+			reason: "verified_failure",
+		});
+		expect(store.ledger.at(-1)).toEqual(
+			expect.objectContaining({
+				amount: 2,
+				entryType: "refund",
+				operationId: operation.id,
+				pricingVersion: quote.pricingVersion,
+				reason: "verified_failure",
+			}),
+		);
+		expect(store.subscriptions.get("sub-1")?.creditsUsed).toBe(0);
 	});
 });

@@ -139,6 +139,7 @@ export interface CreditOperationFailure {
 export interface CreditOperationReconciliation {
 	status: "not_required" | "pending" | "resolved";
 	code?: string;
+	accounting?: "none" | "manual_correction_required";
 	resolvedAt?: string;
 }
 
@@ -149,6 +150,8 @@ export interface CreditOperationUsage {
 export interface CreditLedgerMetadata {
 	reason?: string;
 	measuredUnits?: number;
+	reconciliationCode?: string;
+	accounting?: "manual_correction_required";
 }
 
 export type CreditOperationStage = "codebase" | "prd" | "ac" | "task";

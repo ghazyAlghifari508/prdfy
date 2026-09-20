@@ -25,7 +25,7 @@ export interface CreditOperation {
 	id: string;
 	userId: string;
 	projectId: string;
-	subscriptionId: string;
+	subscriptionId: string | null;
 	kind: CreditOperationKind;
 	stage: CreditOperationStage;
 	idempotencyKey: string;
@@ -38,6 +38,12 @@ export interface CreditOperation {
 	metrics: CreditQuote["metrics"];
 	usage?: { measuredUnits: number };
 	capApplied: boolean;
+	reconciliation?: {
+		status: "not_required" | "pending" | "resolved";
+		code?: string;
+		accounting?: "none" | "manual_correction_required";
+		resolvedAt?: string;
+	};
 	artifactReference: string | null;
 	failureReason: string | null;
 	expiresAt: Date | null;
@@ -52,6 +58,11 @@ export interface CreditLedgerEntry {
 	amount: number;
 	entryType: CreditLedgerEntryType;
 	reason: string;
+	pricingVersion: CreditQuote["pricingVersion"];
+	metadata?: {
+		reconciliationCode?: string;
+		accounting?: "manual_correction_required";
+	};
 	createdAt: Date;
 }
 
@@ -153,6 +164,20 @@ function assertActiveReservation(state: CreditOperationState): void {
 	}
 }
 
+function isPermanentlyUnresolvableSubscription(
+	operation: CreditOperation,
+	store: CreditServiceStore,
+): boolean {
+	if (!operation.subscriptionId) return true;
+	const subscription = store.subscriptions.get(operation.subscriptionId);
+	return (
+		!subscription ||
+		subscription.userId !== operation.userId ||
+		(subscription.currentPeriodEnd !== null &&
+			subscription.currentPeriodEnd.getTime() < Date.now())
+	);
+}
+
 function requireBoundSubscriptionId(subscriptionId: string | null): string {
 	if (!subscriptionId)
 		throw new Error("Credit operation subscription origin is unresolved");
@@ -205,13 +230,13 @@ export function createCreditService(store: CreditServiceStore) {
 			input: ReserveCreditOperationInput,
 		): CreditOperationResult {
 			requireProject(store, input.userId, input.projectId);
-			validateQuote(input.quote, input.operation, input.metrics);
 			const existing = [...store.operations.values()].find(
 				(operation) =>
 					operation.userId === input.userId &&
 					operation.idempotencyKey === input.idempotencyKey,
 			);
 			if (existing) return operationResult(existing);
+			validateQuote(input.quote, input.operation, input.metrics);
 			if (input.quote.estimatedCredits > input.quote.maximumCredits) {
 				throw new Error("Credit quote exceeds its configured maximum");
 			}
@@ -241,6 +266,7 @@ export function createCreditService(store: CreditServiceStore) {
 				capApplied: false,
 				artifactReference: null,
 				failureReason: null,
+				reconciliation: { status: "not_required" },
 				expiresAt: input.expiresAt ?? null,
 				createdAt: timestamp,
 				updatedAt: timestamp,
@@ -253,6 +279,7 @@ export function createCreditService(store: CreditServiceStore) {
 				amount: -operation.reservedCredits,
 				entryType: "reservation",
 				reason: "credit reservation",
+				pricingVersion: input.quote.pricingVersion,
 			});
 			return operationResult(operation);
 		},
@@ -296,7 +323,10 @@ export function createCreditService(store: CreditServiceStore) {
 			if (!Number.isFinite(input.measuredUnits) || input.measuredUnits < 0) {
 				throw new Error("Measured credit usage is invalid");
 			}
-			const subscription = store.subscriptions.get(operation.subscriptionId);
+			const subscriptionId = requireBoundSubscriptionId(
+				operation.subscriptionId,
+			);
+			const subscription = store.subscriptions.get(subscriptionId);
 			if (
 				!subscription ||
 				subscription.userId !== input.userId ||
@@ -315,6 +345,7 @@ export function createCreditService(store: CreditServiceStore) {
 					amount: release,
 					entryType: "release",
 					reason: "unused credit reservation released",
+					pricingVersion: operation.pricingVersion,
 				});
 			if (input.finalCharge > 0)
 				appendLedger(store, {
@@ -323,6 +354,7 @@ export function createCreditService(store: CreditServiceStore) {
 					amount: -input.finalCharge,
 					entryType: "debit",
 					reason: "credit operation settled",
+					pricingVersion: operation.pricingVersion,
 				});
 			operation.state = "settled";
 			operation.finalCharge = input.finalCharge;
@@ -347,7 +379,10 @@ export function createCreditService(store: CreditServiceStore) {
 				input.operationId,
 			);
 			assertActiveReservation(operation.state);
-			const subscription = store.subscriptions.get(operation.subscriptionId);
+			const subscriptionId = requireBoundSubscriptionId(
+				operation.subscriptionId,
+			);
+			const subscription = store.subscriptions.get(subscriptionId);
 			if (
 				!subscription ||
 				subscription.userId !== input.userId ||
@@ -365,10 +400,54 @@ export function createCreditService(store: CreditServiceStore) {
 					amount: released,
 					entryType: "release",
 					reason: input.reason,
+					pricingVersion: operation.pricingVersion,
 				});
 			operation.state = "released";
 			operation.reservedCredits = 0;
 			operation.failureReason = input.reason;
+			operation.updatedAt = now();
+			return operationResult(operation);
+		},
+
+		quarantineCreditOperation(input: {
+			userId: string;
+			operationId: string;
+			reason: string;
+		}): CreditOperationResult {
+			const operation = requireOperation(
+				store,
+				input.userId,
+				input.operationId,
+			);
+			assertActiveReservation(operation.state);
+			const subscription = operation.subscriptionId
+				? store.subscriptions.get(operation.subscriptionId)
+				: undefined;
+			if (subscription && subscription.userId === input.userId) {
+				subscription.creditsReserved -= operation.reservedCredits;
+			}
+			if (operation.reservedCredits > 0)
+				appendLedger(store, {
+					userId: input.userId,
+					operationId: operation.id,
+					amount: operation.reservedCredits,
+					entryType: "correction",
+					reason: input.reason,
+					metadata: {
+						reconciliationCode: "subscription_origin_unresolvable",
+						accounting: "manual_correction_required",
+					},
+					pricingVersion: operation.pricingVersion,
+				});
+			operation.state = "quarantined";
+			operation.reservedCredits = 0;
+			operation.failureReason = input.reason;
+			operation.reconciliation = {
+				status: "resolved",
+				code: "subscription_origin_unresolvable",
+				accounting: "manual_correction_required",
+				resolvedAt: now().toISOString(),
+			};
 			operation.updatedAt = now();
 			return operationResult(operation);
 		},
@@ -386,7 +465,10 @@ export function createCreditService(store: CreditServiceStore) {
 			if (operation.state !== "settled" || operation.finalCharge === null) {
 				throw new Error("Only settled credit operations can be refunded");
 			}
-			const subscription = store.subscriptions.get(operation.subscriptionId);
+			const subscriptionId = requireBoundSubscriptionId(
+				operation.subscriptionId,
+			);
+			const subscription = store.subscriptions.get(subscriptionId);
 			if (
 				!subscription ||
 				subscription.userId !== input.userId ||
@@ -402,6 +484,7 @@ export function createCreditService(store: CreditServiceStore) {
 				amount: operation.finalCharge,
 				entryType: "refund",
 				reason: input.reason,
+				pricingVersion: operation.pricingVersion,
 			});
 			operation.state = "refunded";
 			operation.updatedAt = now();
@@ -439,7 +522,13 @@ export function createCreditService(store: CreditServiceStore) {
 					});
 					releasedOperationIds.push(operation.id);
 				} catch {
-					// Keep settling so a later reconciliation can retry safely.
+					if (isPermanentlyUnresolvableSubscription(operation, store)) {
+						this.quarantineCreditOperation({
+							userId: input.userId,
+							operationId: operation.id,
+							reason: "subscription origin is permanently unresolvable",
+						});
+					}
 				}
 			}
 			return { releasedOperationIds };
@@ -465,7 +554,6 @@ async function getDatabase() {
 export async function reserveCreditOperation(
 	input: ReserveCreditOperationInput,
 ): Promise<CreditOperationResult> {
-	validateQuote(input.quote, input.operation, input.metrics);
 	const { db, schema } = await getDatabase();
 	return db.transaction(async (tx) => {
 		const [project] = await tx
@@ -500,6 +588,7 @@ export async function reserveCreditOperation(
 				state: existing.state,
 				finalCharge: existing.finalCharge,
 			};
+		validateQuote(input.quote, input.operation, input.metrics);
 
 		const [subscription] = await tx
 			.select({ id: schema.subscriptions.id })
@@ -602,6 +691,97 @@ export async function reserveCreditOperation(
 			metadata: { reason: "credit reservation" },
 		});
 		return { id: operation.id, state: "reserved", finalCharge: null };
+	});
+}
+
+export async function quarantineCreditOperation(input: {
+	userId: string;
+	operationId: string;
+	reason: string;
+}): Promise<CreditOperationResult> {
+	const { db, schema } = await getDatabase();
+	return db.transaction(async (tx) => {
+		const [operation] = await tx
+			.select()
+			.from(schema.creditOperations)
+			.where(
+				and(
+					eq(schema.creditOperations.id, input.operationId),
+					eq(schema.creditOperations.userId, input.userId),
+				),
+			)
+			.for("update")
+			.limit(1);
+		if (!operation) throw new Error("Credit operation ownership mismatch");
+		if (!["reserved", "running", "settling"].includes(operation.state))
+			throw new Error("Credit operation is not active");
+		if (operation.subscriptionId) {
+			const [subscription] = await tx
+				.select({ id: schema.subscriptions.id })
+				.from(schema.subscriptions)
+				.where(
+					and(
+						eq(schema.subscriptions.id, operation.subscriptionId),
+						eq(schema.subscriptions.userId, input.userId),
+					),
+				)
+				.for("update")
+				.limit(1);
+			if (subscription) {
+				await tx
+					.update(schema.subscriptions)
+					.set({
+						creditsReserved: sql`${schema.subscriptions.creditsReserved} - ${operation.reservedCredits}`,
+						updatedAt: new Date(),
+					})
+					.where(eq(schema.subscriptions.id, subscription.id));
+			}
+		}
+		if (operation.reservedCredits > 0)
+			await tx.insert(schema.creditLedgerEntries).values({
+				id: crypto.randomUUID(),
+				userId: input.userId,
+				operationId: operation.id,
+				amount: operation.reservedCredits,
+				entryType: "correction",
+				sourceCategory: "manual_correction",
+				pricingVersion: operation.pricingVersion,
+				metadata: {
+					reason: input.reason,
+					reconciliationCode: "subscription_origin_unresolvable",
+					accounting: "manual_correction_required",
+				},
+			});
+		const [updated] = await tx
+			.update(schema.creditOperations)
+			.set({
+				state: "quarantined",
+				reservedCredits: 0,
+				reconciliation: {
+					status: "resolved",
+					code: "subscription_origin_unresolvable",
+					accounting: "manual_correction_required",
+					resolvedAt: new Date().toISOString(),
+				},
+				failure: {
+					message: input.reason,
+					occurredAt: new Date().toISOString(),
+				},
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(schema.creditOperations.id, operation.id),
+					eq(schema.creditOperations.userId, input.userId),
+				),
+			)
+			.returning({
+				id: schema.creditOperations.id,
+				state: schema.creditOperations.state,
+				finalCharge: schema.creditOperations.finalCharge,
+			});
+		if (!updated) throw new Error("Credit operation quarantine conflict");
+		return updated;
 	});
 }
 
@@ -988,8 +1168,18 @@ export async function reconcileExpiredCreditOperations(input: {
 				reason: "operation expired",
 			});
 			if (result.state === "released") releasedOperationIds.push(operation.id);
-		} catch {
-			// Keep the durable settling state for a later retry.
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === "Active subscription is required for credit operation"
+			) {
+				await quarantineCreditOperation({
+					userId: input.userId,
+					operationId: operation.id,
+					reason: "subscription origin is permanently unresolvable",
+				});
+			}
+			// Other failures remain in settling for a later retry.
 		}
 	}
 	return { releasedOperationIds };

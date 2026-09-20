@@ -13,6 +13,7 @@ export type CreditOperationState =
 	| "reserved"
 	| "running"
 	| "settling"
+	| "quarantined"
 	| "settled"
 	| "released"
 	| "failed"
