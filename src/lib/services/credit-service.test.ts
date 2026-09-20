@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { estimateCreditQuote } from "@/lib/adaptive-credit";
 import {
 	type CreditServiceStore,
 	createCreditService,
@@ -25,12 +26,13 @@ function makeStore(): CreditServiceStore {
 	};
 }
 
-const quote = {
-	operation: "prd_generation" as const,
-	pricingVersion: "adaptive-v1" as const,
-	estimatedCredits: 2,
-	maximumCredits: 4,
+const quote = estimateCreditQuote({
+	operation: "prd_generation",
 	metrics: { promptChars: 100 },
+});
+const reservationDetails = {
+	operation: quote.operation,
+	metrics: quote.metrics,
 };
 
 describe("credit service lifecycle", () => {
@@ -46,6 +48,7 @@ describe("credit service lifecycle", () => {
 				userId: "user-1",
 				projectId: "project-1",
 				stage: "prd",
+				...reservationDetails,
 				idempotencyKey: "request-1",
 				quote,
 			}),
@@ -60,6 +63,7 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd" as const,
+			...reservationDetails,
 			idempotencyKey: "request-1",
 			quote,
 		};
@@ -68,7 +72,9 @@ describe("credit service lifecycle", () => {
 		const second = await service.reserveCreditOperation(input);
 
 		expect(second.id).toBe(first.id);
-		expect(store.subscriptions.get("sub-1")?.creditsReserved).toBe(4);
+		expect(store.subscriptions.get("sub-1")?.creditsReserved).toBe(
+			quote.maximumCredits,
+		);
 		expect(
 			store.ledger.filter((entry) => entry.entryType === "reservation"),
 		).toHaveLength(1);
@@ -78,7 +84,7 @@ describe("credit service lifecycle", () => {
 		const store = makeStore();
 		const subscription = store.subscriptions.get("sub-1");
 		if (!subscription) throw new Error("Test subscription fixture is missing");
-		subscription.credits = 4;
+		subscription.credits = quote.maximumCredits;
 		const service = createCreditService(store);
 		const reserve = (idempotencyKey: string) =>
 			Promise.resolve().then(() =>
@@ -86,6 +92,7 @@ describe("credit service lifecycle", () => {
 					userId: "user-1",
 					projectId: "project-1",
 					stage: "prd",
+					...reservationDetails,
 					idempotencyKey,
 					quote,
 				}),
@@ -99,7 +106,9 @@ describe("credit service lifecycle", () => {
 		expect(
 			results.filter((result) => result.status === "fulfilled"),
 		).toHaveLength(1);
-		expect(store.subscriptions.get("sub-1")?.creditsReserved).toBe(4);
+		expect(store.subscriptions.get("sub-1")?.creditsReserved).toBe(
+			quote.maximumCredits,
+		);
 	});
 
 	it("settles final charge and releases the unused reservation", async () => {
@@ -109,6 +118,7 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd",
+			...reservationDetails,
 			idempotencyKey: "request-1",
 			quote,
 		});
@@ -201,6 +211,7 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd",
+			...reservationDetails,
 			idempotencyKey: "request-1",
 			quote,
 		});
@@ -230,6 +241,7 @@ describe("credit service lifecycle", () => {
 				userId: "user-2",
 				projectId: "project-1",
 				stage: "prd",
+				...reservationDetails,
 				idempotencyKey: "request-1",
 				quote,
 			}),
@@ -243,6 +255,7 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd",
+			...reservationDetails,
 			idempotencyKey: "request-1",
 			quote,
 		});
@@ -273,6 +286,7 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd",
+			...reservationDetails,
 			idempotencyKey: "expiry-key",
 			quote,
 			expiresAt,
@@ -308,11 +322,52 @@ describe("credit service lifecycle", () => {
 					userId: "user-1",
 					projectId: "project-1",
 					stage: "prd",
+					...reservationDetails,
 					idempotencyKey: `invalid-${String(invalid.estimatedCredits)}`,
 					quote: { ...quote, ...invalid },
 				}),
 			).toThrow("quote");
 		}
+	});
+
+	it("rejects a caller quote whose pricing is not recomputed from its metrics", () => {
+		const service = createCreditService(makeStore());
+
+		expect(() =>
+			service.reserveCreditOperation({
+				userId: "user-1",
+				projectId: "project-1",
+				stage: "prd",
+				...reservationDetails,
+				idempotencyKey: "forged-price",
+				quote: { ...quote, maximumCredits: quote.maximumCredits - 1 },
+			}),
+		).toThrow("quote does not match server pricing");
+	});
+
+	it("retries expired settling operations after a prior reconciliation claim", async () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const operation = await service.reserveCreditOperation({
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd",
+			...reservationDetails,
+			idempotencyKey: "settling-retry",
+			quote,
+			expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+		});
+		const stored = store.operations.get(operation.id);
+		if (!stored) throw new Error("Test operation fixture is missing");
+		stored.state = "settling";
+
+		const result = await service.reconcileExpiredCreditOperations({
+			userId: "user-1",
+			now: new Date("2001-01-01T00:00:00.000Z"),
+		});
+
+		expect(result.releasedOperationIds).toEqual([operation.id]);
+		expect(stored.state).toBe("released");
 	});
 
 	it("reconciles expired reservations and leaves unrelated users untouched", async () => {
@@ -322,8 +377,9 @@ describe("credit service lifecycle", () => {
 			userId: "user-1",
 			projectId: "project-1",
 			stage: "prd",
+			...reservationDetails,
 			idempotencyKey: "request-1",
-			quote: { ...quote, maximumCredits: 2 },
+			quote,
 			expiresAt: new Date("2000-01-01T00:00:00.000Z"),
 		});
 

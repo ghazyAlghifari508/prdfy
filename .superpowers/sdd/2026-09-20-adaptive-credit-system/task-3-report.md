@@ -61,3 +61,28 @@ Implemented and verified for the Task 3 review findings. Generation route integr
 - `git diff --check` passed.
 - Full typecheck remains blocked only by the pre-existing unrelated error `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.`
 - A live PostgreSQL transaction test was not run because no database prerequisite was available; deterministic lifecycle tests and Drizzle schema checks do not claim to replace that coverage.
+
+## Follow-up Review Fix Report
+
+### Historical Binding Policy
+
+Migration `0016` does not infer a historical subscription from `user_id`, timestamps, or the newest row. The pre-existing `credit_operations` table has no persisted subscription relationship, so ambiguous rows remain `subscription_id = NULL` and receive `reconciliation.status = 'pending'` with code `historical_subscription_unresolved`. The nullable foreign key preserves the row for explicit future reconciliation; mutation paths fail closed when the operation has no bound subscription. New reservations always persist the selected subscription ID, and the composite user/subscription foreign key prevents cross-user binding.
+
+### Lifecycle Fixes
+
+- Reservation now requires server-owned `operation` and `metrics` inputs and recomputes the quote with `estimateCreditQuote`; caller estimates, maximums, pricing versions, operation kinds, and metrics must exactly match the server result before any reservation.
+- Expiry reconciliation processes existing expired `settling` rows and newly claims only expired `reserved`/`running` rows. A failed release leaves `settling` durable and retryable, and only successful `released` transitions are returned.
+- In-memory and database mutation paths preserve ownership, valid-period checks, exact subscription binding, state guards, exact-one update assertions, durable usage/cap fields, and append-only ledger behavior.
+- Conservation assertions now distinguish the reservation hold (`-maximum`), unused release, final debit, operation linkage, and terminal transition rather than treating temporary holds as final usage.
+
+### Database Contract Coverage
+
+- Added deterministic source/migration contract tests for subscription predicates, settling retry inclusion, quarantine migration policy, and absence of arbitrary historical subscription ordering.
+- Repository inspection found no PostgreSQL test harness, DB test script, or configured database test environment. Live PostgreSQL transaction, concurrent locking, and migration execution remain blocked and are not claimed by the in-memory tests or Drizzle static checks.
+
+### Verification
+
+- Focused all-credit Vitest: `4 files, 35 tests` passed.
+- Changed-file Biome passed after formatting.
+- `pnpm exec drizzle-kit check` passed with `Everything's fine`.
+- Production build, full typecheck, bypass scan, and `git diff --check` are run as the final gate; the known unrelated `commander` typecheck blocker remains documented if reproduced.

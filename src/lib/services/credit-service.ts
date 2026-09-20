@@ -74,6 +74,8 @@ export interface ReserveCreditOperationInput {
 	userId: string;
 	projectId: string;
 	stage: CreditOperationStage;
+	operation: CreditOperationKind;
+	metrics: CreditQuote["metrics"];
 	idempotencyKey: string;
 	quote: CreditQuote;
 	expiresAt?: Date;
@@ -151,7 +153,17 @@ function assertActiveReservation(state: CreditOperationState): void {
 	}
 }
 
-function validateQuote(quote: CreditQuote): void {
+function requireBoundSubscriptionId(subscriptionId: string | null): string {
+	if (!subscriptionId)
+		throw new Error("Credit operation subscription origin is unresolved");
+	return subscriptionId;
+}
+
+function validateQuote(
+	quote: CreditQuote,
+	operation: CreditOperationKind,
+	metrics: CreditQuote["metrics"],
+): void {
 	if (
 		!Number.isInteger(quote.estimatedCredits) ||
 		!Number.isInteger(quote.maximumCredits) ||
@@ -162,6 +174,20 @@ function validateQuote(quote: CreditQuote): void {
 		quote.estimatedCredits > quote.maximumCredits
 	) {
 		throw new Error("Credit quote is invalid");
+	}
+	const serverQuote = estimateCreditQuote({
+		operation,
+		metrics,
+	});
+	if (
+		quote.operation !== operation ||
+		quote.pricingVersion !== serverQuote.pricingVersion ||
+		quote.estimatedCredits !== serverQuote.estimatedCredits ||
+		quote.maximumCredits !== serverQuote.maximumCredits ||
+		JSON.stringify(quote.metrics) !== JSON.stringify(serverQuote.metrics) ||
+		JSON.stringify(metrics) !== JSON.stringify(serverQuote.metrics)
+	) {
+		throw new Error("Credit quote does not match server pricing");
 	}
 }
 
@@ -179,7 +205,7 @@ export function createCreditService(store: CreditServiceStore) {
 			input: ReserveCreditOperationInput,
 		): CreditOperationResult {
 			requireProject(store, input.userId, input.projectId);
-			validateQuote(input.quote);
+			validateQuote(input.quote, input.operation, input.metrics);
 			const existing = [...store.operations.values()].find(
 				(operation) =>
 					operation.userId === input.userId &&
@@ -404,12 +430,17 @@ export function createCreditService(store: CreditServiceStore) {
 					continue;
 				if (!["reserved", "running", "settling"].includes(operation.state))
 					continue;
-				this.releaseCreditOperation({
-					userId: input.userId,
-					operationId: operation.id,
-					reason: "operation expired",
-				});
-				releasedOperationIds.push(operation.id);
+				operation.state = "settling";
+				try {
+					this.releaseCreditOperation({
+						userId: input.userId,
+						operationId: operation.id,
+						reason: "operation expired",
+					});
+					releasedOperationIds.push(operation.id);
+				} catch {
+					// Keep settling so a later reconciliation can retry safely.
+				}
 			}
 			return { releasedOperationIds };
 		},
@@ -434,7 +465,7 @@ async function getDatabase() {
 export async function reserveCreditOperation(
 	input: ReserveCreditOperationInput,
 ): Promise<CreditOperationResult> {
-	validateQuote(input.quote);
+	validateQuote(input.quote, input.operation, input.metrics);
 	const { db, schema } = await getDatabase();
 	return db.transaction(async (tx) => {
 		const [project] = await tx
@@ -484,7 +515,6 @@ export async function reserveCreditOperation(
 			.limit(1);
 		if (!subscription)
 			throw new Error("Active subscription is required for credit operation");
-
 		const [operation] = await tx
 			.insert(schema.creditOperations)
 			.values({
@@ -492,7 +522,7 @@ export async function reserveCreditOperation(
 				userId: input.userId,
 				projectId: input.projectId,
 				subscriptionId: subscription.id,
-				kind: input.quote.operation,
+				kind: input.operation,
 				stage: input.stage,
 				idempotencyKey: input.idempotencyKey,
 				state: "quoted",
@@ -644,13 +674,14 @@ export async function settleCreditOperation(input: {
 			throw new Error("Credit operation is already terminal");
 		if (input.finalCharge > operation.maximumCredits)
 			throw new Error("Final credit charge exceeds operation maximum");
+		const subscriptionId = requireBoundSubscriptionId(operation.subscriptionId);
 		const [subscription] = await tx
 			.select({ id: schema.subscriptions.id })
 			.from(schema.subscriptions)
 			.where(
 				and(
 					eq(schema.subscriptions.userId, input.userId),
-					eq(schema.subscriptions.id, operation.subscriptionId),
+					eq(schema.subscriptions.id, subscriptionId),
 					orValidPeriod(schema.subscriptions.currentPeriodEnd),
 				),
 			)
@@ -751,13 +782,14 @@ export async function releaseCreditOperation(input: {
 		if (!operation) throw new Error("Credit operation ownership mismatch");
 		if (!["reserved", "running", "settling"].includes(operation.state))
 			throw new Error("Credit operation is not active");
+		const subscriptionId = requireBoundSubscriptionId(operation.subscriptionId);
 		const [subscription] = await tx
 			.select({ id: schema.subscriptions.id })
 			.from(schema.subscriptions)
 			.where(
 				and(
 					eq(schema.subscriptions.userId, input.userId),
-					eq(schema.subscriptions.id, operation.subscriptionId),
+					eq(schema.subscriptions.id, subscriptionId),
 					orValidPeriod(schema.subscriptions.currentPeriodEnd),
 				),
 			)
@@ -837,13 +869,14 @@ export async function refundCreditOperation(input: {
 		if (!operation) throw new Error("Credit operation ownership mismatch");
 		if (operation.state !== "settled" || operation.finalCharge === null)
 			throw new Error("Only settled credit operations can be refunded");
+		const subscriptionId = requireBoundSubscriptionId(operation.subscriptionId);
 		const [subscription] = await tx
 			.select({ id: schema.subscriptions.id })
 			.from(schema.subscriptions)
 			.where(
 				and(
 					eq(schema.subscriptions.userId, input.userId),
-					eq(schema.subscriptions.id, operation.subscriptionId),
+					eq(schema.subscriptions.id, subscriptionId),
 					orValidPeriod(schema.subscriptions.currentPeriodEnd),
 				),
 			)
@@ -922,7 +955,18 @@ export async function reconcileExpiredCreditOperations(input: {
 	const { db, schema } = await getDatabase();
 	const nowValue = input.now ?? new Date();
 	const claimed = await db.transaction(async (tx) => {
-		return tx
+		const settling = await tx
+			.select({ id: schema.creditOperations.id })
+			.from(schema.creditOperations)
+			.where(
+				and(
+					eq(schema.creditOperations.userId, input.userId),
+					sql`${schema.creditOperations.expiresAt} <= ${nowValue}`,
+					eq(schema.creditOperations.state, "settling"),
+				),
+			)
+			.for("update");
+		const newlyClaimed = await tx
 			.update(schema.creditOperations)
 			.set({ state: "settling", updatedAt: nowValue })
 			.where(
@@ -933,15 +977,20 @@ export async function reconcileExpiredCreditOperations(input: {
 				),
 			)
 			.returning({ id: schema.creditOperations.id });
+		return [...settling, ...newlyClaimed];
 	});
 	const releasedOperationIds: string[] = [];
 	for (const operation of claimed) {
-		const result = await releaseCreditOperation({
-			userId: input.userId,
-			operationId: operation.id,
-			reason: "operation expired",
-		});
-		if (result.state === "released") releasedOperationIds.push(operation.id);
+		try {
+			const result = await releaseCreditOperation({
+				userId: input.userId,
+				operationId: operation.id,
+				reason: "operation expired",
+			});
+			if (result.state === "released") releasedOperationIds.push(operation.id);
+		} catch {
+			// Keep the durable settling state for a later retry.
+		}
 	}
 	return { releasedOperationIds };
 }

@@ -167,9 +167,9 @@ export const creditOperations = pgTable(
 		projectId: text("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
-		subscriptionId: text("subscription_id")
-			.notNull()
-			.references(() => subscriptions.id, { onDelete: "restrict" }),
+		subscriptionId: text("subscription_id").references(() => subscriptions.id, {
+			onDelete: "restrict",
+		}),
 		kind: text("kind").$type<CreditOperationKind>().notNull(),
 		stage: text("stage").$type<CreditOperationStage>().notNull(),
 		idempotencyKey: text("idempotency_key").notNull(),

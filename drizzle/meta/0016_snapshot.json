@@ -1471,7 +1471,7 @@
           "name": "subscription_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "kind": {
           "name": "kind",
