@@ -11,6 +11,8 @@ import {
 	codebaseSyncIdempotencyKeys,
 	codebaseSyncSessions,
 	conversations,
+	creditLedgerEntries,
+	creditOperations,
 	messages,
 	prdVersions,
 	projects,
@@ -52,27 +54,51 @@ export const Route = createFileRoute("/api/projects/$id")({
 						{ status: 400 },
 					);
 
-				// Ownership check MUST run before any child-row deletes. Deleting
-				// children first (old code) let an authenticated user wipe another
-				// user's data by sending their projectId - the owner check only
-				// fired on the parent delete, by which point the damage was done.
-				const [ownProject] = await db
-					.select({ id: projects.id })
-					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
-					.limit(1);
-				if (!ownProject) {
-					return Response.json({ error: "Project not found" }, { status: 404 });
-				}
+				// Ownership is established inside the transaction on the locked
+				// project row, and the final parent delete repeats the owner
+				// predicate, so a project that changes hands (or disappears)
+				// mid-request can never be deleted without revalidation.
+				const deleted = await db.transaction(async (tx) => {
+					const [ownProject] = await tx
+						.select({ id: projects.id })
+						.from(projects)
+						.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+						.limit(1)
+						.for("update");
+					if (!ownProject) return null;
 
-				// ponytail: delete children before parent. FKs lack ON DELETE CASCADE
-				// (schema.ts), so skipping any leaves orphaned rows. Order matters:
-				// messages→conversations first (messages FK conversations), then the
-				// project-scoped tables, then projects last. All in one transaction so
-				// a mid-sequence failure leaves no partial orphans. ac_versions is
-				// easy to miss: it is created by the AC stage, so every project past
-				// PRD-only carries rows that block the parent delete.
-				await db.transaction(async (tx) => {
+					// ponytail: delete children before parent. FKs lack ON DELETE CASCADE
+					// (schema.ts), so skipping any leaves orphaned rows. Order matters:
+					// credit ledger→operations first (composite FKs without cascade
+					// block the parent delete), then messages→conversations
+					// (messages FK conversations), then the project-scoped tables,
+					// then projects last. All in one transaction so a mid-sequence
+					// failure leaves no partial orphans. ac_versions is easy to
+					// miss: it is created by the AC stage, so every project past
+					// PRD-only carries rows that block the parent delete.
+					const opRows = await tx
+						.select({ id: creditOperations.id })
+						.from(creditOperations)
+						.where(
+							and(
+								eq(creditOperations.projectId, projectId),
+								eq(creditOperations.userId, user.id),
+							),
+						);
+					const opIds = opRows.map((o) => o.id);
+					if (opIds.length > 0) {
+						await tx
+							.delete(creditLedgerEntries)
+							.where(inArray(creditLedgerEntries.operationId, opIds));
+					}
+					await tx
+						.delete(creditOperations)
+						.where(
+							and(
+								eq(creditOperations.projectId, projectId),
+								eq(creditOperations.userId, user.id),
+							),
+						);
 					const convRows = await tx
 						.select({ id: conversations.id })
 						.from(conversations)
@@ -141,8 +167,15 @@ export const Route = createFileRoute("/api/projects/$id")({
 					await tx
 						.delete(codebaseSyncSessions)
 						.where(eq(codebaseSyncSessions.projectId, projectId));
-					await tx.delete(projects).where(eq(projects.id, projectId));
+					const [gone] = await tx
+						.delete(projects)
+						.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+						.returning({ id: projects.id });
+					return gone ?? null;
 				});
+				if (!deleted) {
+					return Response.json({ error: "Project not found" }, { status: 404 });
+				}
 				return Response.json({ success: true });
 			},
 		},
