@@ -110,6 +110,17 @@ export const CODEBASE_ASK_HANDOFF_MAX_OPTIONS = 8;
 // through; sessionStorage already preserves UI continuity.
 export const CODEBASE_ASK_HANDOFF_SAVE_TIMEOUT_MS = 8_000;
 
+// === Client error reports ===
+// Bounds for error telemetry persisted by /api/report-error. The endpoint
+// stores whatever passes validation, so oversized payloads are rejected
+// with 400 before insert instead of growing the table unboundedly.
+export const ERROR_REPORT_MAX_MESSAGE_CHARS = 2000;
+export const ERROR_REPORT_MAX_CONTEXT_CHARS = 8000;
+
+// === User feedback ===
+export const FEEDBACK_TYPES = ["general", "bug", "feature"] as const;
+export const FEEDBACK_MAX_MESSAGE_CHARS = 2000;
+
 // === Billing (monthly subscription) ===
 // Length of one paid/free billing period. All period math lives in lib/billing.ts.
 export const BILLING_PERIOD_DAYS = 30;

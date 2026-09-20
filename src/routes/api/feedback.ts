@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { db } from "@/db";
 import { feedback } from "@/db/schema";
+import { type FeedbackPayload, parseFeedbackBody } from "@/lib/feedback";
 import { getSessionFromHeaders } from "@/lib/session";
 
 export const Route = createFileRoute("/api/feedback")({
@@ -10,16 +11,18 @@ export const Route = createFileRoute("/api/feedback")({
 			POST: async ({ request }: { request: Request }) => {
 				const session = await getSessionFromHeaders(getRequestHeaders());
 				const body = await request.json().catch(() => null);
-				const { message, type } = body ?? {};
-
-				if (!message?.trim())
+				let payload: FeedbackPayload;
+				try {
+					payload = parseFeedbackBody(body);
+				} catch {
 					return Response.json({ error: "Message required" }, { status: 400 });
+				}
 
 				await db.insert(feedback).values({
 					id: crypto.randomUUID(),
 					userId: session?.user.id ?? null,
-					message: message.trim(),
-					type: type || "general",
+					message: payload.message,
+					type: payload.type,
 				});
 
 				return Response.json({ success: true });
