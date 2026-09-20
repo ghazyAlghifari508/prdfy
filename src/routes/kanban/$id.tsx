@@ -31,7 +31,7 @@ export const Route = createFileRoute("/kanban/$id")({
 		try {
 			return await loadKanban({ data: params.id });
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}

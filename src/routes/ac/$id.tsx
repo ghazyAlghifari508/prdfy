@@ -63,7 +63,7 @@ export const Route = createFileRoute("/ac/$id")({
 		try {
 			return await loadAc({ data: params.id });
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}

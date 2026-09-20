@@ -5,6 +5,7 @@
 // global QueryClient default (providers.tsx). Use refetch() when fresh data is
 // required (e.g. before creating a project / navigating from history).
 import { useQuery } from "@tanstack/react-query";
+import { authClient } from "@/lib/auth-client";
 import type { Plan } from "@/types/database";
 
 export type SubscriptionUiState =
@@ -26,11 +27,13 @@ export interface UserPlan {
 }
 
 export function useUserPlan() {
+	const { data: session } = authClient.useSession();
+	const userId = session?.user?.id ?? "anonymous";
 	return useQuery<UserPlan>({
-		queryKey: ["user-plan"],
+		queryKey: ["user-plan", userId],
 		queryFn: async () => {
 			const res = await fetch("/api/user/plan", { cache: "no-store" });
-			if (!res.ok) {
+			if (res.status === 401) {
 				return {
 					authenticated: false,
 					plan: "free" as Plan,
@@ -40,6 +43,7 @@ export function useUserPlan() {
 					subscriptionState: "free_active" as const,
 				};
 			}
+			if (!res.ok) throw new Error(`Failed to load plan: ${res.status}`);
 			return (await res.json()) as UserPlan;
 		},
 		staleTime: 60 * 1000,
