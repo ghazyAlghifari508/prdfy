@@ -215,6 +215,10 @@ describe("syncCodebase happy path", () => {
 
 		expect(res.ok).toBe(true);
 		expect(res.fileCount).toBe(1);
+		const manifestArg = client.uploadManifestWithRetry.mock.calls[0]?.[2] as
+			| Array<{ path: string }>
+			| undefined;
+		expect(manifestArg?.map((entry) => entry.path)).toEqual(["src/app.ts"]);
 		const chunksArg = client.uploadFileChunksWithRetry.mock.calls[0]?.[2];
 		expect(chunksArg?.map((c) => c.path)).not.toContain("logo.png");
 		expect(res.excludedCount).toBeGreaterThanOrEqual(1);

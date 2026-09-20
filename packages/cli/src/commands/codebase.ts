@@ -215,10 +215,15 @@ export async function syncCodebase(
 			console.log(`Session ${handshake.sessionId}: ${handshake.status}`);
 		}
 
+		// The server's manifest is the upload contract: every stored entry must
+		// have matching chunks at completion. Keep ineligible metadata local in
+		// `manifest.excluded`; sending it as a manifest entry would make a valid
+		// text-only snapshot impossible to complete.
+		const eligible = manifest.entries.filter((entry) => entry.contentEligible);
 		const manifestStatus = await client.uploadManifestWithRetry(
 			projectId,
 			{ sessionId: handshake.sessionId, attemptId: handshake.attemptId },
-			manifest.entries.map(toSyncManifestEntry),
+			eligible.map(toSyncManifestEntry),
 		);
 		if (output === "human") {
 			console.log(
@@ -226,9 +231,6 @@ export async function syncCodebase(
 			);
 		}
 
-		// Eligible text only: binaries and other ineligible entries are
-		// excluded here and never uploaded as source content.
-		const eligible = manifest.entries.filter((entry) => entry.contentEligible);
 		const inputs: FileChunkInput[] = [];
 		for (const entry of eligible) {
 			const bytes = await readFile(join(root, ...entry.path.split("/")));
