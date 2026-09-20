@@ -226,10 +226,6 @@ export const Route = createFileRoute("/api/chat")({
 										fileCount: snapRow.fileCount,
 										sourceBytes: snapRow.contentSize,
 									};
-								} else {
-									codebaseSnapshotInfo = {
-										fileCount: generationContext.snapshot.fileCount,
-									};
 								}
 							}
 						} catch {

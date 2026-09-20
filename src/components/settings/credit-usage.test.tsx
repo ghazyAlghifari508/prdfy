@@ -36,7 +36,7 @@ const mockOperations: CreditOperationItem[] = [
 			taskCount: 0,
 			codebase: {
 				fileCount: 0,
-				totalBytes: 0,
+				sourceBytes: 0,
 				dependencyCount: 0,
 			},
 		},
@@ -80,7 +80,7 @@ const mockOperations: CreditOperationItem[] = [
 			promptChars: 0,
 			codebase: {
 				fileCount: 45,
-				totalBytes: 150000,
+				sourceBytes: 150000,
 				dependencyCount: 12,
 			},
 		},

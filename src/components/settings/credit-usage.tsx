@@ -599,7 +599,7 @@ export function CreditUsageSection({
 												</span>
 												<span className="font-mono text-snow">
 													{(
-														selectedOp.metrics.codebase.totalBytes ?? 0
+														selectedOp.metrics.codebase.sourceBytes ?? 0
 													).toLocaleString("id-ID")}{" "}
 													bytes
 												</span>

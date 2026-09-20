@@ -154,10 +154,6 @@ export const Route = createFileRoute("/api/task/generate")({
 									fileCount: snapRow.fileCount,
 									sourceBytes: snapRow.contentSize,
 								};
-							} else {
-								codebaseSnapshotInfo = {
-									fileCount: generationContext.snapshot.fileCount,
-								};
 							}
 						}
 					} catch (_e) {

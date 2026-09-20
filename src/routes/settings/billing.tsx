@@ -130,10 +130,10 @@ const loadBilling = createServerFn({ method: "GET" }).handler(async () => {
 	const paymentsList: BillingPaymentItem[] = paymentRows.map((p) => ({
 		id: p.id,
 		userId: p.userId,
-		amount: p.amount,
-		status: p.status,
-		plan: p.plan,
-		snapToken: p.snapToken,
+		amount: p.amount ?? 0,
+		status: p.status ?? "pending",
+		plan: p.plan ?? "pro",
+		snapToken: null,
 		createdAt: p.createdAt?.toISOString() ?? null,
 		updatedAt: p.updatedAt?.toISOString() ?? null,
 		midtransResponse: p.midtransResponse as object | null,
@@ -164,7 +164,7 @@ const loadBilling = createServerFn({ method: "GET" }).handler(async () => {
 
 	const creditUsage: BillingCreditUsage = {
 		availableCredits,
-		reservedCredits,
+		reservedCredits: creditsReserved,
 		totalCreditsUsed: creditsUsed,
 		operations: operationsList,
 	};
