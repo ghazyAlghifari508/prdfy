@@ -1,13 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { projects, subscriptions } from "@/db/schema";
+import {
+	buildPrdMetrics,
+	type CreditQuote,
+	formatInsufficientCreditsError,
+	formatSubscriptionPausedError,
+} from "@/lib/adaptive-credit";
 import {
 	buildCodebasePromptBlock,
 	getProjectGenerationContext,
 	linkGenerationContext,
 } from "@/lib/codebase-generation-context";
-import { checkCredits, consumeCredit } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
@@ -42,8 +45,26 @@ export const Route = createFileRoute("/api/chat")({
 			POST: async ({ request }: { request: Request }) => {
 				const user = await requireUser(request.headers);
 
+				const { db } = await import("@/db");
+				const { codebaseSnapshots, projects, subscriptions } = await import(
+					"@/db/schema"
+				);
+				const {
+					createCreditQuote,
+					reserveCreditOperation,
+					markCreditOperationRunning,
+					settleCreditOperation,
+					releaseCreditOperation,
+				} = await import("@/lib/services/credit-service");
+
 				const [sub] = await db
-					.select({ plan: subscriptions.plan })
+					.select({
+						plan: subscriptions.plan,
+						credits: subscriptions.credits,
+						creditsUsed: subscriptions.creditsUsed,
+						creditsReserved: subscriptions.creditsReserved,
+						currentPeriodEnd: subscriptions.currentPeriodEnd,
+					})
 					.from(subscriptions)
 					.where(eq(subscriptions.userId, user.id))
 					.orderBy(desc(subscriptions.createdAt))
@@ -60,6 +81,8 @@ export const Route = createFileRoute("/api/chat")({
 					partialContent,
 					preferences,
 					selectedVersionNum,
+					idempotencyKey: callerIdempotencyKey,
+					attempt: callerAttempt,
 				} = body as {
 					message: string;
 					displayMessage?: string;
@@ -69,6 +92,8 @@ export const Route = createFileRoute("/api/chat")({
 					partialContent?: string;
 					preferences?: Record<string, unknown>;
 					selectedVersionNum?: number;
+					idempotencyKey?: string;
+					attempt?: number;
 				};
 
 				if (!message?.trim())
@@ -87,28 +112,10 @@ export const Route = createFileRoute("/api/chat")({
 						{ status: 429 },
 					);
 
-				// ponytail: 1 credit = 1 project, burned here at PRD generation.
-				// Revisi is unlimited on every tier, so no gate for mode "revise".
-				if (mode === "generate") {
-					const creditCheck = await checkCredits(user.id);
-					if (!creditCheck.allowed) {
-						const paused = creditCheck.subscriptionState === "paused";
-						return Response.json(
-							{
-								error: paused
-									? "Masa aktif langgananmu sudah habis. Perpanjang di halaman Pricing untuk membuat proyek baru."
-									: "Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
-								code: paused ? "SUBSCRIPTION_PAUSED" : "NO_CREDITS",
-								plan: creditCheck.plan,
-								remaining: creditCheck.remaining,
-							},
-							{ status: 403 },
-						);
-					}
-				}
-
 				let conversationIdToUse = conversationId;
 				let projectIdToUse = projectId;
+				let createdProjectId: string | undefined;
+				let createdConversationId: string | undefined;
 				let conversationHistory: Array<{
 					role: "system" | "user" | "assistant";
 					content: string;
@@ -127,14 +134,28 @@ export const Route = createFileRoute("/api/chat")({
 					conversationHistory = result.messages;
 				}
 
+				if (mode === "generate" && !conversationIdToUse) {
+					const result = await ensureConversation(
+						user.id,
+						projectIdToUse,
+						deriveProjectNameSync(message),
+						preferences || null,
+					);
+					conversationIdToUse = result.conversationId;
+					projectIdToUse = result.projectId;
+					createdConversationId = result.createdConversationId;
+					createdProjectId = result.createdProjectId;
+				}
+
 				let systemPrompt = PRD_SYSTEM_PROMPT();
 				let groundingSource = message;
 				let projectLanguage: "id" | "en" = "id";
-				// Task 8 snapshot-bound context (existing-codebase only).
-				// Stays "" for greenfield so prompts are byte-identical.
 				let codebaseBlock = "";
 				let codebaseSnapshotId: string | undefined;
 				let codebaseAnalysisId: string | undefined;
+				let codebaseSnapshotInfo:
+					| { fileCount?: number; sourceBytes?: number }
+					| undefined;
 
 				if (projectIdToUse) {
 					const [projCheck] = await db
@@ -153,7 +174,10 @@ export const Route = createFileRoute("/api/chat")({
 						)
 						.limit(1);
 
-					if ((mode === "revise" || mode === "chat") && !projCheck) {
+					if (
+						(mode === "revise" || mode === "chat" || mode === "generate") &&
+						!projCheck
+					) {
 						return Response.json(
 							{ error: "Project not found or unauthorized" },
 							{ status: 403 },
@@ -181,9 +205,6 @@ export const Route = createFileRoute("/api/chat")({
 						projectLanguage = normalizeLanguage(projCheck.language);
 					}
 
-					// Task 8: bounded, snapshot-bound context via the shared
-					// builder (never duplicated queries/formatting). Null for
-					// greenfield or not-ready snapshots. Consumes no credits.
 					if (projCheck?.projectMode === "existing_codebase") {
 						try {
 							const generationContext =
@@ -192,9 +213,27 @@ export const Route = createFileRoute("/api/chat")({
 								codebaseBlock = buildCodebasePromptBlock(generationContext);
 								codebaseSnapshotId = generationContext.snapshotId;
 								codebaseAnalysisId = generationContext.analysisId ?? undefined;
+								const [snapRow] = await db
+									.select({
+										fileCount: codebaseSnapshots.fileCount,
+										contentSize: codebaseSnapshots.contentSize,
+									})
+									.from(codebaseSnapshots)
+									.where(eq(codebaseSnapshots.id, generationContext.snapshotId))
+									.limit(1);
+								if (snapRow) {
+									codebaseSnapshotInfo = {
+										fileCount: snapRow.fileCount,
+										sourceBytes: snapRow.contentSize,
+									};
+								} else {
+									codebaseSnapshotInfo = {
+										fileCount: generationContext.snapshot.fileCount,
+									};
+								}
 							}
 						} catch {
-							/* ponytail: optional context must never block generation */
+							/* optional context must never block generation */
 						}
 					}
 
@@ -209,6 +248,108 @@ export const Route = createFileRoute("/api/chat")({
 								systemPrompt = `${PRD_REVISION_PROMPT}\n\nCURRENT PRD CONTENT:\n\n${activeContent}`;
 							}
 						}
+					}
+				}
+
+				let creditQuote: CreditQuote | undefined;
+				let reservation:
+					| { id: string; state: string; finalCharge: number | null }
+					| undefined;
+
+				if (mode === "generate" && projectIdToUse) {
+					const metrics = buildPrdMetrics({
+						prompt: message,
+						promptChars: message.length,
+						hasCodebaseContext: Boolean(codebaseSnapshotId),
+						codebase: codebaseSnapshotInfo,
+					});
+
+					creditQuote = createCreditQuote({
+						userId: user.id,
+						projectId: projectIdToUse,
+						stage: "prd",
+						operation: "prd_generation",
+						metrics,
+					});
+
+					const isPaused =
+						sub?.currentPeriodEnd !== null &&
+						sub?.currentPeriodEnd !== undefined &&
+						new Date(sub.currentPeriodEnd).getTime() < Date.now();
+
+					const availableCredits = Math.max(
+						0,
+						(sub?.credits ?? 0) -
+							(sub?.creditsUsed ?? 0) -
+							(sub?.creditsReserved ?? 0),
+					);
+
+					if (isPaused) {
+						if (createdProjectId) {
+							await rollbackStreamInserts(
+								user.id,
+								createdConversationId,
+								createdProjectId,
+							).catch(() => {});
+						}
+						return Response.json(
+							formatSubscriptionPausedError({
+								quote: creditQuote,
+								availableCredits,
+								stageLabel: "membuat PRD",
+							}),
+							{ status: 403 },
+						);
+					}
+
+					if (availableCredits < creditQuote.maximumCredits) {
+						if (createdProjectId) {
+							await rollbackStreamInserts(
+								user.id,
+								createdConversationId,
+								createdProjectId,
+							).catch(() => {});
+						}
+						return Response.json(
+							formatInsufficientCreditsError({
+								quote: creditQuote,
+								availableCredits,
+								stageLabel: "membuat PRD",
+							}),
+							{ status: 403 },
+						);
+					}
+
+					const idempotencyKey =
+						callerIdempotencyKey ||
+						`${projectIdToUse}:prd:${callerAttempt ?? 1}`;
+
+					try {
+						reservation = await reserveCreditOperation({
+							userId: user.id,
+							projectId: projectIdToUse,
+							stage: "prd",
+							operation: "prd_generation",
+							metrics,
+							idempotencyKey,
+							quote: creditQuote,
+						});
+					} catch (_err) {
+						if (createdProjectId) {
+							await rollbackStreamInserts(
+								user.id,
+								createdConversationId,
+								createdProjectId,
+							).catch(() => {});
+						}
+						return Response.json(
+							formatInsufficientCreditsError({
+								quote: creditQuote,
+								availableCredits,
+								stageLabel: "membuat PRD",
+							}),
+							{ status: 403 },
+						);
 					}
 				}
 
@@ -263,6 +404,23 @@ export const Route = createFileRoute("/api/chat")({
 						let eventStarted = false;
 						let eventDone = false;
 						let eventErrored = false;
+						let isSettled = false;
+						let isReleased = false;
+
+						const safeRelease = async (reason: string) => {
+							if (isSettled || isReleased || !reservation) return;
+							isReleased = true;
+							try {
+								await releaseCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to release credit operation:", e);
+							}
+						};
+
 						const emit = (payload: Record<string, unknown>) => {
 							try {
 								controller.enqueue(
@@ -286,9 +444,7 @@ export const Route = createFileRoute("/api/chat")({
 							try {
 								controller.enqueue(
 									encoder.encode(
-										`data: ${JSON.stringify({ type: "thinking", content: text })}
-
-`,
+										`data: ${JSON.stringify({ type: "thinking", content: text })}\n\n`,
 									),
 								);
 							} catch {}
@@ -308,9 +464,10 @@ export const Route = createFileRoute("/api/chat")({
 								controller.close();
 							} catch {}
 						};
-						const safeError = (msg: string) => {
+						const safeError = async (msg: string) => {
 							if (eventDone || eventErrored) return;
 							eventErrored = true;
+							await safeRelease(msg);
 							emit({ type: "error", error: msg });
 							try {
 								controller.close();
@@ -319,11 +476,23 @@ export const Route = createFileRoute("/api/chat")({
 
 						if (!eventStarted) {
 							eventStarted = true;
-							emit({ type: "started", model: modelsToTry[0] });
+							if (mode === "generate" && reservation) {
+								await markCreditOperationRunning({
+									userId: user.id,
+									operationId: reservation.id,
+								}).catch((err) =>
+									console.error("markCreditOperationRunning error:", err),
+								);
+							}
+							emit({
+								type: "started",
+								model: modelsToTry[0],
+								quote: creditQuote,
+							});
+							if (creditQuote) {
+								emit({ type: "quote", quote: creditQuote });
+							}
 						}
-
-						let createdProjectId: string | undefined;
-						let createdConversationId: string | undefined;
 
 						try {
 							const { generator, firstChunk, outcome } =
@@ -395,7 +564,8 @@ export const Route = createFileRoute("/api/chat")({
 								conversationIdToUse
 							) {
 								if (isTruncatedGeneration(fullResponse, outcome.finishReason)) {
-									safeError(
+									await safeRelease("generation truncated");
+									await safeError(
 										"Generasi PRD terputus di tengah jalan dan tidak disimpan. Coba generate ulang.",
 									);
 									return;
@@ -487,8 +657,14 @@ export const Route = createFileRoute("/api/chat")({
 
 								const { FEATURES } = await import("@/types/database");
 								const allowShare = FEATURES[plan].shareLink !== false;
-								await savePrdVersion(
-									(conversationIdToUse || projectIdToUse)!,
+								const targetId = conversationIdToUse || projectIdToUse;
+								if (!targetId) {
+									await safeRelease("target id missing");
+									await safeError("Project or conversation ID is missing");
+									return;
+								}
+								const saveResult = await savePrdVersion(
+									targetId,
 									finalPrdToSave,
 									message,
 									mode === "resume" ? "generate" : mode,
@@ -505,14 +681,10 @@ export const Route = createFileRoute("/api/chat")({
 									);
 								}
 
-								// ponytail: revive the documented-but-never-wired AI rename.
-								// Cosmetic only — must never delay or fail the done event.
+								// AI rename of project (cosmetic only)
 								void (async () => {
 									try {
 										if (mode !== "generate" || !projectIdToUse) return;
-										// User gave an explicit name (quoted/bernama/CamelCase) —
-										// the sync extractor already named the project from it;
-										// an AI rename of a compiled prompt would only clobber it.
 										if (hasExplicitProductName(message)) return;
 										const better = await deriveProjectName(message);
 										if (!better || better === "Project Baru") return;
@@ -525,10 +697,7 @@ export const Route = createFileRoute("/api/chat")({
 									}
 								})();
 
-								// ponytail: AI one-liner for /history card preview. Same contract
-								// as the rename above: cosmetic, fire-and-forget, never delays
-								// or fails the done event. generate/resume only — revisions do
-								// not change what the project is about.
+								// AI one-liner for history preview
 								void (async () => {
 									try {
 										if (
@@ -554,37 +723,34 @@ export const Route = createFileRoute("/api/chat")({
 									}
 								})();
 
-								try {
-									// One credit per project, at generate only. Revisi is free.
-									if (mode === "generate") {
-										const burned = await consumeCredit(user.id);
-										if (!burned) {
-											console.warn(
-												"savePrdVersion succeeded but consumeCredit returned false for user",
-												user.id,
-											);
-											emit({
-												type: "error",
-												error:
-													"PRD tersimpan, namun kredit gagal dipotong. Saldo kreditmu mungkin tidak akurat — hubungi dukungan jika ini terjadi berulang.",
-											});
-											try {
-												controller.close();
-											} catch {}
-											return;
-										}
+								if (mode === "generate" && reservation) {
+									if (!saveResult?.prdVersionId) {
+										await safeRelease("savePrdVersion failed");
+										await safeError("PRD gagal disimpan. Coba generate ulang.");
+										return;
 									}
-								} catch (err) {
-									console.error(
-										"Failed to consume credit for user",
-										user.id,
-										err,
-									);
-									emit({
-										type: "error",
-										error:
-											"PRD tersimpan, namun terjadi kesalahan saat memotong kredit. Hubungi dukungan jika saldo kreditmu tidak akurat.",
+									const actualMetrics = buildPrdMetrics({
+										prompt: message,
+										promptChars: message.length,
+										hasCodebaseContext: Boolean(codebaseSnapshotId),
+										codebase: codebaseSnapshotInfo,
 									});
+									try {
+										await settleCreditOperation({
+											userId: user.id,
+											operationId: reservation.id,
+											artifactId: saveResult.prdVersionId,
+											actualMetrics,
+										});
+										isSettled = true;
+									} catch (err) {
+										console.error("PRD credit settlement failed:", err);
+										await safeRelease("settlement error");
+										await safeError(
+											"PRD tersimpan, namun settlement kredit gagal. Hubungi dukungan.",
+										);
+										return;
+									}
 								}
 							}
 
@@ -601,6 +767,7 @@ export const Route = createFileRoute("/api/chat")({
 								donePayload.content = finalPrdToSave;
 							safeDone(donePayload);
 						} catch (error) {
+							await safeRelease((error as Error)?.message || "stream error");
 							const errMsg = (error as Error)?.message ?? String(error);
 							const errName = (error as Error)?.name ?? "";
 							const isClientAbort =

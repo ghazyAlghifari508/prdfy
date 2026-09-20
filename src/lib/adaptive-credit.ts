@@ -84,7 +84,7 @@ function thresholdUnits(value: number | undefined, threshold: number): number {
 		: Math.ceil(normalizedValue / threshold);
 }
 
-function surcharge(metrics: CreditComplexityMetrics): number {
+export function surcharge(metrics: CreditComplexityMetrics): number {
 	const thresholds = ADAPTIVE_CREDIT_PRICING.thresholds;
 	const weights = ADAPTIVE_CREDIT_PRICING.weights;
 	const project = metrics.project ?? {};
@@ -149,4 +149,187 @@ export function calculateFinalCreditCost(input: CreditUsageInput): number {
 	);
 	const measuredUnits = nonNegativeFinite(input.usage.measuredUnits);
 	return Math.min(maximumCredits, Math.ceil(measuredUnits));
+}
+
+function normalizeCodebaseMetrics(
+	codebase:
+		| {
+				sourceBytes?: number;
+				contentSize?: number;
+				fileCount?: number;
+				languageCount?: number;
+				dependencyCount?: number;
+				relationshipCount?: number;
+		  }
+		| null
+		| undefined,
+): CreditComplexityMetrics["codebase"] {
+	if (!codebase) return undefined;
+	const sourceBytes =
+		codebase.sourceBytes !== undefined
+			? nonNegativeFinite(codebase.sourceBytes)
+			: codebase.contentSize !== undefined
+				? nonNegativeFinite(codebase.contentSize)
+				: undefined;
+	const fileCount =
+		codebase.fileCount !== undefined
+			? nonNegativeFinite(codebase.fileCount)
+			: undefined;
+	const languageCount =
+		codebase.languageCount !== undefined
+			? nonNegativeFinite(codebase.languageCount)
+			: undefined;
+	const dependencyCount =
+		codebase.dependencyCount !== undefined
+			? nonNegativeFinite(codebase.dependencyCount)
+			: undefined;
+	const relationshipCount =
+		codebase.relationshipCount !== undefined
+			? nonNegativeFinite(codebase.relationshipCount)
+			: undefined;
+
+	const result: NonNullable<CreditComplexityMetrics["codebase"]> = {
+		...(fileCount !== undefined ? { fileCount } : {}),
+		...(sourceBytes !== undefined ? { sourceBytes } : {}),
+		...(languageCount !== undefined ? { languageCount } : {}),
+		...(dependencyCount !== undefined ? { dependencyCount } : {}),
+		...(relationshipCount !== undefined ? { relationshipCount } : {}),
+	};
+	return Object.keys(result).length > 0 ? result : undefined;
+}
+
+export interface BuildPrdMetricsInput {
+	prompt?: string;
+	promptChars?: number;
+	hasCodebaseContext?: boolean;
+	codebase?: {
+		sourceBytes?: number;
+		contentSize?: number;
+		fileCount?: number;
+		languageCount?: number;
+		dependencyCount?: number;
+		relationshipCount?: number;
+	} | null;
+	project?: CreditComplexityMetrics["project"];
+}
+
+export function buildPrdMetrics(
+	input: BuildPrdMetricsInput,
+): CreditComplexityMetrics {
+	const promptChars =
+		input.promptChars !== undefined
+			? nonNegativeFinite(input.promptChars)
+			: input.prompt
+				? input.prompt.length
+				: 0;
+	const codebase = normalizeCodebaseMetrics(input.codebase);
+	return {
+		promptChars,
+		hasCodebaseContext: Boolean(input.hasCodebaseContext),
+		...(codebase ? { codebase } : {}),
+		...(input.project ? { project: input.project } : {}),
+	};
+}
+
+export interface BuildAcMetricsInput {
+	prdSource?: string;
+	prdSourceChars?: number;
+	hasCodebaseContext?: boolean;
+	codebase?: {
+		sourceBytes?: number;
+		contentSize?: number;
+		fileCount?: number;
+		languageCount?: number;
+		dependencyCount?: number;
+		relationshipCount?: number;
+	} | null;
+	project?: CreditComplexityMetrics["project"];
+}
+
+export function buildAcMetrics(
+	input: BuildAcMetricsInput,
+): CreditComplexityMetrics {
+	const prdSourceChars =
+		input.prdSourceChars !== undefined
+			? nonNegativeFinite(input.prdSourceChars)
+			: input.prdSource
+				? input.prdSource.length
+				: 0;
+	const codebase = normalizeCodebaseMetrics(input.codebase);
+	return {
+		prdSourceChars,
+		hasCodebaseContext: Boolean(input.hasCodebaseContext),
+		...(codebase ? { codebase } : {}),
+		...(input.project ? { project: input.project } : {}),
+	};
+}
+
+export interface BuildTaskMetricsInput {
+	prdSource?: string;
+	prdSourceChars?: number;
+	taskCount?: number;
+	hasCodebaseContext?: boolean;
+	codebase?: {
+		sourceBytes?: number;
+		contentSize?: number;
+		fileCount?: number;
+		languageCount?: number;
+		dependencyCount?: number;
+		relationshipCount?: number;
+	} | null;
+	project?: CreditComplexityMetrics["project"];
+}
+
+export function buildTaskMetrics(
+	input: BuildTaskMetricsInput,
+): CreditComplexityMetrics {
+	const prdSourceChars =
+		input.prdSourceChars !== undefined
+			? nonNegativeFinite(input.prdSourceChars)
+			: input.prdSource
+				? input.prdSource.length
+				: 0;
+	const taskCount =
+		input.taskCount !== undefined
+			? nonNegativeFinite(input.taskCount)
+			: undefined;
+	const codebase = normalizeCodebaseMetrics(input.codebase);
+	return {
+		prdSourceChars,
+		...(taskCount !== undefined ? { taskCount } : {}),
+		hasCodebaseContext: Boolean(input.hasCodebaseContext),
+		...(codebase ? { codebase } : {}),
+		...(input.project ? { project: input.project } : {}),
+	};
+}
+
+export function formatInsufficientCreditsError(input: {
+	quote: CreditQuote;
+	availableCredits: number;
+	stageLabel: string;
+}) {
+	return {
+		error: `Kredit kamu tidak mencukupi untuk ${input.stageLabel}. Dibutuhkan maksimal ${input.quote.maximumCredits} kredit, saldo tersedia: ${input.availableCredits} kredit.`,
+		code: "NO_CREDITS" as const,
+		quote: input.quote,
+		requiredCredits: input.quote.maximumCredits,
+		availableCredits: input.availableCredits,
+		topUpInstructions:
+			"Silakan top up kredit atau upgrade paket Anda melalui menu Billing.",
+	};
+}
+
+export function formatSubscriptionPausedError(input: {
+	quote: CreditQuote;
+	availableCredits: number;
+	stageLabel: string;
+}) {
+	return {
+		error: `Masa aktif langgananmu sudah habis. Perpanjang di halaman Pricing untuk ${input.stageLabel}.`,
+		code: "SUBSCRIPTION_PAUSED" as const,
+		quote: input.quote,
+		requiredCredits: input.quote.maximumCredits,
+		availableCredits: input.availableCredits,
+		topUpInstructions: "Perpanjang paket langganan Anda melalui menu Billing.",
+	};
 }

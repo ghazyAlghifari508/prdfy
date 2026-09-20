@@ -1,11 +1,27 @@
 import { type AnyColumn, and, desc, eq, gt, sql } from "drizzle-orm";
 import type { CreditOperationStage } from "@/db/schema";
-import type {
-	CreditLedgerEntryType,
-	CreditOperationKind,
-	CreditOperationState,
+import {
+	ADAPTIVE_CREDIT_PRICING,
+	type CreditComplexityMetrics,
+	type CreditLedgerEntryType,
+	type CreditOperationKind,
+	type CreditOperationState,
+	type CreditQuote,
+	calculateFinalCreditCost,
+	estimateCreditQuote,
+	surcharge,
 } from "@/lib/adaptive-credit";
-import { type CreditQuote, estimateCreditQuote } from "@/lib/adaptive-credit";
+
+export {
+	type BuildAcMetricsInput,
+	type BuildPrdMetricsInput,
+	type BuildTaskMetricsInput,
+	buildAcMetrics,
+	buildPrdMetrics,
+	buildTaskMetrics,
+	formatInsufficientCreditsError,
+	formatSubscriptionPausedError,
+} from "@/lib/adaptive-credit";
 
 export interface CreditSubscription {
 	id: string;
@@ -90,6 +106,16 @@ export interface ReserveCreditOperationInput {
 	idempotencyKey: string;
 	quote: CreditQuote;
 	expiresAt?: Date;
+}
+
+export interface SettleCreditOperationInput {
+	userId: string;
+	operationId: string;
+	artifactReference?: string;
+	artifactId?: string;
+	finalCharge?: number;
+	measuredUnits?: number;
+	actualMetrics?: CreditComplexityMetrics;
 }
 
 export interface CreditOperationResult {
@@ -196,6 +222,41 @@ function isPermanentlyUnresolvableSubscription(
 function requireBoundSubscriptionId(subscriptionId: string | null): string {
 	if (!subscriptionId) throw new CreditSubscriptionOriginError("unresolved");
 	return subscriptionId;
+}
+
+function resolveSettlementParameters(
+	operation: { kind: CreditOperationKind; maximumCredits: number },
+	input: SettleCreditOperationInput,
+): { artifactReference: string; finalCharge: number; measuredUnits: number } {
+	const artifactReference = input.artifactReference ?? input.artifactId;
+	if (!artifactReference) {
+		throw new Error("Artifact reference is required for settlement");
+	}
+
+	let measuredUnits = input.measuredUnits;
+	let finalCharge = input.finalCharge;
+
+	if (measuredUnits === undefined || finalCharge === undefined) {
+		if (input.actualMetrics) {
+			const pricing = ADAPTIVE_CREDIT_PRICING.operations[operation.kind];
+			const computedUnits =
+				pricing.baseCredits + surcharge(input.actualMetrics);
+			measuredUnits = measuredUnits ?? computedUnits;
+			finalCharge =
+				finalCharge ??
+				calculateFinalCreditCost({
+					operation: operation.kind,
+					usage: { measuredUnits },
+					maximumCredits: operation.maximumCredits,
+				});
+		} else {
+			throw new Error(
+				"Either actualMetrics or both finalCharge and measuredUnits must be provided",
+			);
+		}
+	}
+
+	return { artifactReference, finalCharge, measuredUnits };
 }
 
 function validateQuote(
@@ -314,27 +375,25 @@ export function createCreditService(store: CreditServiceStore) {
 			return operationResult(operation);
 		},
 
-		settleCreditOperation(input: {
-			userId: string;
-			operationId: string;
-			finalCharge: number;
-			measuredUnits: number;
-			artifactReference: string;
-		}): CreditOperationResult {
+		settleCreditOperation(
+			input: SettleCreditOperationInput,
+		): CreditOperationResult {
 			const operation = requireOperation(
 				store,
 				input.userId,
 				input.operationId,
 			);
 			assertActiveReservation(operation.state);
+			const { artifactReference, finalCharge, measuredUnits } =
+				resolveSettlementParameters(operation, input);
 			if (
-				!Number.isInteger(input.finalCharge) ||
-				input.finalCharge < 0 ||
-				input.finalCharge > operation.maximumCredits
+				!Number.isInteger(finalCharge) ||
+				finalCharge < 0 ||
+				finalCharge > operation.maximumCredits
 			) {
 				throw new Error("Final credit charge is outside the operation maximum");
 			}
-			if (!Number.isFinite(input.measuredUnits) || input.measuredUnits < 0) {
+			if (!Number.isFinite(measuredUnits) || measuredUnits < 0) {
 				throw new Error("Measured credit usage is invalid");
 			}
 			const subscriptionId = requireBoundSubscriptionId(
@@ -349,9 +408,9 @@ export function createCreditService(store: CreditServiceStore) {
 			) {
 				throw new CreditSubscriptionOriginError("missing");
 			}
-			const release = operation.reservedCredits - input.finalCharge;
+			const release = operation.reservedCredits - finalCharge;
 			subscription.creditsReserved -= operation.reservedCredits;
-			subscription.creditsUsed += input.finalCharge;
+			subscription.creditsUsed += finalCharge;
 			if (release > 0)
 				appendLedger(store, {
 					userId: input.userId,
@@ -361,23 +420,22 @@ export function createCreditService(store: CreditServiceStore) {
 					reason: "unused credit reservation released",
 					pricingVersion: operation.pricingVersion,
 				});
-			if (input.finalCharge > 0)
+			if (finalCharge > 0)
 				appendLedger(store, {
 					userId: input.userId,
 					operationId: operation.id,
-					amount: -input.finalCharge,
+					amount: -finalCharge,
 					entryType: "debit",
 					reason: "credit operation settled",
 					pricingVersion: operation.pricingVersion,
 				});
 			operation.state = "settled";
-			operation.finalCharge = input.finalCharge;
+			operation.finalCharge = finalCharge;
 			operation.reservedCredits = 0;
-			operation.artifactReference = input.artifactReference;
-			operation.usage = { measuredUnits: input.measuredUnits };
+			operation.artifactReference = artifactReference;
+			operation.usage = { measuredUnits };
 			operation.capApplied =
-				input.finalCharge === operation.maximumCredits &&
-				input.measuredUnits > input.finalCharge;
+				finalCharge === operation.maximumCredits && measuredUnits > finalCharge;
 			operation.updatedAt = now();
 			return operationResult(operation);
 		},
@@ -838,17 +896,9 @@ export async function markCreditOperationRunning(input: {
 	});
 }
 
-export async function settleCreditOperation(input: {
-	userId: string;
-	operationId: string;
-	finalCharge: number;
-	measuredUnits: number;
-	artifactReference: string;
-}): Promise<CreditOperationResult> {
-	if (!Number.isInteger(input.finalCharge) || input.finalCharge < 0)
-		throw new Error("Final credit charge is invalid");
-	if (!Number.isFinite(input.measuredUnits) || input.measuredUnits < 0)
-		throw new Error("Measured credit usage is invalid");
+export async function settleCreditOperation(
+	input: SettleCreditOperationInput,
+): Promise<CreditOperationResult> {
 	const { db, schema } = await getDatabase();
 	return db.transaction(async (tx) => {
 		const [operation] = await tx
@@ -865,7 +915,15 @@ export async function settleCreditOperation(input: {
 		if (!operation) throw new Error("Credit operation ownership mismatch");
 		if (!["reserved", "running", "settling"].includes(operation.state))
 			throw new Error("Credit operation is already terminal");
-		if (input.finalCharge > operation.maximumCredits)
+
+		const { artifactReference, finalCharge, measuredUnits } =
+			resolveSettlementParameters(operation, input);
+
+		if (!Number.isInteger(finalCharge) || finalCharge < 0)
+			throw new Error("Final credit charge is invalid");
+		if (!Number.isFinite(measuredUnits) || measuredUnits < 0)
+			throw new Error("Measured credit usage is invalid");
+		if (finalCharge > operation.maximumCredits)
 			throw new Error("Final credit charge exceeds operation maximum");
 		const subscriptionId = requireBoundSubscriptionId(operation.subscriptionId);
 		const [subscription] = await tx
@@ -882,14 +940,14 @@ export async function settleCreditOperation(input: {
 			.limit(1)
 			.for("update");
 		if (!subscription) throw new CreditSubscriptionOriginError("missing");
-		const release = operation.reservedCredits - input.finalCharge;
+		const release = operation.reservedCredits - finalCharge;
 		if (release < 0)
 			throw new Error("Final credit charge exceeds reserved credit");
 		const subscriptionUpdates = await tx
 			.update(schema.subscriptions)
 			.set({
 				creditsReserved: sql`${schema.subscriptions.creditsReserved} - ${operation.reservedCredits}`,
-				creditsUsed: sql`${schema.subscriptions.creditsUsed} + ${input.finalCharge}`,
+				creditsUsed: sql`${schema.subscriptions.creditsUsed} + ${finalCharge}`,
 				updatedAt: new Date(),
 			})
 			.where(eq(schema.subscriptions.id, subscription.id))
@@ -907,18 +965,18 @@ export async function settleCreditOperation(input: {
 				pricingVersion: operation.pricingVersion,
 				metadata: { reason: "unused credit reservation released" },
 			});
-		if (input.finalCharge > 0)
+		if (finalCharge > 0)
 			await tx.insert(schema.creditLedgerEntries).values({
 				id: crypto.randomUUID(),
 				userId: input.userId,
 				operationId: operation.id,
-				amount: -input.finalCharge,
+				amount: -finalCharge,
 				entryType: "debit",
 				sourceCategory: "adaptive_credit",
 				pricingVersion: operation.pricingVersion,
 				metadata: {
 					reason: "credit operation settled",
-					measuredUnits: input.measuredUnits,
+					measuredUnits: measuredUnits,
 				},
 			});
 		const updated = await tx
@@ -926,12 +984,12 @@ export async function settleCreditOperation(input: {
 			.set({
 				state: "settled",
 				reservedCredits: 0,
-				finalCharge: input.finalCharge,
-				artifactReference: input.artifactReference,
-				usage: { measuredUnits: input.measuredUnits },
+				finalCharge: finalCharge,
+				artifactReference: artifactReference,
+				usage: { measuredUnits: measuredUnits },
 				capApplied:
-					input.finalCharge === operation.maximumCredits &&
-					input.measuredUnits > input.finalCharge,
+					finalCharge === operation.maximumCredits &&
+					measuredUnits > finalCharge,
 				settledAt: new Date(),
 				updatedAt: new Date(),
 			})

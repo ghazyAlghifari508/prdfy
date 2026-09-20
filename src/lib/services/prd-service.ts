@@ -390,7 +390,7 @@ export async function savePrdVersion(
 	userMessage: string,
 	mode: "generate" | "revise",
 	allowShareLink = true,
-): Promise<void> {
+): Promise<{ prdVersionId: string; version: number } | undefined> {
 	let projectId: string | undefined;
 	const [conv] = await db
 		.select({ projectId: conversations.projectId })
@@ -414,7 +414,7 @@ export async function savePrdVersion(
 			"savePrdVersion: conversation or project missing, content discarded",
 			{ idOrConversationId },
 		);
-		return;
+		return undefined;
 	}
 
 	if (mode === "generate" && allowShareLink) {
@@ -453,10 +453,11 @@ export async function savePrdVersion(
 		if (latest) nextVersion = latest.version + 1;
 	}
 
+	let prdVersionId = crypto.randomUUID();
 	await db
 		.insert(prdVersions)
 		.values({
-			id: crypto.randomUUID(),
+			id: prdVersionId,
 			projectId,
 			version: nextVersion,
 			content: cleanContent,
@@ -477,8 +478,9 @@ export async function savePrdVersion(
 				.orderBy(desc(prdVersions.version))
 				.limit(1);
 			nextVersion = (latest?.version ?? nextVersion) + 1;
+			prdVersionId = crypto.randomUUID();
 			await db.insert(prdVersions).values({
-				id: crypto.randomUUID(),
+				id: prdVersionId,
 				projectId,
 				version: nextVersion,
 				content: cleanContent,
@@ -505,6 +507,8 @@ export async function savePrdVersion(
 				: { status: "completed", updatedAt: new Date() },
 		)
 		.where(eq(projects.id, projectId));
+
+	return { prdVersionId, version: nextVersion };
 }
 
 export async function getPrdVersionContent(
