@@ -26,6 +26,7 @@ import {
 	rollbackStreamInserts,
 	saveMessages,
 } from "@/lib/services/chat-service";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { sanitizeErrorForClient } from "@/lib/services/error-sanitizer";
 import {
 	deriveProjectName,
@@ -51,10 +52,12 @@ export const Route = createFileRoute("/api/chat")({
 				);
 				const {
 					createCreditQuote,
-					reserveCreditOperation,
+					reserveActiveCreditOperation,
+					isReleasableReservation,
 					markCreditOperationRunning,
 					settleCreditOperation,
 					releaseCreditOperation,
+					quarantineCreditOperation,
 				} = await import("@/lib/services/credit-service");
 
 				const [sub] = await db
@@ -248,9 +251,7 @@ export const Route = createFileRoute("/api/chat")({
 				}
 
 				let creditQuote: CreditQuote | undefined;
-				let reservation:
-					| { id: string; state: string; finalCharge: number | null }
-					| undefined;
+				let reservation: CreditOperationResult | undefined;
 
 				if (mode === "generate" && projectIdToUse) {
 					const metrics = buildPrdMetrics({
@@ -321,7 +322,11 @@ export const Route = createFileRoute("/api/chat")({
 						`${projectIdToUse}:prd:${callerAttempt ?? 1}`;
 
 					try {
-						reservation = await reserveCreditOperation({
+						// A reused key whose operation already terminated cannot
+						// generate again: mint a fresh attempt instead of
+						// regenerating for free (settled) or against a dead
+						// reservation. Genuine in-flight retries keep joining.
+						reservation = await reserveActiveCreditOperation({
 							userId: user.id,
 							projectId: projectIdToUse,
 							stage: "prd",
@@ -403,10 +408,14 @@ export const Route = createFileRoute("/api/chat")({
 						let eventErrored = false;
 						let isSettled = false;
 						let isReleased = false;
+						let isQuarantined = false;
 
 						const safeRelease = async (reason: string) => {
 							if (isSettled || isReleased || !reservation) return;
 							isReleased = true;
+							// A running operation is owned by a concurrent
+							// request sharing this key: never cancel it here.
+							if (!isReleasableReservation(reservation.state)) return;
 							try {
 								await releaseCreditOperation({
 									userId: user.id,
@@ -415,6 +424,21 @@ export const Route = createFileRoute("/api/chat")({
 								});
 							} catch (e) {
 								console.error("Failed to release credit operation:", e);
+							}
+						};
+
+						const safeQuarantine = async (reason: string) => {
+							if (isSettled || isReleased || isQuarantined || !reservation)
+								return;
+							isQuarantined = true;
+							try {
+								await quarantineCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to quarantine credit operation:", e);
 							}
 						};
 
@@ -474,12 +498,26 @@ export const Route = createFileRoute("/api/chat")({
 						if (!eventStarted) {
 							eventStarted = true;
 							if (mode === "generate" && reservation) {
-								await markCreditOperationRunning({
-									userId: user.id,
-									operationId: reservation.id,
-								}).catch((err) =>
-									console.error("markCreditOperationRunning error:", err),
-								);
+								try {
+									await markCreditOperationRunning({
+										userId: user.id,
+										operationId: reservation.id,
+									});
+								} catch (err) {
+									// The reservation is not ours to run (a concurrent
+									// request owns it, or it died): do not generate
+									// against it and do not release it either.
+									console.error("markCreditOperationRunning error:", err);
+									eventErrored = true;
+									emit({
+										type: "error",
+										error: "PRD sedang digenerate. Tunggu hingga selesai.",
+									});
+									try {
+										controller.close();
+									} catch {}
+									return;
+								}
 							}
 							emit({
 								type: "started",
@@ -740,8 +778,11 @@ export const Route = createFileRoute("/api/chat")({
 										});
 										isSettled = true;
 									} catch (err) {
+										// The version is durable but unpaid: quarantine
+										// for manual reconciliation instead of
+										// releasing the charge into thin air.
 										console.error("PRD credit settlement failed:", err);
-										await safeRelease("settlement error");
+										await safeQuarantine("settlement error");
 										await safeError(
 											"PRD tersimpan, namun settlement kredit gagal. Hubungi dukungan.",
 										);
@@ -763,9 +804,12 @@ export const Route = createFileRoute("/api/chat")({
 								donePayload.content = finalPrdToSave;
 							safeDone(donePayload);
 						} catch (error) {
-							await safeRelease((error as Error)?.message || "stream error");
-							const errMsg = (error as Error)?.message ?? String(error);
-							const errName = (error as Error)?.name ?? "";
+							await safeRelease(
+								error instanceof Error ? error.message : "stream error",
+							);
+							const errMsg =
+								error instanceof Error ? error.message : String(error);
+							const errName = error instanceof Error ? error.name : "";
 							const isClientAbort =
 								errName === "AbortError" ||
 								/aborted|Invalid state: The stream closed|Controller is already closed|ReadableStream/i.test(
