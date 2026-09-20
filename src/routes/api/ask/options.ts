@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { projects, subscriptions } from "@/db/schema";
+import { projects, prdVersions, subscriptions } from "@/db/schema";
 import {
 	askHandoffSchema,
 	buildCodebasePromptBlock,
@@ -10,7 +10,7 @@ import {
 	resolveActiveSnapshotId,
 	saveAskHandoff,
 } from "@/lib/codebase-generation-context";
-import { isTruncatedGeneration } from "@/lib/flow-progress";
+import { isTruncatedGeneration, shouldMarkQuestionStep } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { ASK_OPTIONS_GENERATION_PROMPT } from "@/lib/prompts-ask";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -218,18 +218,50 @@ export const Route = createFileRoute("/api/ask/options")({
 						);
 					}
 
-					// Mark project at question-stage server-side so it appears in
-					// History immediately on generation, not only once a PRD exists.
-					// Mirrors ac-service saveAcVersion's step-on-generate write.
+					// Mark pre-artifact projects at question-stage server-side so
+					// History routes them to /ask instead of the empty PRD page.
+					// Guarded: only when no PRD version exists and the step has
+					// not advanced past prd, so a concurrent or repeated Ask
+					// call can never rewind an ac/task project. The UPDATE
+					// predicate re-checks the step so a generation that
+					// completes between the read and the write still wins.
 					// ponytail: non-fatal - a failed marker write must not block the
 					// questions the user just paid an AI call to generate.
-					await db
-						.update(projects)
-						.set({ step: "question", updatedAt: new Date() })
-						.where(
-							and(eq(projects.id, projectId), eq(projects.userId, user.id)),
-						)
-						.catch((e) => console.error("ask step marker failed:", e));
+					try {
+						const [existing] = await db
+							.select({ step: projects.step })
+							.from(projects)
+							.where(
+								and(eq(projects.id, projectId), eq(projects.userId, user.id)),
+							)
+							.limit(1);
+						const [prdRow] = await db
+							.select({ id: prdVersions.id })
+							.from(prdVersions)
+							.where(eq(prdVersions.projectId, projectId))
+							.limit(1);
+						if (
+							existing &&
+							shouldMarkQuestionStep(existing.step, Boolean(prdRow))
+						) {
+							await db
+								.update(projects)
+								.set({ step: "question", updatedAt: new Date() })
+								.where(
+									and(
+										eq(projects.id, projectId),
+										eq(projects.userId, user.id),
+										or(
+											eq(projects.step, "question"),
+											eq(projects.step, "prd"),
+											isNull(projects.step),
+										),
+									),
+								);
+						}
+					} catch (e) {
+						console.error("ask step marker failed:", e);
+					}
 
 					return Response.json({ questions });
 				} catch (err: unknown) {

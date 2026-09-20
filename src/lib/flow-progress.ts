@@ -39,6 +39,18 @@ export function advanceStep(
 }
 
 /**
+ * Whether the Ask success marker may set step to "question".
+ * Only for projects with no PRD version that have not advanced past
+ * prd, so a repeated Ask call can never rewind an ac/task project.
+ */
+export function shouldMarkQuestionStep(
+	current: string | null | undefined,
+	hasPrd: boolean,
+): boolean {
+	return !hasPrd && stepRank(current) <= stepRank("prd");
+}
+
+/**
  * True when a streamed generation must NOT be persisted as a new version.
  *
  * A dropped/aborted stream used to be saved anyway, creating a partial version

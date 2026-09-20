@@ -5,6 +5,7 @@ import {
 	isTruncatedGeneration,
 	isValidHistoryUrl,
 	resolveHistoryUrl,
+	shouldMarkQuestionStep,
 	stepRank,
 } from "./flow-progress";
 
@@ -59,6 +60,21 @@ describe("advanceStep", () => {
 	it("advances from a null/legacy step", () => {
 		expect(advanceStep(null, "ac")).toBe("ac");
 		expect(advanceStep(null, "prd")).toBeNull();
+	});
+});
+
+describe("shouldMarkQuestionStep", () => {
+	it("marks pre-artifact projects at or before prd", () => {
+		expect(shouldMarkQuestionStep("question", false)).toBe(true);
+		expect(shouldMarkQuestionStep("prd", false)).toBe(true);
+		expect(shouldMarkQuestionStep(null, false)).toBe(true);
+	});
+
+	it("never rewinds progressed projects or ones with a PRD", () => {
+		expect(shouldMarkQuestionStep("ac", false)).toBe(false);
+		expect(shouldMarkQuestionStep("task", false)).toBe(false);
+		expect(shouldMarkQuestionStep("prd", true)).toBe(false);
+		expect(shouldMarkQuestionStep("question", true)).toBe(false);
 	});
 });
 
