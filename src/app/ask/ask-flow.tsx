@@ -36,6 +36,7 @@ import {
 	FULLSTACK_FRAMEWORK_OPTIONS,
 	FULLSTACK_MOBILE_OPTIONS,
 } from "@/lib/stack-data";
+import { useUIStore } from "@/store";
 import { type NonTechAnswer, QuestionCard } from "./question-card";
 import { StackDropdown } from "./stack-dropdown";
 
@@ -91,6 +92,12 @@ export function AskFlow({
 	const navigate = useNavigate();
 	const promptRef = useRef("");
 	const hasFetched = useRef(false);
+	// Server restore must win over a stale local snapshot: autosave stays
+	// off until the initial load settles, and submit cancels any autosave
+	// still in flight so an older write cannot land after the final one.
+	const restoreSettled = useRef(false);
+	const autosaveCtrl = useRef<AbortController | null>(null);
+	const showToast = useUIStore((s) => s.showToast);
 
 	const flowCta = getFlowStepCta("question", step, hasPrd);
 	const isNavigateOnly = flowCta?.kind === "navigate";
@@ -295,11 +302,15 @@ export function AskFlow({
 				setIsLoadingQuestions(false);
 			}
 		};
-		void run();
+		void run().finally(() => {
+			restoreSettled.current = true;
+		});
 	}, []);
 
 	// Persist across refresh/hard-refresh: write state whenever it changes.
 	// Only once questions exist, avoids persisting an empty placeholder.
+	// Server writes wait for the initial restore so a stale local snapshot
+	// can never overwrite newer server state on mount.
 	useEffect(() => {
 		if (questions.length === 0 || !promptRef.current) return;
 		saveAskState({
@@ -312,12 +323,19 @@ export function AskFlow({
 			skippedTech: [...skippedTech],
 			techAnswers,
 		});
+		if (!restoreSettled.current) return;
 
-		// Debounced server auto-save so answers survive tab close & multi-device
+		// Debounced server auto-save so answers survive tab close & multi-device.
+		// Each new change aborts the previous in-flight save: only the latest
+		// snapshot may land.
+		autosaveCtrl.current?.abort();
+		const ctrl = new AbortController();
+		autosaveCtrl.current = ctrl;
 		const timer = setTimeout(() => {
 			void fetch("/api/ask/options", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
+				signal: ctrl.signal,
 				body: JSON.stringify({
 					projectId,
 					action: "save-handoff",
@@ -336,11 +354,15 @@ export function AskFlow({
 					},
 				}),
 			}).catch((err) => {
+				if (err instanceof Error && err.name === "AbortError") return;
 				console.error("Auto-save ask handoff failed:", err);
 			});
 		}, 600);
 
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			ctrl.abort();
+		};
 	}, [
 		questions,
 		nonTechAnswers,
@@ -411,8 +433,12 @@ export function AskFlow({
 
 		savePendingPrdPrompt(compiledPrompt, "auto", projectName);
 		// Authoritative server handoff: survives refresh and multi-device access.
-		// Best-effort with a timeout — the save must never stall navigation:
-		// abort/timeout/failure all fall through safely.
+		// Cancel any autosave still in flight so its older snapshot cannot
+		// land after this final write. Best-effort with a timeout — the save
+		// must never stall navigation: abort/timeout/failure surface a
+		// warning toast and fall through to the PRD page, whose prompt is
+		// already preserved in sessionStorage.
+		autosaveCtrl.current?.abort();
 		const ctrl = new AbortController();
 		const timer = setTimeout(
 			() => ctrl.abort(),
@@ -433,7 +459,7 @@ export function AskFlow({
 					answer: picked || skipLabel,
 				};
 			});
-			await fetch("/api/ask/options", {
+			const res = await fetch("/api/ask/options", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				signal: ctrl.signal,
@@ -460,8 +486,20 @@ export function AskFlow({
 					},
 				}),
 			});
+			if (!res.ok) {
+				showToast(
+					"Progres tidak tersimpan di server, tapi PRD tetap bisa dibuat.",
+					"error",
+				);
+			}
 		} catch (err) {
 			console.warn("Ask handoff save skipped:", err);
+			if (!(err instanceof Error && err.name === "AbortError")) {
+				showToast(
+					"Progres tidak tersimpan di server, tapi PRD tetap bisa dibuat.",
+					"error",
+				);
+			}
 		} finally {
 			clearTimeout(timer);
 		}
