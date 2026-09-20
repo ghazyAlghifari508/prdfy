@@ -39,7 +39,6 @@ export function OnboardingForm() {
 	const [tujuan, setTujuan] = useState<string[]>(restored?.goals ?? []);
 	// ponytail: 200ms debounce snapshots the wizard so a refresh mid-onboarding
 	// restores step + name + role + goals instead of wiping them to step 1.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional wizard snapshot
 	useEffect(() => {
 		const t = setTimeout(
 			() => saveOnboardingState({ step, fullName, role, goals: tujuan }),
@@ -80,35 +79,40 @@ export function OnboardingForm() {
 		setLoading(true);
 		setError(null);
 
-		const response = await fetch("/api/auth/onboarding", {
-			method: "POST",
-			credentials: "include",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				fullName,
-				role,
-				goals: tujuan,
-			}),
-		});
+		try {
+			const response = await fetch("/api/auth/onboarding", {
+				method: "POST",
+				credentials: "include",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					fullName,
+					role,
+					goals: tujuan,
+				}),
+			});
 
-		const result = await response.json().catch(() => null);
+			const result = await response.json().catch(() => null);
 
-		if (response.status === 401) {
-			navigate({ to: "/login", replace: true });
-			return;
-		}
+			if (response.status === 401) {
+				navigate({ to: "/login", replace: true });
+				return;
+			}
 
-		if (!response.ok || !result?.user) {
-			setError(result?.message ?? "Gagal menyimpan onboarding.");
+			if (!response.ok || !result?.user) {
+				setError(result?.message ?? "Gagal menyimpan onboarding.");
+				return;
+			}
+
+			setUser({ id: result.user.id, email: result.user.email });
+			clearOnboardingState();
+			window.location.assign("/");
+		} catch {
+			setError("Gagal menyimpan onboarding.");
+		} finally {
 			setLoading(false);
-			return;
 		}
-
-		setUser({ id: result.user.id, email: result.user.email });
-		clearOnboardingState();
-		window.location.assign("/");
 	};
 
 	return (
@@ -146,6 +150,7 @@ export function OnboardingForm() {
 					{ROLES.map((r) => (
 						<button
 							key={r.value}
+							type="button"
 							onClick={() => {
 								setRole(r.value);
 								setError(null);
@@ -167,6 +172,7 @@ export function OnboardingForm() {
 					{GOALS.map((g) => (
 						<button
 							key={g.value}
+							type="button"
 							onClick={() => toggleTujuan(g.value)}
 							className={`rounded-lg border p-4 text-left transition-all ${
 								tujuan.includes(g.value)
