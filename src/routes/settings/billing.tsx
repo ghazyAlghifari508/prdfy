@@ -46,7 +46,6 @@ export interface BillingPaymentItem {
 	snapToken: string | null;
 	createdAt: string | null;
 	updatedAt: string | null;
-	midtransResponse: object | null;
 }
 
 export interface BillingCreditUsage {
@@ -136,7 +135,6 @@ const loadBilling = createServerFn({ method: "GET" }).handler(async () => {
 		snapToken: null,
 		createdAt: p.createdAt?.toISOString() ?? null,
 		updatedAt: p.updatedAt?.toISOString() ?? null,
-		midtransResponse: p.midtransResponse as object | null,
 	}));
 
 	const operationsList: CreditOperationItem[] = operationRows.map((op) => ({
@@ -176,10 +174,17 @@ const deletePayment = createServerFn({ method: "POST" })
 	.validator((paymentId: string) => paymentId)
 	.handler(async ({ data: paymentId }) => {
 		const user = await requireUserServer();
-		await db
+		const deleted = await db
 			.delete(payments)
-			.where(and(eq(payments.id, paymentId), eq(payments.userId, user.id)));
-		return { success: true };
+			.where(
+				and(
+					eq(payments.id, paymentId),
+					eq(payments.userId, user.id),
+					ne(payments.status, "success"),
+				),
+			)
+			.returning({ id: payments.id });
+		return { success: deleted.length === 1 };
 	});
 
 export const Route = createFileRoute("/settings/billing")({
@@ -187,7 +192,7 @@ export const Route = createFileRoute("/settings/billing")({
 		try {
 			return await loadBilling();
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
@@ -245,9 +250,13 @@ function BillingPage() {
 
 	const handleDelete = async (id: string) => {
 		try {
-			await deletePayment({ data: id });
-			setPaymentsList((prev) => prev.filter((p) => p.id !== id));
-			showToast("Riwayat pembayaran berhasil dihapus", "success");
+			const res = await deletePayment({ data: id });
+			if (res.success) {
+				setPaymentsList((prev) => prev.filter((p) => p.id !== id));
+				showToast("Riwayat pembayaran berhasil dihapus", "success");
+			} else {
+				showToast("Riwayat pembayaran berhasil tidak dapat dihapus", "error");
+			}
 		} catch {
 			showToast("Gagal menghapus riwayat pembayaran", "error");
 		} finally {
@@ -385,14 +394,16 @@ function BillingPage() {
 										>
 											{p.status === "success" ? "Berhasil" : "Gagal"}
 										</span>
-										<button
-											type="button"
-											onClick={() => setDeleteId(p.id)}
-											className="rounded p-1.5 text-fog hover:bg-red-500/10 hover:text-red-400 transition-colors"
-											aria-label="Hapus riwayat"
-										>
-											<Trash2 size={14} />
-										</button>
+										{p.status !== "success" && (
+											<button
+												type="button"
+												onClick={() => setDeleteId(p.id)}
+												className="rounded p-1.5 text-fog hover:bg-red-500/10 hover:text-red-400 transition-colors"
+												aria-label="Hapus riwayat"
+											>
+												<Trash2 size={14} />
+											</button>
+										)}
 									</div>
 								</div>
 							))}

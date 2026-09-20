@@ -10,7 +10,7 @@ import { requireUserServer } from "@/lib/session";
 const loadSettings = createServerFn({ method: "GET" }).handler(async () => {
 	const user = await requireUserServer();
 	const [profile] = await db
-		.select()
+		.select({ id: users.id, name: users.name, email: users.email, image: users.image })
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/settings")({
 		try {
 			return await loadSettings();
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
