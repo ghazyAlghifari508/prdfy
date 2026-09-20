@@ -4,18 +4,63 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { AlertTriangle, CalendarClock, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { cancelSubscription } from "@/app/actions/payment";
+import {
+	type CreditOperationItem,
+	CreditUsageSection,
+} from "@/components/settings/credit-usage";
 import { db } from "@/db";
-import { payments, subscriptions } from "@/db/schema";
+import {
+	creditOperations,
+	payments,
+	projects,
+	subscriptions,
+} from "@/db/schema";
 import { TOPUP_SKU } from "@/lib/constants";
 import { requireUserServer } from "@/lib/session";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useUIStore } from "@/store";
 
+export interface BillingSubscription {
+	id: string;
+	userId: string;
+	plan: string;
+	status: string;
+	midtransOrderId: string | null;
+	currentPeriodStart: string | null;
+	currentPeriodEnd: string | null;
+	cancelledAt: string | null;
+	reminderCount: number;
+	credits: number;
+	creditsUsed: number;
+	creditsReserved: number;
+	createdAt: string | null;
+	updatedAt: string | null;
+}
+
+export interface BillingPaymentItem {
+	id: string;
+	userId: string;
+	amount: number;
+	status: string;
+	plan: string | null;
+	snapToken: string | null;
+	createdAt: string | null;
+	updatedAt: string | null;
+	midtransResponse: object | null;
+}
+
+export interface BillingCreditUsage {
+	availableCredits: number;
+	reservedCredits: number;
+	totalCreditsUsed: number;
+	operations: CreditOperationItem[];
+}
+
 // ponytail: server-only db logic - loader runs on client too, must not import db there.
 const loadBilling = createServerFn({ method: "GET" }).handler(async () => {
 	const user = await requireUserServer();
 
-	const [subRows, paymentRows] = await Promise.all([
+	const [subRows, paymentRows, operationRows] = await Promise.all([
 		db
 			.select()
 			.from(subscriptions)
@@ -30,24 +75,101 @@ const loadBilling = createServerFn({ method: "GET" }).handler(async () => {
 			.where(and(eq(payments.userId, user.id), ne(payments.status, "pending")))
 			.orderBy(desc(payments.createdAt))
 			.limit(10),
+		db
+			.select({
+				id: creditOperations.id,
+				projectId: creditOperations.projectId,
+				projectName: projects.name,
+				kind: creditOperations.kind,
+				stage: creditOperations.stage,
+				state: creditOperations.state,
+				estimatedCredits: creditOperations.estimatedCredits,
+				reservedCredits: creditOperations.reservedCredits,
+				maximumCredits: creditOperations.maximumCredits,
+				finalCharge: creditOperations.finalCharge,
+				pricingVersion: creditOperations.pricingVersion,
+				metrics: creditOperations.metrics,
+				capApplied: creditOperations.capApplied,
+				createdAt: creditOperations.createdAt,
+				settledAt: creditOperations.settledAt,
+			})
+			.from(creditOperations)
+			.leftJoin(
+				projects,
+				and(
+					eq(projects.id, creditOperations.projectId),
+					eq(projects.userId, user.id),
+				),
+			)
+			.where(eq(creditOperations.userId, user.id))
+			.orderBy(desc(creditOperations.createdAt))
+			.limit(50),
 	]);
+
 	// ponytail: server fn boundary rejects Date + unknown - coerce to plain JSON.
-	const subscription = subRows[0]
+	const subscription: BillingSubscription | undefined = subRows[0]
 		? {
-				...subRows[0],
-				createdAt: subRows[0].createdAt?.toISOString() ?? null,
-				updatedAt: subRows[0].updatedAt?.toISOString() ?? null,
+				id: subRows[0].id,
+				userId: subRows[0].userId,
+				plan: subRows[0].plan,
+				status: subRows[0].status,
+				midtransOrderId: subRows[0].midtransOrderId ?? null,
+				currentPeriodStart:
+					subRows[0].currentPeriodStart?.toISOString() ?? null,
 				currentPeriodEnd: subRows[0].currentPeriodEnd?.toISOString() ?? null,
 				cancelledAt: subRows[0].cancelledAt?.toISOString() ?? null,
+				reminderCount: subRows[0].reminderCount,
+				credits: subRows[0].credits,
+				creditsUsed: subRows[0].creditsUsed,
+				creditsReserved: subRows[0].creditsReserved,
+				createdAt: subRows[0].createdAt?.toISOString() ?? null,
+				updatedAt: subRows[0].updatedAt?.toISOString() ?? null,
 			}
 		: undefined;
-	const paymentsList = paymentRows.map((p) => ({
-		...p,
+
+	const paymentsList: BillingPaymentItem[] = paymentRows.map((p) => ({
+		id: p.id,
+		userId: p.userId,
+		amount: p.amount,
+		status: p.status,
+		plan: p.plan,
+		snapToken: p.snapToken,
 		createdAt: p.createdAt?.toISOString() ?? null,
 		updatedAt: p.updatedAt?.toISOString() ?? null,
 		midtransResponse: p.midtransResponse as object | null,
 	}));
-	return { subscription, payments: paymentsList };
+
+	const operationsList: CreditOperationItem[] = operationRows.map((op) => ({
+		id: op.id,
+		projectId: op.projectId,
+		projectName: op.projectName ?? null,
+		kind: op.kind,
+		stage: op.stage,
+		state: op.state,
+		estimatedCredits: op.estimatedCredits,
+		reservedCredits: op.reservedCredits,
+		maximumCredits: op.maximumCredits,
+		finalCharge: op.finalCharge,
+		pricingVersion: op.pricingVersion,
+		metrics: op.metrics,
+		capApplied: op.capApplied,
+		createdAt: op.createdAt?.toISOString() ?? null,
+		settledAt: op.settledAt?.toISOString() ?? null,
+	}));
+
+	const credits = subscription?.credits ?? 0;
+	const creditsUsed = subscription?.creditsUsed ?? 0;
+	const creditsReserved = subscription?.creditsReserved ?? 0;
+	const availableCredits = Math.max(0, credits - creditsUsed - creditsReserved);
+
+	const creditUsage: BillingCreditUsage = {
+		availableCredits,
+		reservedCredits,
+		totalCreditsUsed: creditsUsed,
+		operations: operationsList,
+	};
+
+	return { subscription, payments: paymentsList, creditUsage };
 });
 
 const deletePayment = createServerFn({ method: "POST" })
@@ -74,7 +196,11 @@ export const Route = createFileRoute("/settings/billing")({
 });
 
 function BillingPage() {
-	const { subscription, payments: initialPayments } = Route.useLoaderData();
+	const {
+		subscription,
+		payments: initialPayments,
+		creditUsage,
+	} = Route.useLoaderData();
 	const [paymentsList, setPaymentsList] = useState(initialPayments);
 	const [deleteId, setDeleteId] = useState<string | null>(null);
 	const [cancelOpen, setCancelOpen] = useState(false);
@@ -95,7 +221,7 @@ function BillingPage() {
 	};
 
 	// Derived subscription display state (server truth via loader dates).
-	const planLabel = (subscription?.plan as string) || "free";
+	const planLabel = subscription?.plan || "free";
 	const isPaidPlan = planLabel === "pro" || planLabel === "hengker";
 	const periodEndDate = subscription?.currentPeriodEnd
 		? new Date(subscription.currentPeriodEnd)
@@ -112,11 +238,10 @@ function BillingPage() {
 				: "Aktif (paket lama, tanpa masa aktif)"
 		: "Gratis";
 	const showToast = useUIStore((s) => s.showToast);
-	const credits =
-		((subscription as Record<string, unknown>)?.credits as number) ?? 0;
-	const creditsUsed =
-		((subscription as Record<string, unknown>)?.creditsUsed as number) ?? 0;
-	const remaining = Math.max(0, credits - creditsUsed);
+	const credits = subscription?.credits ?? 0;
+	const creditsUsed = subscription?.creditsUsed ?? 0;
+	const creditsReserved = subscription?.creditsReserved ?? 0;
+	const remaining = Math.max(0, credits - creditsUsed - creditsReserved);
 
 	const handleDelete = async (id: string) => {
 		try {
@@ -186,6 +311,11 @@ function BillingPage() {
 							<span className="text-(--text-secondary)">Kredit digunakan</span>
 							<span className="font-medium">
 								{creditsUsed} / {credits}
+								{creditsReserved > 0 && (
+									<span className="ml-1 text-xs text-amber-400 font-normal">
+										({creditsReserved} direservasi)
+									</span>
+								)}
 							</span>
 						</div>
 						<div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-(--bg-card)">
@@ -200,7 +330,7 @@ function BillingPage() {
 							{isPaused
 								? "Masa aktif habis — sisa kredit periode lama hangus. Perpanjang untuk dapat kredit segar."
 								: remaining > 0
-									? `Sisa ${remaining} kredit periode ini. Kredit reset setiap 30 hari.`
+									? `Sisa ${remaining} kredit periode ini.${creditsReserved > 0 ? ` (${creditsReserved} sedang direservasi).` : ""} Kredit reset setiap 30 hari.`
 									: "Kredit periode ini habis. Perpanjang atau tunggu reset berikutnya."}
 						</p>
 						{!isPaused &&
@@ -270,6 +400,14 @@ function BillingPage() {
 					)}
 				</div>
 			</div>
+
+			{/* Credit Usage Section */}
+			<CreditUsageSection
+				availableCredits={creditUsage.availableCredits}
+				reservedCredits={creditUsage.reservedCredits}
+				totalCreditsUsed={creditUsage.totalCreditsUsed}
+				operations={creditUsage.operations}
+			/>
 
 			{/* Cancel subscription confirmation */}
 			{cancelOpen && (
