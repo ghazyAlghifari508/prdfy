@@ -37,38 +37,66 @@ export const Route = createFileRoute("/api/kanban/stream")({
 					return Response.json({ error: "Not found" }, { status: 404 });
 				}
 
-				const stream = new ReadableStream<Uint8Array>({
-					async start(controller) {
-						const enc = new TextEncoder();
+			let stopped = false;
+			let iv: ReturnType<typeof setInterval> | undefined;
+			const stop = (controller: ReadableStreamDefaultController) => {
+				stopped = true;
+				if (iv !== undefined) clearInterval(iv);
+				try {
+					controller.close();
+				} catch {}
+			};
+			const stream = new ReadableStream<Uint8Array>({
+				async start(controller) {
+					const enc = new TextEncoder();
 
-						const send = async () => {
-							try {
-								const { getKanbanData } = await import(
-									"@/lib/services/task-service"
-								);
-								const data = await getKanbanData(projectId);
-								controller.enqueue(
-									enc.encode(`data: ${JSON.stringify(data)}\n\n`),
-								);
-							} catch (e) {
-								// Controller may be closed after abort; swallow.
-								// Log only when still open so we see real DB errors.
-								try {
-									console.error("kanban SSE send error:", e);
-								} catch {}
+					const send = async () => {
+						if (stopped) return;
+						try {
+							// Re-validate ownership on every tick: the project
+							// may be deleted or reassigned while the stream
+							// is open. Close instead of serving stale tenants.
+							const [proj] = await db
+								.select({ id: projects.id })
+								.from(projects)
+								.where(
+									and(eq(projects.id, projectId), eq(projects.userId, user.id)),
+								)
+								.limit(1);
+							if (!proj) {
+								stop(controller);
+								return;
 							}
-						};
-
-						await send();
-						const iv = setInterval(send, KANBAN_SSE_INTERVAL_MS);
-						request.signal.addEventListener("abort", () => {
-							clearInterval(iv);
+							const { getKanbanData } = await import(
+								"@/lib/services/task-service"
+							);
+							const data = await getKanbanData(projectId);
+							if (stopped) return;
+							controller.enqueue(
+								enc.encode(`data: ${JSON.stringify(data)}\n\n`),
+							);
+						} catch (e) {
+							// Controller may be closed after abort; swallow.
+							// Log only when still open so we see real DB errors.
 							try {
-								controller.close();
+								console.error("kanban SSE send error:", e);
 							} catch {}
-						});
-					},
-				});
+						}
+					};
+
+					await send();
+					if (stopped) return;
+					iv = setInterval(() => {
+						void send();
+					}, KANBAN_SSE_INTERVAL_MS);
+					request.signal.addEventListener("abort", () => {
+						stop(controller);
+					});
+				},
+				cancel(controller) {
+					stop(controller);
+				},
+			});
 
 				return new Response(stream, {
 					headers: {
