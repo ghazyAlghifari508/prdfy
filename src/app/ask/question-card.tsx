@@ -1,7 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface NonTechAnswer {
@@ -34,14 +34,36 @@ export function QuestionCard({
 	const [textInput, setTextInput] = useState(
 		answer?.isCustom ? answer.value : "",
 	);
+	// Skipping stashes the current answer so an accidental skip can be
+	// undone without losing the selection or text.
+	const skippedBackup = useRef<NonTechAnswer | null>(null);
+	// The parent reuses this component across questions: reset local drafts
+	// when the question identity changes so one question's text can never
+	// be submitted as another's.
+	const questionRef = useRef(question);
+	if (questionRef.current !== question) {
+		questionRef.current = question;
+		skippedBackup.current = null;
+		setCustomText("");
+		setShowCustomInput(false);
+		setTextInput(answer?.isCustom ? answer.value : "");
+	}
 
 	const isSkipped = answer?.skipped ?? false;
 
 	const toggleSkip = () => {
 		if (isSkipped) {
-			// undo skip
-			onAnswer({ value: "", isCustom: false, skipped: false });
+			const restore = skippedBackup.current;
+			skippedBackup.current = null;
+			onAnswer(restore ?? { value: "", isCustom: false, skipped: false });
 		} else {
+			if (
+				answer &&
+				!answer.skipped &&
+				(answer.value || (answer.values?.length ?? 0) > 0)
+			) {
+				skippedBackup.current = answer;
+			}
 			setShowCustomInput(false);
 			onAnswer({ value: "", isCustom: false, skipped: true });
 		}
