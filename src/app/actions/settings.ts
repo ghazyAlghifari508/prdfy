@@ -43,61 +43,98 @@ const _deleteAccount = createServerFn({ method: "POST" })
 	.handler(async () => {
 		const user = await requireUser(getRequestHeaders());
 		const { db } = await import("@/db");
-		const {
-			acVersions,
-			conversations,
-			messages,
-			notificationPreferences,
-			payments,
-			prdVersions,
-			projects,
-			quotas,
-			rateLimits,
-			subscriptions,
-			tasks,
-			users,
-		} = await import("@/db/schema");
+	const {
+		acVersions,
+		apiKeys,
+		conversations,
+		creditLedgerEntries,
+		creditOperations,
+		errorReports,
+		feedback,
+		messages,
+		notificationPreferences,
+		payments,
+		prdVersions,
+		projects,
+		quotas,
+		rateLimits,
+		subscriptions,
+		tasks,
+		users,
+	} = await import("@/db/schema");
 		const { auth } = await import("@/lib/auth");
 
-		await db
+	// One transaction: any failure rolls everything back instead of
+	// leaving a partially deleted account. FK-safe order: leaf rows
+	// first (ledger→operations: composite FKs without cascade block
+	// their parents), user row last. Tables with ON DELETE CASCADE
+	// (sessions, accounts, codebase rows) follow automatically.
+	await db.transaction(async (tx) => {
+		await tx
 			.delete(notificationPreferences)
 			.where(eq(notificationPreferences.userId, user.id));
-		await db.delete(rateLimits).where(eq(rateLimits.userId, user.id));
+		await tx.delete(rateLimits).where(eq(rateLimits.userId, user.id));
+		await tx.delete(apiKeys).where(eq(apiKeys.userId, user.id));
+		await tx.delete(feedback).where(eq(feedback.userId, user.id));
+		await tx.delete(errorReports).where(eq(errorReports.userId, user.id));
 
-		const userProjects = await db
+		const opRows = await tx
+			.select({ id: creditOperations.id })
+			.from(creditOperations)
+			.where(eq(creditOperations.userId, user.id));
+		const opIds = opRows.map((o) => o.id);
+		if (opIds.length > 0) {
+			await tx
+				.delete(creditLedgerEntries)
+				.where(inArray(creditLedgerEntries.operationId, opIds));
+		}
+		await tx
+			.delete(creditOperations)
+			.where(eq(creditOperations.userId, user.id));
+
+		const userProjects = await tx
 			.select({ id: projects.id })
 			.from(projects)
 			.where(eq(projects.userId, user.id));
 		const projectIds = userProjects.map((p) => p.id);
+		const convRows = await tx
+			.select({ id: conversations.id })
+			.from(conversations)
+			.where(eq(conversations.userId, user.id));
+		const convIds = convRows.map((c) => c.id);
+		if (convIds.length > 0) {
+			await tx
+				.delete(messages)
+				.where(inArray(messages.conversationId, convIds));
+		}
 		if (projectIds.length > 0) {
-			const convRows = await db
-				.select({ id: conversations.id })
-				.from(conversations)
-				.where(inArray(conversations.projectId, projectIds));
-			const convIds = convRows.map((c) => c.id);
-			if (convIds.length > 0) {
-				await db
-					.delete(messages)
-					.where(inArray(messages.conversationId, convIds));
-			}
-			await db
+			await tx
 				.delete(conversations)
 				.where(inArray(conversations.projectId, projectIds));
-			await db
+			await tx
 				.delete(prdVersions)
 				.where(inArray(prdVersions.projectId, projectIds));
-			await db
+			await tx
 				.delete(acVersions)
 				.where(inArray(acVersions.projectId, projectIds));
-			await db.delete(tasks).where(inArray(tasks.projectId, projectIds));
+			await tx.delete(tasks).where(inArray(tasks.projectId, projectIds));
 		}
-		await db.delete(projects).where(eq(projects.userId, user.id));
-		await db.delete(payments).where(eq(payments.userId, user.id));
-		await db.delete(subscriptions).where(eq(subscriptions.userId, user.id));
-		await db.delete(quotas).where(eq(quotas.userId, user.id));
+		await tx
+			.delete(conversations)
+			.where(eq(conversations.userId, user.id));
+		await tx.delete(projects).where(eq(projects.userId, user.id));
+		await tx.delete(payments).where(eq(payments.userId, user.id));
+		await tx.delete(subscriptions).where(eq(subscriptions.userId, user.id));
+		await tx.delete(quotas).where(eq(quotas.userId, user.id));
+		await tx.delete(users).where(eq(users.id, user.id));
+	});
 
+	try {
 		await auth.api.signOut({ headers: getRequestHeaders() });
-		await db.delete(users).where(eq(users.id, user.id));
+	} catch (e) {
+		// The user row is already gone, so the session is dead regardless.
+		console.error("Sign out after account deletion failed:", e);
+	}
 	});
 
 export async function deleteAccount(formData: FormData) {
