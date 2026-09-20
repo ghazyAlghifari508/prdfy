@@ -47,6 +47,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 			size,
 			asChild = false,
 			isLoading,
+			disabled,
 			children,
 			...props
 		},
@@ -57,8 +58,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 			<Comp
 				className={cn(buttonVariants({ variant, size, className }))}
 				ref={ref}
-				disabled={isLoading || props.disabled}
 				{...props}
+				disabled={isLoading || disabled}
 			>
 				{isLoading && (
 					<svg
@@ -66,6 +67,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 						xmlns="http://www.w3.org/2000/svg"
 						fill="none"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
 					>
 						<circle
 							className="opacity-25"
