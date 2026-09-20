@@ -181,6 +181,21 @@ export function CreditUsageSection({
 		return base;
 	}, [operations, customStageBreakdown]);
 
+	const stageCounts = useMemo(() => {
+		const counts: Record<CreditOperationStage, number> = {
+			codebase: 0,
+			prd: 0,
+			ac: 0,
+			task: 0,
+		};
+		for (const op of operations) {
+			if (counts[op.stage] !== undefined) {
+				counts[op.stage] += 1;
+			}
+		}
+		return counts;
+	}, [operations]);
+
 	const filteredOperations = useMemo(() => {
 		return operations.filter((op) => {
 			if (stageFilter !== "all" && op.stage !== stageFilter) {
@@ -253,25 +268,25 @@ export function CreditUsageSection({
 						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
 							<span className="text-(--text-secondary)">Codebase</span>
 							<span className="font-semibold text-snow">
-								{stageBreakdown.codebase} kr
+								{stageBreakdown.codebase} kr ({stageCounts.codebase} op)
 							</span>
 						</div>
 						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
 							<span className="text-(--text-secondary)">PRD</span>
 							<span className="font-semibold text-snow">
-								{stageBreakdown.prd} kr
+								{stageBreakdown.prd} kr ({stageCounts.prd} op)
 							</span>
 						</div>
 						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
 							<span className="text-(--text-secondary)">AC</span>
 							<span className="font-semibold text-snow">
-								{stageBreakdown.ac} kr
+								{stageBreakdown.ac} kr ({stageCounts.ac} op)
 							</span>
 						</div>
 						<div className="flex justify-between rounded-lg bg-(--bg-surface) px-2.5 py-1.5">
 							<span className="text-(--text-secondary)">Task</span>
 							<span className="font-semibold text-snow">
-								{stageBreakdown.task} kr
+								{stageBreakdown.task} kr ({stageCounts.task} op)
 							</span>
 						</div>
 					</div>
