@@ -37,58 +37,60 @@ export async function rollOverFreeIfNeeded(
 ): Promise<SubscriptionRowLike & { id: string; userId?: string }> {
 	if (!isFreeRolloverDue(row, now)) return row;
 	const period = computeFreeRolloverPeriod(now);
-	const [updated] = await db
-		.update(subscriptions)
-		.set({
-			currentPeriodStart: period.start,
-			currentPeriodEnd: period.end,
-			credits: PLAN_CREDITS.free,
-			creditsUsed: 0,
-			creditsReserved: 0,
-			updatedAt: now,
-		})
-		.where(
-			and(
-				eq(subscriptions.id, row.id),
-				or(
-					isNull(subscriptions.currentPeriodEnd),
-					lt(subscriptions.currentPeriodEnd, now),
+	return db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(subscriptions)
+			.set({
+				currentPeriodStart: period.start,
+				currentPeriodEnd: period.end,
+				credits: PLAN_CREDITS.free,
+				creditsUsed: 0,
+				creditsReserved: 0,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(subscriptions.id, row.id),
+					or(
+						isNull(subscriptions.currentPeriodEnd),
+						lt(subscriptions.currentPeriodEnd, now),
+					),
 				),
-			),
-		)
-		.returning({
-			id: subscriptions.id,
-			userId: subscriptions.userId,
-			plan: subscriptions.plan,
-			status: subscriptions.status,
-			credits: subscriptions.credits,
-			creditsUsed: subscriptions.creditsUsed,
-			creditsReserved: subscriptions.creditsReserved,
-			currentPeriodStart: subscriptions.currentPeriodStart,
-			currentPeriodEnd: subscriptions.currentPeriodEnd,
-			cancelledAt: subscriptions.cancelledAt,
-		});
-
-	if (updated) {
-		const targetUserId = row.userId ?? updated.userId;
-		if (targetUserId) {
-			const { creditLedgerEntries } = await import("@/db/schema");
-			await db.insert(creditLedgerEntries).values({
-				id: crypto.randomUUID(),
-				userId: targetUserId,
-				operationId: null,
-				amount: PLAN_CREDITS.free,
-				entryType: "grant",
-				sourceCategory: "system_grant",
-				pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
-				metadata: {
-					reason: `free_rollover:${period.start.toISOString()}`,
-				},
+			)
+			.returning({
+				id: subscriptions.id,
+				userId: subscriptions.userId,
+				plan: subscriptions.plan,
+				status: subscriptions.status,
+				credits: subscriptions.credits,
+				creditsUsed: subscriptions.creditsUsed,
+				creditsReserved: subscriptions.creditsReserved,
+				currentPeriodStart: subscriptions.currentPeriodStart,
+				currentPeriodEnd: subscriptions.currentPeriodEnd,
+				cancelledAt: subscriptions.cancelledAt,
 			});
+
+		if (updated) {
+			const targetUserId = row.userId ?? updated.userId;
+			if (targetUserId) {
+				const { creditLedgerEntries } = await import("@/db/schema");
+				await tx.insert(creditLedgerEntries).values({
+					id: crypto.randomUUID(),
+					userId: targetUserId,
+					operationId: null,
+					amount: PLAN_CREDITS.free,
+					entryType: "grant",
+					sourceCategory: "system_grant",
+					pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
+					metadata: {
+						reason: `free_rollover:${period.start.toISOString()}`,
+					},
+				});
+			}
+			return updated;
 		}
-		return updated;
-	}
-	return row;
+		return row;
+	});
 }
 
 export async function getCreditBalance(userId: string): Promise<CreditBalance> {
