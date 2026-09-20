@@ -6,6 +6,14 @@ const migrationPath = new URL(
 	"../../../drizzle/0016_lame_squirrel_girl.sql",
 	import.meta.url,
 );
+const followUpMigrationPath = new URL(
+	"../../../drizzle/0017_credit_operation_quarantine_fix.sql",
+	import.meta.url,
+);
+const journalPath = new URL(
+	"../../../drizzle/meta/_journal.json",
+	import.meta.url,
+);
 
 describe("adaptive credit database contracts", () => {
 	it("pins every mutating subscription lookup to the operation subscription", async () => {
@@ -39,6 +47,19 @@ describe("adaptive credit database contracts", () => {
 		expect(migration).toContain("\"reconciliation\" ? 'status'");
 	});
 
+	it("keeps the deployed migration correction predicate safe in a follow-up migration", async () => {
+		const migration = await readFile(followUpMigrationPath, "utf8");
+		const journal = await readFile(journalPath, "utf8");
+
+		expect(migration).toContain('operation."subscription_id" IS NULL');
+		expect(migration).toContain(
+			"operation.\"state\" IN ('reserved', 'running', 'settling')",
+		);
+		expect(migration).toContain('operation."reserved_credits" > 0');
+		expect(migration).toContain("NOT EXISTS");
+		expect(journal).toContain('"tag": "0017_credit_operation_quarantine_fix"');
+	});
+
 	it("models nullable origins and terminal reconciliation outcomes", async () => {
 		const source = await readFile(servicePath, "utf8");
 		expect(source).toContain("subscriptionId: string | null");
@@ -47,5 +68,7 @@ describe("adaptive credit database contracts", () => {
 		expect(source).toContain("if (existing) return operationResult(existing);");
 		expect(source).toContain("export async function quarantineCreditOperation");
 		expect(source).toContain('state: "quarantined"');
+		expect(source).toContain("class CreditSubscriptionOriginError");
+		expect(source).toContain("instanceof CreditSubscriptionOriginError");
 	});
 });

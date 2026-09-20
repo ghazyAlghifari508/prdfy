@@ -88,6 +88,8 @@ export const creditLedgerMetadataSchema = z
 				message: "Credit ledger metadata contains unsafe content",
 			}),
 		measuredUnits: z.number().finite().nonnegative(),
+		reconciliationCode: z.string().max(256),
+		accounting: z.literal("manual_correction_required"),
 	})
 	.partial()
 	.strict();

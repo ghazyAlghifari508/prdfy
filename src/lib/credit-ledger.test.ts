@@ -183,6 +183,19 @@ describe("credit ledger persistence contracts", () => {
 		).toThrow();
 	});
 
+	it("accepts manual correction metadata emitted by reconciliation", () => {
+		expect(
+			parseCreditLedgerMetadata({
+				reason: "historical active reservation quarantined",
+				reconciliationCode: "historical_active_reservation_quarantined",
+				accounting: "manual_correction_required",
+			}),
+		).toMatchObject({
+			reconciliationCode: "historical_active_reservation_quarantined",
+			accounting: "manual_correction_required",
+		});
+	});
+
 	it("rejects invalid measured units and unsafe metadata content", () => {
 		expect(() =>
 			parseCreditLedgerMetadata({ measuredUnits: Number.POSITIVE_INFINITY }),

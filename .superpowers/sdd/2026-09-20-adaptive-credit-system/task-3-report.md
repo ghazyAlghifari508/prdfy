@@ -110,3 +110,25 @@ Migration `0016` does not infer a historical subscription from `user_id`, timest
 - `git diff --check` passed.
 - Full typecheck remains blocked by the pre-existing unrelated `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.` No new Task 3 type error remains after the quarantine insert correction.
 - Live PostgreSQL migration, transaction, and concurrency execution remains unavailable because no configured database test environment exists; this is not represented as passing coverage.
+
+## Latest Review Fixes
+
+### Fixes
+
+- Added follow-up migration `0017_credit_operation_quarantine_fix.sql` instead of rewriting deployed migration `0016`; correction rows now require a null subscription origin, an active reservation state, positive reserved credits, and no existing matching correction.
+- Registered the follow-up migration in `drizzle/meta/_journal.json`.
+- Replaced reconciliation's exact error-message comparison with the typed `CreditSubscriptionOriginError` boundary, covering unresolved, missing, ownership-mismatch, and invalid-period subscription origins while leaving unrelated failures retryable in `settling`.
+- Extended runtime ledger metadata validation to accept the `reconciliationCode` and `accounting: "manual_correction_required"` fields already emitted by SQL and database quarantine paths.
+- Added contract and runtime regressions for the follow-up migration, journal entry, typed classification boundary, and correction metadata.
+
+### Verification
+
+- TDD RED: focused regression run failed on the missing follow-up migration, missing typed classification, and rejected correction metadata.
+- Focused GREEN: `pnpm exec vitest run src/lib/services/credit-service.test.ts src/lib/services/credit-service.contract.test.ts src/lib/credit-ledger.test.ts src/lib/adaptive-credit.test.ts` passed: `4 files, 41 tests`.
+- Changed-file Biome passed for the five changed TypeScript files.
+- `pnpm exec drizzle-kit check` passed with `Everything's fine`.
+- `pnpm exec drizzle-kit generate` reported `No schema changes, nothing to migrate`; the data-correction follow-up migration and journal entry were inspected directly.
+- `pnpm build` passed for client and SSR bundles; existing externalization and large-chunk warnings remain informational.
+- `git diff --check` passed.
+- Full typecheck remains blocked by the pre-existing unrelated `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.`
+- No live PostgreSQL migration, transaction, or concurrency execution was claimed because no configured database test environment exists.

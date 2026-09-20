@@ -98,6 +98,22 @@ export interface CreditOperationResult {
 	finalCharge: number | null;
 }
 
+export type CreditSubscriptionOriginErrorCode =
+	| "unresolved"
+	| "missing"
+	| "ownership_mismatch"
+	| "invalid_period";
+
+export class CreditSubscriptionOriginError extends Error {
+	readonly code: CreditSubscriptionOriginErrorCode;
+
+	constructor(code: CreditSubscriptionOriginErrorCode) {
+		super(`Credit operation subscription origin is ${code}`);
+		this.name = "CreditSubscriptionOriginError";
+		this.code = code;
+	}
+}
+
 function now(): Date {
 	return new Date();
 }
@@ -128,13 +144,12 @@ function requireSubscription(
 	const subscription = [...store.subscriptions.values()].find(
 		(row) => row.userId === userId,
 	);
-	if (!subscription)
-		throw new Error("Active subscription is required for credit operation");
+	if (!subscription) throw new CreditSubscriptionOriginError("missing");
 	if (
 		subscription.currentPeriodEnd &&
 		subscription.currentPeriodEnd.getTime() < Date.now()
 	) {
-		throw new Error("Subscription period is expired");
+		throw new CreditSubscriptionOriginError("invalid_period");
 	}
 	return subscription;
 }
@@ -179,8 +194,7 @@ function isPermanentlyUnresolvableSubscription(
 }
 
 function requireBoundSubscriptionId(subscriptionId: string | null): string {
-	if (!subscriptionId)
-		throw new Error("Credit operation subscription origin is unresolved");
+	if (!subscriptionId) throw new CreditSubscriptionOriginError("unresolved");
 	return subscriptionId;
 }
 
@@ -333,7 +347,7 @@ export function createCreditService(store: CreditServiceStore) {
 				(subscription.currentPeriodEnd &&
 					subscription.currentPeriodEnd.getTime() < Date.now())
 			) {
-				throw new Error("Active subscription is required for credit operation");
+				throw new CreditSubscriptionOriginError("missing");
 			}
 			const release = operation.reservedCredits - input.finalCharge;
 			subscription.creditsReserved -= operation.reservedCredits;
@@ -389,7 +403,7 @@ export function createCreditService(store: CreditServiceStore) {
 				(subscription.currentPeriodEnd &&
 					subscription.currentPeriodEnd.getTime() < Date.now())
 			) {
-				throw new Error("Active subscription is required for credit operation");
+				throw new CreditSubscriptionOriginError("missing");
 			}
 			const released = operation.reservedCredits;
 			subscription.creditsReserved -= released;
@@ -475,7 +489,7 @@ export function createCreditService(store: CreditServiceStore) {
 				(subscription.currentPeriodEnd &&
 					subscription.currentPeriodEnd.getTime() < Date.now())
 			) {
-				throw new Error("Active subscription is required for credit operation");
+				throw new CreditSubscriptionOriginError("missing");
 			}
 			subscription.creditsUsed -= operation.finalCharge;
 			appendLedger(store, {
@@ -602,8 +616,7 @@ export async function reserveCreditOperation(
 			)
 			.orderBy(desc(schema.subscriptions.createdAt))
 			.limit(1);
-		if (!subscription)
-			throw new Error("Active subscription is required for credit operation");
+		if (!subscription) throw new CreditSubscriptionOriginError("missing");
 		const [operation] = await tx
 			.insert(schema.creditOperations)
 			.values({
@@ -868,8 +881,7 @@ export async function settleCreditOperation(input: {
 			.orderBy(desc(schema.subscriptions.createdAt))
 			.limit(1)
 			.for("update");
-		if (!subscription)
-			throw new Error("Active subscription is required for credit operation");
+		if (!subscription) throw new CreditSubscriptionOriginError("missing");
 		const release = operation.reservedCredits - input.finalCharge;
 		if (release < 0)
 			throw new Error("Final credit charge exceeds reserved credit");
@@ -976,8 +988,7 @@ export async function releaseCreditOperation(input: {
 			.orderBy(desc(schema.subscriptions.createdAt))
 			.limit(1)
 			.for("update");
-		if (!subscription)
-			throw new Error("Active subscription is required for credit operation");
+		if (!subscription) throw new CreditSubscriptionOriginError("missing");
 		const subscriptionUpdates = await tx
 			.update(schema.subscriptions)
 			.set({
@@ -1063,8 +1074,7 @@ export async function refundCreditOperation(input: {
 			.orderBy(desc(schema.subscriptions.createdAt))
 			.limit(1)
 			.for("update");
-		if (!subscription)
-			throw new Error("Active subscription is required for credit operation");
+		if (!subscription) throw new CreditSubscriptionOriginError("missing");
 		const subscriptionUpdates = await tx
 			.update(schema.subscriptions)
 			.set({
@@ -1169,10 +1179,7 @@ export async function reconcileExpiredCreditOperations(input: {
 			});
 			if (result.state === "released") releasedOperationIds.push(operation.id);
 		} catch (error) {
-			if (
-				error instanceof Error &&
-				error.message === "Active subscription is required for credit operation"
-			) {
+			if (error instanceof CreditSubscriptionOriginError) {
 				await quarantineCreditOperation({
 					userId: input.userId,
 					operationId: operation.id,
