@@ -1,14 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, ne } from "drizzle-orm";
-import { db } from "@/db";
-import { projects, subscriptions } from "@/db/schema";
+import {
+	buildAcMetrics,
+	formatInsufficientCreditsError,
+	formatSubscriptionPausedError,
+} from "@/lib/adaptive-credit";
 import {
 	buildCodebasePromptBlock,
 	getProjectGenerationContext,
 	linkGenerationContext,
 } from "@/lib/codebase-generation-context";
 import { CLAIM_POLL_MS, CLAIM_RETRY_MS } from "@/lib/constants";
-import { checkCredits, consumeCredit, hasFullWorkflow } from "@/lib/credits";
+import { hasFullWorkflow } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
@@ -29,9 +32,30 @@ export const Route = createFileRoute("/api/ac/generate")({
 			POST: async ({ request }: { request: Request }) => {
 				const user = await requireUser(request.headers);
 
-				const { projectId } = await request
+				const { db } = await import("@/db");
+				const { codebaseSnapshots, projects, subscriptions } = await import(
+					"@/db/schema"
+				);
+				const {
+					createCreditQuote,
+					reserveCreditOperation,
+					markCreditOperationRunning,
+					settleCreditOperation,
+					releaseCreditOperation,
+				} = await import("@/lib/services/credit-service");
+
+				const body = await request
 					.json()
 					.catch(() => ({ projectId: undefined }));
+				const {
+					projectId,
+					idempotencyKey: callerIdempotencyKey,
+					attempt: callerAttempt,
+				} = body as {
+					projectId?: string;
+					idempotencyKey?: string;
+					attempt?: number;
+				};
 				if (!projectId)
 					return Response.json(
 						{ error: "Project ID required" },
@@ -45,6 +69,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 						status: subscriptions.status,
 						credits: subscriptions.credits,
 						creditsUsed: subscriptions.creditsUsed,
+						creditsReserved: subscriptions.creditsReserved,
 						currentPeriodStart: subscriptions.currentPeriodStart,
 						currentPeriodEnd: subscriptions.currentPeriodEnd,
 						cancelledAt: subscriptions.cancelledAt,
@@ -55,36 +80,12 @@ export const Route = createFileRoute("/api/ac/generate")({
 					.limit(1);
 				const eff = resolveSubscriptionState(sub, new Date());
 
-				if (eff.state === "paused") {
-					return Response.json(
-						{
-							error:
-								"Masa aktif langgananmu sudah habis. Perpanjang di halaman Pricing untuk generate AC.",
-							code: "SUBSCRIPTION_PAUSED",
-						},
-						{ status: 403 },
-					);
-				}
-
 				if (!hasFullWorkflow(eff.effectivePlan)) {
 					return Response.json(
 						{
 							error: "Generate AC hanya tersedia di paket Pro dan Hengker.",
 							code: "UPGRADE_REQUIRED",
 							plan: eff.effectivePlan,
-						},
-						{ status: 403 },
-					);
-				}
-
-				const creditCheck = await checkCredits(user.id);
-				if (!creditCheck.allowed) {
-					return Response.json(
-						{
-							error: "Kredit kamu sudah habis. Beli kredit untuk generate AC.",
-							code: "NO_CREDITS",
-							plan: creditCheck.plan,
-							remaining: creditCheck.remaining,
 						},
 						{ status: 403 },
 					);
@@ -121,6 +122,113 @@ export const Route = createFileRoute("/api/ac/generate")({
 						{ status: 404 },
 					);
 
+				let codebaseSnapshotId: string | undefined;
+				let codebaseAnalysisId: string | undefined;
+				let codebaseSnapshotInfo:
+					| { fileCount?: number; sourceBytes?: number }
+					| undefined;
+
+				if (project.projectMode === "existing_codebase") {
+					try {
+						const generationContext =
+							await getProjectGenerationContext(projectId);
+						if (generationContext) {
+							codebaseSnapshotId = generationContext.snapshotId;
+							codebaseAnalysisId = generationContext.analysisId ?? undefined;
+							const [snapRow] = await db
+								.select({
+									fileCount: codebaseSnapshots.fileCount,
+									contentSize: codebaseSnapshots.contentSize,
+								})
+								.from(codebaseSnapshots)
+								.where(eq(codebaseSnapshots.id, generationContext.snapshotId))
+								.limit(1);
+							if (snapRow) {
+								codebaseSnapshotInfo = {
+									fileCount: snapRow.fileCount,
+									sourceBytes: snapRow.contentSize,
+								};
+							}
+						}
+					} catch (_e) {
+						/* optional context must never block generation */
+					}
+				}
+
+				const metrics = buildAcMetrics({
+					prdSource: prdContent,
+					prdSourceChars: prdContent.length,
+					hasCodebaseContext: Boolean(codebaseSnapshotId),
+					codebase: codebaseSnapshotInfo,
+				});
+
+				const quote = createCreditQuote({
+					userId: user.id,
+					projectId,
+					stage: "ac",
+					operation: "ac_generation",
+					metrics,
+				});
+
+				const availableCredits = Math.max(
+					0,
+					(sub.credits ?? 0) -
+						(sub.creditsUsed ?? 0) -
+						(sub.creditsReserved ?? 0),
+				);
+
+				if (eff.state === "paused") {
+					return Response.json(
+						formatSubscriptionPausedError({
+							quote,
+							availableCredits,
+							stageLabel: "generate AC",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				if (availableCredits < quote.maximumCredits) {
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "generate AC",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				const idempotencyKey =
+					callerIdempotencyKey || `${projectId}:ac:${callerAttempt ?? 1}`;
+
+				let reservation: {
+					id: string;
+					state: string;
+					finalCharge: number | null;
+				};
+				try {
+					reservation = await reserveCreditOperation({
+						userId: user.id,
+						projectId,
+						stage: "ac",
+						operation: "ac_generation",
+						metrics,
+						idempotencyKey,
+						quote,
+					});
+				} catch (err) {
+					console.error("[ac/generate] reserveCreditOperation failed:", err);
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "generate AC",
+						}),
+						{ status: 403 },
+					);
+				}
+
 				const claimAc = () =>
 					db
 						.update(projects)
@@ -135,10 +243,6 @@ export const Route = createFileRoute("/api/ac/generate")({
 
 				let claimed = await claimAc();
 				if (!claimed.length) {
-					// Abort unwind is instant and safeError awaits the claim
-					// release, so this window rarely matters — kept bounded as a
-					// safety net for StrictMode double-mount retries racing the
-					// teardown of a dead generation.
 					for (
 						let waited = 0;
 						waited < CLAIM_RETRY_MS;
@@ -149,6 +253,11 @@ export const Route = createFileRoute("/api/ac/generate")({
 						if (claimed.length) break;
 					}
 					if (!claimed.length) {
+						await releaseCreditOperation({
+							userId: user.id,
+							operationId: reservation.id,
+							reason: "AC generation conflict",
+						}).catch(() => {});
 						return Response.json(
 							{ error: "AC sedang digenerate. Tunggu hingga selesai." },
 							{ status: 409 },
@@ -163,11 +272,23 @@ export const Route = createFileRoute("/api/ac/generate")({
 						const encoder = new TextEncoder();
 						let eventDone = false;
 						let eventErrored = false;
+						let isSettled = false;
+						let isReleased = false;
 						let fullResponse = "";
-						// Task 8 snapshot identity, filled when the system
-						// prompt is built and read back in safeDone.
-						let codebaseSnapshotId: string | undefined;
-						let codebaseAnalysisId: string | undefined;
+
+						const safeRelease = async (reason: string) => {
+							if (isSettled || isReleased || !reservation) return;
+							isReleased = true;
+							try {
+								await releaseCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to release AC credit reservation:", e);
+							}
+						};
 
 						const emit = (payload: Record<string, unknown>) => {
 							try {
@@ -180,6 +301,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 						const safeDone = async (finishReason: string | undefined) => {
 							if (eventDone || eventErrored) return;
 							if (isTruncatedGeneration(fullResponse, finishReason)) {
+								await safeRelease("generation truncated");
 								await safeError(
 									"Generasi AC terputus di tengah jalan dan tidak disimpan. Coba generate ulang.",
 								);
@@ -188,16 +310,12 @@ export const Route = createFileRoute("/api/ac/generate")({
 							eventDone = true;
 							let saved = false;
 							try {
-								// saveAcVersion also flips acStatus → "completed" + advances step
-								// (overwrite-v1 semantics preserved — no version change).
-								await saveAcVersion(
+								const savedResult = await saveAcVersion(
 									projectId,
 									fullResponse,
 									"Initial AC generation",
 								);
 								saved = true;
-								// Task 8: link snapshot identity (non-fatal, no
-								// credit change — AC generate still burns 1).
 								if (codebaseSnapshotId) {
 									await linkGenerationContext(
 										projectId,
@@ -205,14 +323,24 @@ export const Route = createFileRoute("/api/ac/generate")({
 										codebaseAnalysisId,
 									);
 								}
-								await consumeCredit(user.id);
+								const actualMetrics = buildAcMetrics({
+									prdSource: prdContent,
+									prdSourceChars: prdContent.length,
+									hasCodebaseContext: Boolean(codebaseSnapshotId),
+									codebase: codebaseSnapshotInfo,
+								});
+								await settleCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									artifactId: savedResult.acVersionId,
+									actualMetrics,
+								});
+								isSettled = true;
 								emit({ type: "done" });
 							} catch (e) {
 								if (!saved) {
-									// Save failed: release the claim BEFORE the terminal
-									// event, mirroring task/generate.ts — otherwise acStatus
-									// stays 'generating' and every retry answers 409 forever.
 									console.error("saveAcVersion failed:", e);
+									await safeRelease("saveAcVersion failed");
 									await db
 										.update(projects)
 										.set({ acStatus: "pending" })
@@ -225,13 +353,12 @@ export const Route = createFileRoute("/api/ac/generate")({
 										error: "Gagal menyimpan AC. Coba generate ulang.",
 									});
 								} else {
-									// Save succeeded (acStatus is 'completed') — do NOT reset
-									// it here, only report the credit burn failure.
-									console.error("AC credit burn failed:", e);
+									console.error("AC credit settlement failed:", e);
+									await safeRelease("settlement error");
 									emit({
 										type: "error",
 										error:
-											"AC tersimpan, namun terjadi kesalahan saat memotong kredit.",
+											"AC tersimpan, namun settlement kredit gagal. Hubungi dukungan.",
 									});
 								}
 							}
@@ -243,9 +370,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 						const safeError = async (msg: string) => {
 							if (eventDone || eventErrored) return;
 							eventErrored = true;
-							// ponytail: release the claim BEFORE the terminal event reaches
-							// the client — an immediate StrictMode remount retry must see
-							// acStatus='pending', never inherit this dead generation's lock.
+							await safeRelease(msg);
 							try {
 								await db
 									.update(projects)
@@ -271,26 +396,28 @@ export const Route = createFileRoute("/api/ac/generate")({
 						};
 
 						try {
-							emit({ type: "started", model: modelsToTry[0] });
+							await markCreditOperationRunning({
+								userId: user.id,
+								operationId: reservation.id,
+							}).catch((err) =>
+								console.error("markCreditOperationRunning error:", err),
+							);
+
+							emit({ type: "started", model: modelsToTry[0], quote });
+							emit({ type: "quote", quote });
 
 							let grounded = "";
 							try {
 								const { groundStack } = await import("@/lib/grounding");
 								const { raceWithAbort } = await import("@/lib/abort-utils");
-								// Grounding is signal-deaf for up to its own 6s budget; racing
-								// it against the abort signal lets a disconnected client free
-								// the claim instantly instead of after the budget expires.
 								grounded = await raceWithAbort(
 									groundStack(prdContent),
 									request.signal,
 								);
 							} catch (e) {
 								if (e instanceof Error && e.name === "AbortError") throw e;
-								/* ponytail: optional grounding must never block generation */
 							}
-							// Task 8: bounded snapshot-bound context via the shared
-							// builder. "" for greenfield/not-ready (no-op).
-							// Consumes no credits.
+
 							let codebaseBlock = "";
 							if (project.projectMode === "existing_codebase") {
 								try {
@@ -298,13 +425,9 @@ export const Route = createFileRoute("/api/ac/generate")({
 										await getProjectGenerationContext(projectId);
 									if (generationContext) {
 										codebaseBlock = buildCodebasePromptBlock(generationContext);
-										codebaseSnapshotId = generationContext.snapshotId;
-										codebaseAnalysisId =
-											generationContext.analysisId ?? undefined;
 									}
 								} catch (e) {
 									if (e instanceof Error && e.name === "AbortError") throw e;
-									/* ponytail: optional context must never block generation */
 								}
 							}
 							const projectLanguage = normalizeLanguage(project.language);
@@ -340,6 +463,7 @@ export const Route = createFileRoute("/api/ac/generate")({
 
 							await safeDone(outcome.finishReason);
 						} catch (err: unknown) {
+							await safeRelease((err as Error)?.message || "stream error");
 							const isAbort =
 								(err instanceof DOMException && err.name === "AbortError") ||
 								(err instanceof Error && err.name === "AbortError") ||

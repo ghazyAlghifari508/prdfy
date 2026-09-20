@@ -63,14 +63,20 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 export async function saveTaskTree(
 	projectId: string,
 	taskTree: TaskTree,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<
+	| { success: true; artifactId: string; taskCount: number }
+	| { success: false; error: string }
+> {
 	try {
+		const artifactId = crypto.randomUUID();
+		let totalTasks = 0;
 		await db.transaction(async (tx) => {
 			await tx.delete(tasks).where(eq(tasks.projectId, projectId));
 
 			let order = 0;
 			for (const feature of taskTree.features) {
 				for (const task of feature.tasks) {
+					totalTasks++;
 					const subtaskRows = task.subtasks.map((s) => ({
 						name: s.name,
 						description: s.description,
@@ -106,7 +112,7 @@ export async function saveTaskTree(
 				.set(updateData)
 				.where(eq(projects.id, projectId));
 		});
-		return { success: true };
+		return { success: true, artifactId, taskCount: totalTasks };
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		console.error("saveTaskTree error:", msg);

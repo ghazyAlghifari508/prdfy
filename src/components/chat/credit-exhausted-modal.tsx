@@ -18,6 +18,13 @@ interface CreditExhaustedModalProps {
 	// ponytail: plan-gate paywalls reuse this modal with a stage-specific title
 	// ("Lanjut ke AC butuh Pro") instead of the credit-depletion default.
 	title?: string;
+	requiredCredits?: number;
+	availableCredits?: number;
+	quote?: {
+		estimatedCredits?: number;
+		maximumCredits?: number;
+		pricingVersion?: string;
+	};
 }
 
 export function CreditExhaustedModal({
@@ -28,6 +35,9 @@ export function CreditExhaustedModal({
 	stage,
 	currentPlan = "free",
 	title = "Kredit Habis",
+	requiredCredits,
+	availableCredits,
+	quote,
 }: CreditExhaustedModalProps) {
 	// ponytail: shared TanStack Query hook — deduped across all components.
 	// Previously raw fetch("/api/user/plan") in useEffect.
@@ -70,17 +80,27 @@ export function CreditExhaustedModal({
 	return (
 		<div
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 animate-in fade-in duration-200 overflow-y-auto"
-			onClick={onClose}
+			role="dialog"
+			aria-modal="true"
+			onKeyDown={(e) => {
+				if (e.key === "Escape") onClose();
+			}}
 		>
-			<div
-				className="relative w-full max-w-5xl overflow-y-auto max-h-[80vh] rounded-xl bg-obsidian shadow-[var(--shadow-overlay)] animate-in zoom-in-95 duration-200 my-4"
-				onClick={(e) => e.stopPropagation()}
-			>
+			<button
+				type="button"
+				className="fixed inset-0 cursor-default bg-transparent border-none p-0 w-full h-full"
+				aria-label="Tutup modal"
+				tabIndex={-1}
+				onClick={onClose}
+			/>
+			<div className="relative z-10 w-full max-w-5xl overflow-y-auto max-h-[80vh] rounded-xl bg-obsidian shadow-[var(--shadow-overlay)] animate-in zoom-in-95 duration-200 my-4">
 				{/* Header */}
 				<div className="relative p-4 pb-0 text-center">
 					<button
+						type="button"
 						onClick={onClose}
 						className="absolute right-4 top-4 text-fog transition-colors hover:text-snow"
+						aria-label="Tutup"
 					>
 						<X size={20} />
 					</button>
@@ -89,6 +109,33 @@ export function CreditExhaustedModal({
 					</div>
 					<h3 className="font-inter text-xl font-[510] text-snow">{title}</h3>
 					<p className="mt-2 font-inter text-sm text-fog">{errorMessage}</p>
+
+					{(requiredCredits !== undefined || quote) && (
+						<div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200 text-left mx-auto max-w-md">
+							{requiredCredits !== undefined && (
+								<div className="flex justify-between items-center py-0.5">
+									<span className="text-fog">Kebutuhan Kredit:</span>
+									<span className="font-semibold text-snow font-mono">
+										{requiredCredits} kredit
+									</span>
+								</div>
+							)}
+							{availableCredits !== undefined && (
+								<div className="flex justify-between items-center py-0.5">
+									<span className="text-fog">Saldo Tersedia:</span>
+									<span className="font-semibold text-snow font-mono">
+										{availableCredits} kredit
+									</span>
+								</div>
+							)}
+							{quote && (
+								<div className="mt-1 pt-1 border-t border-amber-500/20 flex justify-between items-center text-[11px] text-fog">
+									<span>Estimasi: {quote.estimatedCredits ?? "-"} kredit</span>
+									<span>Maksimum: {quote.maximumCredits ?? "-"} kredit</span>
+								</div>
+							)}
+						</div>
+					)}
 				</div>
 
 				{/* Embedded pricing cards */}

@@ -8,6 +8,7 @@ import {
 	projects,
 	subscriptions,
 } from "@/db/schema";
+import { resolveSubscriptionState } from "@/lib/billing";
 import {
 	type AnalysisResponse,
 	analysisRequestSchema,
@@ -24,6 +25,16 @@ import {
 	isSyncCapableProject,
 } from "@/lib/codebase-sync";
 import { checkRateLimit, recordRequest } from "@/lib/rate-limit";
+import {
+	buildCodebaseMetrics,
+	createCreditQuote,
+	formatInsufficientCreditsError,
+	formatSubscriptionPausedError,
+	markCreditOperationRunning,
+	releaseCreditOperation,
+	reserveCreditOperation,
+	settleCreditOperation,
+} from "@/lib/services/credit-service";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
@@ -39,7 +50,7 @@ import type { Plan } from "@/types/database";
 // finishes; the sync credential must never leave the modal textarea, and the
 // CLI itself has no model access to run analysis. Rate limiting reuses the
 // sync `api_call` action like the neighboring /api/codebase browser routes.
-// Analysis never consumes PRD/AC/Task credits.
+// Codebase analysis uses adaptive credits (new attempts are billed; ready analysis reuse is free).
 
 type AnalysisRow = typeof codebaseAnalyses.$inferSelect;
 
@@ -299,12 +310,19 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					);
 				const sessionIds = sessions.map((session) => session.id);
 
-				let snapshot: { id: string; status: string } | null = null;
+				let snapshot: {
+					id: string;
+					status: string;
+					fileCount: number;
+					contentSize: number;
+				} | null = null;
 				if (body.data.snapshotId) {
 					const [pinned] = await db
 						.select({
 							id: codebaseSnapshots.id,
 							status: codebaseSnapshots.status,
+							fileCount: codebaseSnapshots.fileCount,
+							contentSize: codebaseSnapshots.contentSize,
 						})
 						.from(codebaseSnapshots)
 						.where(
@@ -325,6 +343,8 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						.select({
 							id: codebaseSnapshots.id,
 							status: codebaseSnapshots.status,
+							fileCount: codebaseSnapshots.fileCount,
+							contentSize: codebaseSnapshots.contentSize,
 						})
 						.from(codebaseSnapshots)
 						.where(
@@ -375,6 +395,107 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					return Response.json(response);
 				}
 
+				const [sub] = await db
+					.select({
+						plan: subscriptions.plan,
+						status: subscriptions.status,
+						credits: subscriptions.credits,
+						creditsUsed: subscriptions.creditsUsed,
+						creditsReserved: subscriptions.creditsReserved,
+						currentPeriodStart: subscriptions.currentPeriodStart,
+						currentPeriodEnd: subscriptions.currentPeriodEnd,
+						cancelledAt: subscriptions.cancelledAt,
+					})
+					.from(subscriptions)
+					.where(eq(subscriptions.userId, user.id))
+					.orderBy(desc(subscriptions.createdAt))
+					.limit(1);
+
+				const eff = resolveSubscriptionState(sub, new Date());
+				const availableCredits = Math.max(
+					0,
+					(sub?.credits ?? 0) -
+						(sub?.creditsUsed ?? 0) -
+						(sub?.creditsReserved ?? 0),
+				);
+
+				const metrics = buildCodebaseMetrics({
+					fileCount: snapshot.fileCount,
+					contentSize: snapshot.contentSize,
+				});
+
+				const quote = createCreditQuote({
+					userId: user.id,
+					projectId,
+					stage: "codebase",
+					operation: "codebase_analysis",
+					metrics,
+				});
+
+				if (eff.state === "paused") {
+					return Response.json(
+						formatSubscriptionPausedError({
+							quote,
+							availableCredits,
+							stageLabel: "analisis codebase",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				if (availableCredits < quote.maximumCredits) {
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "analisis codebase",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				const idempotencyKey = `${projectId}:codebase_analysis:${snapshot.id}:${existing.length + 1}`;
+
+				let reservation: {
+					id: string;
+					state: string;
+					finalCharge: number | null;
+				};
+				try {
+					reservation = await reserveCreditOperation({
+						userId: user.id,
+						projectId,
+						stage: "codebase",
+						operation: "codebase_analysis",
+						metrics,
+						idempotencyKey,
+						quote,
+					});
+				} catch (err) {
+					console.error(
+						"[codebase/analysis] reserveCreditOperation failed:",
+						err,
+					);
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "analisis codebase",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				await markCreditOperationRunning({
+					userId: user.id,
+					operationId: reservation.id,
+				}).catch((err) =>
+					console.error(
+						"[codebase/analysis] markCreditOperationRunning failed:",
+						err,
+					),
+				);
+
 				try {
 					const analysis = await requestCodebaseAnalysis(
 						projectId,
@@ -383,22 +504,43 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					const [row] = await db
 						.select()
 						.from(codebaseAnalyses)
-						.where(
-							and(
-								eq(codebaseAnalyses.snapshotId, snapshot.id),
-								eq(codebaseAnalyses.status, "ready"),
-							),
-						)
-						.orderBy(desc(codebaseAnalyses.createdAt))
+						.where(eq(codebaseAnalyses.id, analysis.id))
 						.limit(1);
 					const response = row ? toResponse(row) : null;
-					if (!response || !analysis)
+					if (!response || !analysis) {
+						await releaseCreditOperation({
+							userId: user.id,
+							operationId: reservation.id,
+							reason: "Hasil analisis rusak",
+						}).catch(() => {});
 						return Response.json(
 							{ error: "Hasil analisis rusak", code: "SYNC_FAILED" },
 							{ status: 500 },
 						);
+					}
+
+					await settleCreditOperation({
+						userId: user.id,
+						operationId: reservation.id,
+						artifactId: analysis.id,
+						actualMetrics: metrics,
+					});
+
 					return Response.json(response);
 				} catch (error) {
+					const failureReason =
+						error instanceof Error ? error.message : "Analisis codebase gagal";
+					await releaseCreditOperation({
+						userId: user.id,
+						operationId: reservation.id,
+						reason: failureReason,
+					}).catch((relErr) => {
+						console.error(
+							"[codebase/analysis] releaseCreditOperation failed:",
+							relErr,
+						);
+					});
+
 					if (error instanceof AnalysisServiceError) {
 						if (error.code === "SNAPSHOT_NOT_UPLOADED")
 							return Response.json(

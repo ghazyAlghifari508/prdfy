@@ -1,14 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, ne } from "drizzle-orm";
-import { db } from "@/db";
-import { projects, subscriptions } from "@/db/schema";
+import {
+	buildTaskMetrics,
+	formatInsufficientCreditsError,
+	formatSubscriptionPausedError,
+} from "@/lib/adaptive-credit";
 import {
 	buildCodebasePromptBlock,
 	getProjectGenerationContext,
 	linkGenerationContext,
 } from "@/lib/codebase-generation-context";
 import { CLAIM_POLL_MS, CLAIM_RETRY_MS } from "@/lib/constants";
-import { checkCredits, consumeCredit, hasFullWorkflow } from "@/lib/credits";
+import { hasFullWorkflow } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { TASK_GENERATION_PROMPT } from "@/lib/prompts-task";
@@ -20,7 +23,10 @@ import {
 } from "@/lib/services/ai-orchestrator";
 import { sanitizeErrorForClient } from "@/lib/services/error-sanitizer";
 import { extractJson } from "@/lib/services/json-extract";
-import { sanitizeModelOutput } from "@/lib/services/prd-service";
+import {
+	getLatestPrdContent,
+	sanitizeModelOutput,
+} from "@/lib/services/prd-service";
 import { parseTaskJson, saveTaskTree } from "@/lib/services/task-service";
 import { requireUser } from "@/lib/session";
 
@@ -29,9 +35,31 @@ export const Route = createFileRoute("/api/task/generate")({
 		handlers: {
 			POST: async ({ request }: { request: Request }) => {
 				const user = await requireUser(request.headers);
-				const { projectId } = await request
+
+				const { db } = await import("@/db");
+				const { codebaseSnapshots, projects, subscriptions } = await import(
+					"@/db/schema"
+				);
+				const {
+					createCreditQuote,
+					reserveCreditOperation,
+					markCreditOperationRunning,
+					settleCreditOperation,
+					releaseCreditOperation,
+				} = await import("@/lib/services/credit-service");
+
+				const body = await request
 					.json()
 					.catch(() => ({ projectId: undefined }));
+				const {
+					projectId,
+					idempotencyKey: callerIdempotencyKey,
+					attempt: callerAttempt,
+				} = body as {
+					projectId?: string;
+					idempotencyKey?: string;
+					attempt?: number;
+				};
 				if (!projectId)
 					return Response.json(
 						{ error: "Project ID required" },
@@ -45,6 +73,7 @@ export const Route = createFileRoute("/api/task/generate")({
 						status: subscriptions.status,
 						credits: subscriptions.credits,
 						creditsUsed: subscriptions.creditsUsed,
+						creditsReserved: subscriptions.creditsReserved,
 						currentPeriodStart: subscriptions.currentPeriodStart,
 						currentPeriodEnd: subscriptions.currentPeriodEnd,
 						cancelledAt: subscriptions.cancelledAt,
@@ -55,37 +84,12 @@ export const Route = createFileRoute("/api/task/generate")({
 					.limit(1);
 				const eff = resolveSubscriptionState(sub, new Date());
 
-				if (eff.state === "paused") {
-					return Response.json(
-						{
-							error:
-								"Masa aktif langgananmu sudah habis. Perpanjang di halaman Pricing untuk generate Task.",
-							code: "SUBSCRIPTION_PAUSED",
-						},
-						{ status: 403 },
-					);
-				}
-
 				if (!hasFullWorkflow(eff.effectivePlan)) {
 					return Response.json(
 						{
 							error: "Generate Task hanya tersedia di paket Pro dan Hengker.",
 							code: "UPGRADE_REQUIRED",
 							plan: eff.effectivePlan,
-						},
-						{ status: 403 },
-					);
-				}
-
-				const creditCheck = await checkCredits(user.id);
-				if (!creditCheck.allowed) {
-					return Response.json(
-						{
-							error:
-								"Kredit kamu sudah habis. Beli kredit untuk generate Task.",
-							code: "NO_CREDITS",
-							plan: creditCheck.plan,
-							remaining: creditCheck.remaining,
 						},
 						{ status: 403 },
 					);
@@ -122,6 +126,116 @@ export const Route = createFileRoute("/api/task/generate")({
 						{ status: 404 },
 					);
 
+				const prdContent = (await getLatestPrdContent(projectId)) ?? acMarkdown;
+
+				let codebaseSnapshotId: string | undefined;
+				let codebaseAnalysisId: string | undefined;
+				let codebaseSnapshotInfo:
+					| { fileCount?: number; sourceBytes?: number }
+					| undefined;
+
+				if (project.projectMode === "existing_codebase") {
+					try {
+						const generationContext =
+							await getProjectGenerationContext(projectId);
+						if (generationContext) {
+							codebaseSnapshotId = generationContext.snapshotId;
+							codebaseAnalysisId = generationContext.analysisId ?? undefined;
+							const [snapRow] = await db
+								.select({
+									fileCount: codebaseSnapshots.fileCount,
+									contentSize: codebaseSnapshots.contentSize,
+								})
+								.from(codebaseSnapshots)
+								.where(eq(codebaseSnapshots.id, generationContext.snapshotId))
+								.limit(1);
+							if (snapRow) {
+								codebaseSnapshotInfo = {
+									fileCount: snapRow.fileCount,
+									sourceBytes: snapRow.contentSize,
+								};
+							}
+						}
+					} catch (_e) {
+						/* optional context must never block generation */
+					}
+				}
+
+				const metrics = buildTaskMetrics({
+					prdSource: prdContent,
+					prdSourceChars: prdContent.length,
+					taskCount: 0,
+					hasCodebaseContext: Boolean(codebaseSnapshotId),
+					codebase: codebaseSnapshotInfo,
+				});
+
+				const quote = createCreditQuote({
+					userId: user.id,
+					projectId,
+					stage: "task",
+					operation: "task_generation",
+					metrics,
+				});
+
+				const availableCredits = Math.max(
+					0,
+					(sub.credits ?? 0) -
+						(sub.creditsUsed ?? 0) -
+						(sub.creditsReserved ?? 0),
+				);
+
+				if (eff.state === "paused") {
+					return Response.json(
+						formatSubscriptionPausedError({
+							quote,
+							availableCredits,
+							stageLabel: "generate Task",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				if (availableCredits < quote.maximumCredits) {
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "generate Task",
+						}),
+						{ status: 403 },
+					);
+				}
+
+				const idempotencyKey =
+					callerIdempotencyKey || `${projectId}:task:${callerAttempt ?? 1}`;
+
+				let reservation: {
+					id: string;
+					state: string;
+					finalCharge: number | null;
+				};
+				try {
+					reservation = await reserveCreditOperation({
+						userId: user.id,
+						projectId,
+						stage: "task",
+						operation: "task_generation",
+						metrics,
+						idempotencyKey,
+						quote,
+					});
+				} catch (err) {
+					console.error("[task/generate] reserveCreditOperation failed:", err);
+					return Response.json(
+						formatInsufficientCreditsError({
+							quote,
+							availableCredits,
+							stageLabel: "generate Task",
+						}),
+						{ status: 403 },
+					);
+				}
+
 				const claimTask = () =>
 					db
 						.update(projects)
@@ -136,10 +250,6 @@ export const Route = createFileRoute("/api/task/generate")({
 
 				let claimed = await claimTask();
 				if (!claimed.length) {
-					// ponytail: mirrors ac/generate.ts — abort unwind is instant and
-					// safeError awaits the claim release, so this window rarely
-					// matters; kept bounded as a safety net for StrictMode
-					// double-mount retries racing the teardown of a dead generation.
 					for (
 						let waited = 0;
 						waited < CLAIM_RETRY_MS;
@@ -150,6 +260,11 @@ export const Route = createFileRoute("/api/task/generate")({
 						if (claimed.length) break;
 					}
 					if (!claimed.length) {
+						await releaseCreditOperation({
+							userId: user.id,
+							operationId: reservation.id,
+							reason: "Task generation conflict",
+						}).catch(() => {});
 						return Response.json(
 							{ error: "Task sedang digenerate. Tunggu hingga selesai." },
 							{ status: 409 },
@@ -164,11 +279,23 @@ export const Route = createFileRoute("/api/task/generate")({
 						const encoder = new TextEncoder();
 						let eventDone = false;
 						let eventErrored = false;
+						let isSettled = false;
+						let isReleased = false;
 						let fullResponse = "";
-						// Task 8 snapshot identity, filled when the system
-						// prompt is built and read back in safeDone.
-						let codebaseSnapshotId: string | undefined;
-						let codebaseAnalysisId: string | undefined;
+
+						const safeRelease = async (reason: string) => {
+							if (isSettled || isReleased || !reservation) return;
+							isReleased = true;
+							try {
+								await releaseCreditOperation({
+									userId: user.id,
+									operationId: reservation.id,
+									reason,
+								});
+							} catch (e) {
+								console.error("Failed to release Task credit reservation:", e);
+							}
+						};
 
 						const emit = (payload: Record<string, unknown>) => {
 							try {
@@ -181,6 +308,7 @@ export const Route = createFileRoute("/api/task/generate")({
 						const safeDone = async (finishReason: string | undefined) => {
 							if (eventDone || eventErrored) return;
 							if (isTruncatedGeneration(fullResponse, finishReason)) {
+								await safeRelease("generation truncated");
 								await safeError(
 									"Generasi Task terputus di tengah jalan dan tidak disimpan. Coba generate ulang.",
 								);
@@ -192,28 +320,14 @@ export const Route = createFileRoute("/api/task/generate")({
 									extractJson(sanitizeModelOutput(fullResponse)),
 								);
 								if (!taskTree) {
-									await db
-										.update(projects)
-										.set({ taskStatus: "pending" })
-										.where(eq(projects.id, projectId))
-										.catch((e) =>
-											console.error("task_status reset failed:", e),
-										);
-									emit({
-										type: "error",
-										error: "AI menghasilkan JSON tidak valid. Coba lagi.",
-									});
-									try {
-										controller.close();
-									} catch {}
+									await safeRelease("invalid task json");
+									await safeError(
+										"AI menghasilkan JSON tidak valid. Coba lagi.",
+									);
 									return;
 								}
-								// Full-replace semantics preserved: saveTaskTree
-								// deletes + reinserts (no version change).
 								const saveResult = await saveTaskTree(projectId, taskTree);
 								if (codebaseSnapshotId && saveResult.success) {
-									// Task 8: link snapshot identity (non-fatal,
-									// no credit change — Task generate still burns 1).
 									await linkGenerationContext(
 										projectId,
 										codebaseSnapshotId,
@@ -221,46 +335,41 @@ export const Route = createFileRoute("/api/task/generate")({
 									);
 								}
 								if (!saveResult.success) {
-									// Release the claim before the terminal event — same as the
-									// invalid-JSON branch above — or the project stays
-									// 'generating' and every retry answers 409 forever.
-									await db
-										.update(projects)
-										.set({ taskStatus: "pending" })
-										.where(eq(projects.id, projectId))
-										.catch((e) =>
-											console.error("task_status reset failed:", e),
-										);
-									emit({
-										type: "error",
-										error: saveResult.error || "Gagal menyimpan task tree",
-									});
-									try {
-										controller.close();
-									} catch {}
+									await safeRelease("saveTaskTree failed");
+									await safeError(
+										saveResult.error || "Gagal menyimpan task tree",
+									);
 									return;
 								}
-								emit({ type: "done", taskTree });
+
+								const actualMetrics = buildTaskMetrics({
+									prdSource: prdContent,
+									prdSourceChars: prdContent.length,
+									taskCount: saveResult.taskCount,
+									hasCodebaseContext: Boolean(codebaseSnapshotId),
+									codebase: codebaseSnapshotInfo,
+								});
 								try {
-									await consumeCredit(user.id);
-								} catch (e) {
-									console.error("Task credit burn failed:", e);
-									emit({
-										type: "error",
-										error:
-											"Task tersimpan, namun terjadi kesalahan saat memotong kredit.",
+									await settleCreditOperation({
+										userId: user.id,
+										operationId: reservation.id,
+										artifactId: saveResult.artifactId,
+										actualMetrics,
 									});
+									isSettled = true;
+									emit({ type: "done", taskTree });
+								} catch (settleErr) {
+									console.error("Task credit settlement failed:", settleErr);
+									await safeRelease("settlement error");
+									await safeError(
+										"Task tersimpan, namun settlement kredit gagal. Hubungi dukungan.",
+									);
+									return;
 								}
 							} catch (err) {
 								console.error("saveTaskTree failed:", err);
-								// Nothing was saved — leaving taskStatus='generating' would
-								// 409-lock every retry forever. Release the claim.
-								await db
-									.update(projects)
-									.set({ taskStatus: "pending" })
-									.where(eq(projects.id, projectId))
-									.catch((e) => console.error("task_status reset failed:", e));
-								emit({ type: "error", error: "Failed to save task tree" });
+								await safeRelease("saveTaskTree error");
+								await safeError("Failed to save task tree");
 							}
 							try {
 								controller.close();
@@ -270,9 +379,7 @@ export const Route = createFileRoute("/api/task/generate")({
 						const safeError = async (msg: string) => {
 							if (eventDone || eventErrored) return;
 							eventErrored = true;
-							// ponytail: release the claim BEFORE the terminal event reaches
-							// the client — an immediate StrictMode remount retry must see
-							// taskStatus='pending', never inherit this dead generation's lock.
+							await safeRelease(msg);
 							try {
 								await db
 									.update(projects)
@@ -298,26 +405,28 @@ export const Route = createFileRoute("/api/task/generate")({
 						};
 
 						try {
-							emit({ type: "started", model: modelsToTry[0] });
+							await markCreditOperationRunning({
+								userId: user.id,
+								operationId: reservation.id,
+							}).catch((err) =>
+								console.error("markCreditOperationRunning error:", err),
+							);
+
+							emit({ type: "started", model: modelsToTry[0], quote });
+							emit({ type: "quote", quote });
 
 							let grounded = "";
 							try {
 								const { groundStack } = await import("@/lib/grounding");
 								const { raceWithAbort } = await import("@/lib/abort-utils");
-								// Grounding is signal-deaf for up to its own 6s budget; racing
-								// it against the abort signal lets a disconnected client free
-								// the claim instantly instead of after the budget expires.
 								grounded = await raceWithAbort(
 									groundStack(acMarkdown),
 									request.signal,
 								);
 							} catch (e) {
 								if (e instanceof Error && e.name === "AbortError") throw e;
-								/* ponytail: optional grounding must never block generation */
 							}
-							// Task 8: bounded snapshot-bound context via the shared
-							// builder. "" for greenfield/not-ready (no-op).
-							// Consumes no credits.
+
 							let codebaseBlock = "";
 							if (project.projectMode === "existing_codebase") {
 								try {
@@ -325,13 +434,9 @@ export const Route = createFileRoute("/api/task/generate")({
 										await getProjectGenerationContext(projectId);
 									if (generationContext) {
 										codebaseBlock = buildCodebasePromptBlock(generationContext);
-										codebaseSnapshotId = generationContext.snapshotId;
-										codebaseAnalysisId =
-											generationContext.analysisId ?? undefined;
 									}
 								} catch (e) {
 									if (e instanceof Error && e.name === "AbortError") throw e;
-									/* ponytail: optional context must never block generation */
 								}
 							}
 							const projectLanguage = normalizeLanguage(project.language);
@@ -366,6 +471,7 @@ export const Route = createFileRoute("/api/task/generate")({
 
 							await safeDone(outcome.finishReason);
 						} catch (err: unknown) {
+							await safeRelease((err as Error)?.message || "stream error");
 							console.error("Task generate stream error:", err);
 							await safeError(sanitizeErrorForClient(err));
 						}

@@ -27,18 +27,35 @@ export const auth = betterAuth({
 			create: {
 				after: async (user) => {
 					const { addDays } = await import("@/lib/billing");
-					const { BILLING_PERIOD_DAYS } = await import("@/lib/constants");
+					const { ADAPTIVE_CREDIT_PRICING, BILLING_PERIOD_DAYS } = await import(
+						"@/lib/constants"
+					);
+					const { creditLedgerEntries } = await import("@/db/schema");
 					const now = new Date();
+					const subId = crypto.randomUUID();
 					await db.insert(subscriptions).values({
-						id: crypto.randomUUID(),
+						id: subId,
 						userId: user.id,
 						plan: "free",
 						status: "active",
 						credits: PLAN_CREDITS.free,
 						creditsUsed: 0,
+						creditsReserved: 0,
 						currentPeriodStart: now,
 						currentPeriodEnd: addDays(now, BILLING_PERIOD_DAYS),
 						reminderCount: 0,
+					});
+					await db.insert(creditLedgerEntries).values({
+						id: crypto.randomUUID(),
+						userId: user.id,
+						operationId: null,
+						amount: PLAN_CREDITS.free,
+						entryType: "grant",
+						sourceCategory: "system_grant",
+						pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
+						metadata: {
+							reason: "initial_signup_grant",
+						},
 					});
 				},
 			},

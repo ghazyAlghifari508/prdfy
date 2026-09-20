@@ -22,7 +22,6 @@
 //    consumed either way.
 
 import { and, asc, eq } from "drizzle-orm";
-import { db } from "@/db";
 import {
 	codebaseAnalyses,
 	codebaseSnapshotFiles,
@@ -99,8 +98,9 @@ export async function requestCodebaseAnalysis(
 	projectId: string,
 	snapshotId: string,
 	deps: RequestAnalysisDeps = {},
-): Promise<CodebaseAnalysis> {
+): Promise<CodebaseAnalysis & { id: string }> {
 	const generate = deps.generate ?? defaultGenerate;
+	const { db } = await import("@/db");
 
 	const [snapshot] = await db
 		.select()
@@ -234,7 +234,7 @@ export async function requestCodebaseAnalysis(
 				.set({ status: "ready", updatedAt: new Date() })
 				.where(eq(codebaseSyncSessions.id, session.id));
 		});
-		return analysis;
+		return { ...analysis, id: analysisId };
 	} catch (error) {
 		// Defense-in-depth: writers store only the fixed safe string; the
 		// sanitizer additionally guarantees no token/source content passes.

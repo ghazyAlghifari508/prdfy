@@ -11,15 +11,17 @@
  * grandfathering (one-time purchase, credits never expire). A NULL period on
  * a free row is rolled forward lazily by getCreditBalance.
  */
-import { BILLING_PERIOD_DAYS } from "@/lib/constants";
+import { ADAPTIVE_CREDIT_PRICING, BILLING_PERIOD_DAYS } from "@/lib/constants";
 import { PLAN_CREDITS, type Plan } from "@/types/database";
 
 /** Minimal shape any caller's Drizzle select must provide. */
 export interface SubscriptionRowLike {
+	userId?: string | null;
 	plan: string | null;
 	status: string | null;
 	credits: number | null;
 	creditsUsed: number | null;
+	creditsReserved?: number | null;
 	currentPeriodStart: Date | null;
 	currentPeriodEnd: Date | null;
 	cancelledAt?: Date | null;
@@ -56,8 +58,9 @@ export function resolveSubscriptionState(
 	const plan = normalizePlan(sub?.plan);
 	const credits = sub?.credits ?? 0;
 	const creditsUsed = sub?.creditsUsed ?? 0;
+	const creditsReserved = sub?.creditsReserved ?? 0;
 	const periodEnd = sub?.currentPeriodEnd ?? null;
-	const leftover = Math.max(0, credits - creditsUsed);
+	const leftover = Math.max(0, credits - creditsUsed - creditsReserved);
 
 	if (!sub || plan === "free" || sub.cancelledAt != null) {
 		return {
@@ -111,6 +114,42 @@ export function computeFreeRolloverPeriod(now: Date): {
 	end: Date;
 } {
 	return { start: now, end: addDays(now, BILLING_PERIOD_DAYS) };
+}
+
+export function applyFreeRollover(params: {
+	row: SubscriptionRowLike & { id: string; userId?: string };
+	now: Date;
+}): {
+	updatedRow: SubscriptionRowLike & { id: string; userId?: string };
+	ledgerEntry: {
+		amount: number;
+		entryType: "grant";
+		sourceCategory: "system_grant";
+		pricingVersion: typeof ADAPTIVE_CREDIT_PRICING.version;
+		metadata: { reason: string };
+	};
+} | null {
+	if (!isFreeRolloverDue(params.row, params.now)) return null;
+	const period = computeFreeRolloverPeriod(params.now);
+	return {
+		updatedRow: {
+			...params.row,
+			credits: PLAN_CREDITS.free,
+			creditsUsed: 0,
+			creditsReserved: 0,
+			currentPeriodStart: period.start,
+			currentPeriodEnd: period.end,
+		},
+		ledgerEntry: {
+			amount: PLAN_CREDITS.free,
+			entryType: "grant",
+			sourceCategory: "system_grant",
+			pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
+			metadata: {
+				reason: `free_rollover:${period.start.toISOString()}`,
+			},
+		},
+	};
 }
 
 /**

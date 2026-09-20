@@ -1,5 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
+	check,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -9,6 +12,13 @@ import {
 	timestamp,
 	uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type {
+	CreditComplexityMetrics,
+	CreditLedgerEntryType,
+	CreditOperationKind,
+	CreditOperationState,
+	CreditPricingVersion,
+} from "@/lib/adaptive-credit";
 
 // === TABLES ===
 // ponytail: RLS policies dropped - app-level ownership filters (eq(userId, user.id))
@@ -105,6 +115,7 @@ export const subscriptions = pgTable(
 		reminderCount: integer("reminder_count").notNull().default(0),
 		credits: integer("credits").notNull().default(0),
 		creditsUsed: integer("credits_used").notNull().default(0),
+		creditsReserved: integer("credits_reserved").notNull().default(0),
 		createdAt: timestamp("created_at").defaultNow(),
 		updatedAt: timestamp("updated_at").defaultNow(),
 	},
@@ -112,6 +123,150 @@ export const subscriptions = pgTable(
 		// Hot path: credits.ts getCreditBalance/consumeCredit query
 		// WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
 		index("subscriptions_user_id_created_at_idx").on(t.userId, t.createdAt),
+		check(
+			"subscriptions_credits_reserved_non_negative_check",
+			sql`credits_reserved >= 0`,
+		),
+	],
+);
+
+export interface CreditOperationFailure {
+	code?: string;
+	message?: string;
+	occurredAt?: string;
+}
+
+export interface CreditOperationReconciliation {
+	status: "not_required" | "pending" | "resolved";
+	code?: string;
+	accounting?: "none" | "manual_correction_required";
+	resolvedAt?: string;
+}
+
+export interface CreditOperationUsage {
+	measuredUnits: number;
+}
+
+export interface CreditLedgerMetadata {
+	reason?: string;
+	measuredUnits?: number;
+	reconciliationCode?: string;
+	accounting?: "manual_correction_required";
+}
+
+export type CreditOperationStage = "codebase" | "prd" | "ac" | "task";
+export type CreditLedgerSourceCategory =
+	| "adaptive_credit"
+	| "system_grant"
+	| "manual_correction";
+
+export const creditOperations = pgTable(
+	"credit_operations",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		projectId: text("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		subscriptionId: text("subscription_id").references(() => subscriptions.id, {
+			onDelete: "restrict",
+		}),
+		kind: text("kind").$type<CreditOperationKind>().notNull(),
+		stage: text("stage").$type<CreditOperationStage>().notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		state: text("state")
+			.$type<CreditOperationState>()
+			.notNull()
+			.default("quoted"),
+		estimatedCredits: integer("estimated_credits").notNull(),
+		reservedCredits: integer("reserved_credits").notNull().default(0),
+		maximumCredits: integer("maximum_credits").notNull(),
+		finalCharge: integer("final_charge"),
+		pricingVersion: text("pricing_version")
+			.$type<CreditPricingVersion>()
+			.notNull(),
+		metrics: jsonb("metrics").$type<CreditComplexityMetrics>().notNull(),
+		usage: jsonb("usage").$type<CreditOperationUsage>(),
+		capApplied: boolean("cap_applied").notNull().default(false),
+		artifactReference: text("artifact_reference"),
+		analysisReference: text("analysis_reference"),
+		failure: jsonb("failure").$type<CreditOperationFailure>(),
+		reconciliation:
+			jsonb("reconciliation").$type<CreditOperationReconciliation>(),
+		expiresAt: timestamp("expires_at"),
+		reservedAt: timestamp("reserved_at"),
+		startedAt: timestamp("started_at"),
+		settledAt: timestamp("settled_at"),
+		releasedAt: timestamp("released_at"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(t) => [
+		uniqueIndex("credit_operations_user_id_idempotency_key_unique").on(
+			t.userId,
+			t.idempotencyKey,
+		),
+		index("credit_operations_user_id_created_at_idx").on(t.userId, t.createdAt),
+		index("credit_operations_user_project_id_stage_idx").on(
+			t.userId,
+			t.projectId,
+			t.stage,
+		),
+		index("credit_operations_state_expires_at_idx").on(t.state, t.expiresAt),
+		check(
+			"credit_operations_credit_bounds_check",
+			sql`estimated_credits >= 0 AND reserved_credits >= 0 AND maximum_credits >= 0 AND estimated_credits <= maximum_credits AND reserved_credits <= maximum_credits AND (final_charge IS NULL OR (final_charge >= 0 AND final_charge <= maximum_credits))`,
+		),
+		uniqueIndex("credit_operations_user_id_id_unique").on(t.userId, t.id),
+		foreignKey({
+			columns: [t.userId, t.projectId],
+			foreignColumns: [projects.userId, projects.id],
+			name: "credit_operations_user_project_fk",
+		}),
+		foreignKey({
+			columns: [t.userId, t.subscriptionId],
+			foreignColumns: [subscriptions.userId, subscriptions.id],
+			name: "credit_operations_user_subscription_fk",
+		}),
+	],
+);
+
+export const creditLedgerEntries = pgTable(
+	"credit_ledger_entries",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		operationId: text("operation_id").references(() => creditOperations.id),
+		amount: integer("amount").notNull(),
+		entryType: text("entry_type").$type<CreditLedgerEntryType>().notNull(),
+		sourceCategory: text("source_category")
+			.$type<CreditLedgerSourceCategory>()
+			.notNull(),
+		pricingVersion: text("pricing_version")
+			.$type<CreditPricingVersion>()
+			.notNull(),
+		metadata: jsonb("metadata").$type<CreditLedgerMetadata>().notNull(),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+	},
+	(t) => [
+		index("credit_ledger_entries_user_id_created_at_idx").on(
+			t.userId,
+			t.createdAt,
+		),
+		index("credit_ledger_entries_user_id_operation_id_idx").on(
+			t.userId,
+			t.operationId,
+		),
+		check("credit_ledger_entries_amount_nonzero_check", sql`amount <> 0`),
+		foreignKey({
+			columns: [t.userId, t.operationId],
+			foreignColumns: [creditOperations.userId, creditOperations.id],
+			name: "credit_ledger_entries_user_operation_fk",
+		}),
 	],
 );
 
@@ -158,7 +313,10 @@ export const projects = pgTable(
 		createdAt: timestamp("created_at").defaultNow(),
 		updatedAt: timestamp("updated_at").defaultNow(),
 	},
-	(t) => [index("projects_user_id_idx").on(t.userId)],
+	(t) => [
+		index("projects_user_id_idx").on(t.userId),
+		uniqueIndex("projects_user_id_id_unique").on(t.userId, t.id),
+	],
 );
 
 // Prd Versions

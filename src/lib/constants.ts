@@ -131,3 +131,45 @@ export const TOPUP_SKU = {
 	credits: 15,
 	priceIdr: 20000,
 } as const;
+
+// Versioned product-level pricing inputs for adaptive credit quotes.
+export const ADAPTIVE_CREDIT_PRICING = {
+	version: "adaptive-v1",
+	thresholds: {
+		promptChars: 4_000,
+		prdSourceChars: 12_000,
+		featureCount: 4,
+		personaCount: 3,
+		workflowCount: 3,
+		requirementCount: 8,
+		constraintCount: 5,
+		taskCount: 8,
+		fileCount: 100,
+		sourceBytes: 250_000,
+		languageCount: 3,
+		dependencyCount: 20,
+		relationshipCount: 100,
+	} as const,
+	weights: {
+		promptChars: 0.25,
+		prdSourceChars: 0.5,
+		taskCount: 0.5,
+		featureCount: 0.5,
+		personaCount: 0.25,
+		workflowCount: 0.5,
+		requirementCount: 0.25,
+		constraintCount: 0.25,
+		fileCount: 0.5,
+		sourceBytes: 0.5,
+		languageCount: 0.25,
+		dependencyCount: 0.25,
+		relationshipCount: 0.25,
+		codebaseContext: 0.5,
+	} as const,
+	operations: {
+		codebase_analysis: { baseCredits: 2, maximumCredits: 12 },
+		prd_generation: { baseCredits: 1, maximumCredits: 8 },
+		ac_generation: { baseCredits: 1, maximumCredits: 6 },
+		task_generation: { baseCredits: 1, maximumCredits: 8 },
+	} as const,
+} as const;
