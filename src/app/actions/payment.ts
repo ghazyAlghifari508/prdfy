@@ -10,8 +10,6 @@ import { desc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
-const MIDTRANS_API = "https://api.sandbox.midtrans.com/v2";
-
 export const syncPaymentStatus = createServerFn({ method: "POST" })
 	.validator((orderId: string) => orderId)
 	.handler(async ({ data: orderId }) => {
@@ -45,11 +43,12 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 		}
 
 		// Verify with Midtrans before applying.
-		const serverKey = process.env.MIDTRANS_SERVER_KEY_SANDBOX;
-		if (!serverKey)
-			throw new Error("Missing MIDTRANS_SERVER_KEY_SANDBOX env var");
-		const authString = Buffer.from(`${serverKey}:`).toString("base64");
-		const response = await fetch(`${MIDTRANS_API}/${orderId}/status`, {
+		const { getMidtransConfig, midtransAuthHeader } = await import(
+			"@/lib/midtrans"
+		);
+		const gateway = getMidtransConfig();
+		const authString = midtransAuthHeader(gateway.serverKey);
+		const response = await fetch(`${gateway.apiBaseUrl}/${orderId}/status`, {
 			headers: {
 				Authorization: `Basic ${authString}`,
 				"Content-Type": "application/json",

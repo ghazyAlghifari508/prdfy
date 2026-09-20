@@ -8,6 +8,7 @@ import { canPurchaseTopUp, remainingTopUpQuota } from "@/lib/billing";
 import { TOPUP_SKU } from "@/lib/constants";
 import { getCreditBalance } from "@/lib/credits";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
+import { getMidtransConfig, midtransAuthHeader } from "@/lib/midtrans";
 import { prdFyPlans } from "@/lib/pricing-data";
 import { getTopUpCreditsUsedThisPeriod } from "@/lib/services/payment-service";
 import { requireUser } from "@/lib/session";
@@ -24,6 +25,15 @@ export const Route = createFileRoute("/api/payments/create")({
 		handlers: {
 			POST: async ({ request }: { request: Request }) => {
 				const user = await requireUser(getRequestHeaders());
+				let gateway: ReturnType<typeof getMidtransConfig>;
+				try {
+					gateway = getMidtransConfig();
+				} catch {
+					return Response.json(
+						{ error: "Pembayaran belum dikonfigurasi." },
+						{ status: 500 },
+					);
+				}
 				const { planId, returnUrl, projectId } = (await request.json()) as {
 					planId: string;
 					returnUrl?: string;
@@ -122,12 +132,11 @@ export const Route = createFileRoute("/api/payments/create")({
 					status: "pending",
 				});
 
-				const origin = request.headers.get("origin") || "";
-				const safeOrigin = ALLOWED_ORIGINS.includes(origin)
-					? origin
-					: ALLOWED_ORIGINS[0];
-				const serverKey = process.env.MIDTRANS_SERVER_KEY_SANDBOX || "";
-				const authString = Buffer.from(`${serverKey}:`).toString("base64");
+			const origin = request.headers.get("origin") || "";
+			const safeOrigin = ALLOWED_ORIGINS.includes(origin)
+				? origin
+				: ALLOWED_ORIGINS[0];
+			const authString = midtransAuthHeader(gateway.serverKey);
 
 				const parameters = {
 					transaction_details: { order_id: orderId, gross_amount: amount },
@@ -159,37 +168,43 @@ export const Route = createFileRoute("/api/payments/create")({
 					},
 				};
 
-				try {
-					const response = await fetch(
-						"https://app.sandbox.midtrans.com/snap/v1/transactions",
-						{
-							method: "POST",
-							headers: {
-								"Content-Type": "application/json",
-								Accept: "application/json",
-								Authorization: `Basic ${authString}`,
-								"X-Override-Notification": `${safeOrigin}/api/payments/webhook`,
-							},
-							body: JSON.stringify(parameters),
+			try {
+				const response = await fetch(
+					`${gateway.snapBaseUrl}/transactions`,
+					{
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							Accept: "application/json",
+							Authorization: `Basic ${authString}`,
+							"X-Override-Notification": `${safeOrigin}/api/payments/webhook`,
 						},
-					);
-					if (!response.ok) throw new Error(await response.text());
-					const transaction = await response.json();
-					return Response.json({
-						redirect_url: transaction.redirect_url,
-						token: transaction.token,
-					});
-				} catch (error) {
-					console.error("Midtrans/System Error:", error);
-					await db.delete(payments).where(eq(payments.orderId, orderId));
-					return Response.json(
-						{
-							error:
-								"Terjadi kesalahan pada sistem pembayaran. Silakan coba lagi.",
-						},
-						{ status: 500 },
-					);
-				}
+						body: JSON.stringify(parameters),
+					},
+				);
+				if (!response.ok) throw new Error(await response.text());
+				const transaction = await response.json();
+				return Response.json({
+					redirect_url: transaction.redirect_url,
+					token: transaction.token,
+				});
+			} catch (error) {
+				console.error("Midtrans/System Error:", error);
+				// Keep the row as a failed attempt instead of deleting it: the
+				// gateway may still have accepted the order, and a later
+				// webhook retry must find its audit record.
+				await db
+					.update(payments)
+					.set({ status: "failed", updatedAt: new Date() })
+					.where(eq(payments.orderId, orderId));
+				return Response.json(
+					{
+						error:
+							"Terjadi kesalahan pada sistem pembayaran. Silakan coba lagi.",
+					},
+					{ status: 500 },
+				);
+			}
 			},
 		},
 	},

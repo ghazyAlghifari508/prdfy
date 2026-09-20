@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { payments } from "@/db/schema";
+import { getMidtransConfig } from "@/lib/midtrans";
 import { applyOrderSuccess } from "@/lib/services/payment-service";
 
 export const Route = createFileRoute("/api/payments/webhook")({
@@ -13,13 +14,16 @@ export const Route = createFileRoute("/api/payments/webhook")({
 				const { order_id, transaction_status, status_code, gross_amount } =
 					body;
 
-				const serverKey = process.env.MIDTRANS_SERVER_KEY_SANDBOX;
-				if (!serverKey)
-					return Response.json(
-						{ error: "Server misconfiguration" },
-						{ status: 500 },
-					);
-				const signatureKey = `${order_id}${status_code}${gross_amount}${serverKey}`;
+			let serverKey: string;
+			try {
+				serverKey = getMidtransConfig().serverKey;
+			} catch {
+				return Response.json(
+					{ error: "Server misconfiguration" },
+					{ status: 500 },
+				);
+			}
+			const signatureKey = `${order_id}${status_code}${gross_amount}${serverKey}`;
 				const expected = createHash("sha512")
 					.update(signatureKey)
 					.digest("hex");
