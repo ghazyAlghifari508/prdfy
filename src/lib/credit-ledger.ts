@@ -2,8 +2,10 @@ import { and, eq } from "drizzle-orm";
 import type { db } from "@/db";
 import type {
 	CreditLedgerMetadata,
+	CreditLedgerSourceCategory,
 	CreditOperationFailure,
 	CreditOperationReconciliation,
+	CreditOperationStage,
 } from "@/db/schema";
 import { creditLedgerEntries, creditOperations, projects } from "@/db/schema";
 import type {
@@ -23,7 +25,7 @@ export interface CreditOperationCreateInput {
 	userId: string;
 	projectId: string;
 	operation: CreditOperationKind;
-	stage: string;
+	stage: CreditOperationStage;
 	idempotencyKey: string;
 	quote: CreditQuote;
 	expiresAt?: Date;
@@ -34,7 +36,7 @@ export interface CreditLedgerAppendInput {
 	operationId?: string;
 	amount: number;
 	entryType: CreditLedgerEntryType;
-	source: string;
+	source: CreditLedgerSourceCategory;
 	pricingVersion: CreditPricingVersion;
 	metadata: CreditLedgerMetadata;
 }
@@ -42,7 +44,7 @@ export interface CreditLedgerAppendInput {
 export interface CreditUsageQuery {
 	userId: string;
 	projectId?: string;
-	stage?: string;
+	stage?: CreditOperationStage;
 }
 
 export interface CreditUsageRow {
@@ -59,17 +61,40 @@ export interface CreditUsageRow {
 }
 
 export interface CreditLedgerPersistence {
-	createOperation?: (
+	createOperation: (
 		operation: CreditOperationInsert,
 	) => Promise<CreditOperationRow>;
-	findOperationByIdempotencyKey?: (input: {
+	findOperationByIdempotencyKey: (input: {
 		userId: string;
 		idempotencyKey: string;
 	}) => Promise<CreditOperationRow | undefined>;
-	appendLedgerEntry?: (
+	appendLedgerEntry: (
 		entry: CreditLedgerEntryInsert,
 	) => Promise<CreditLedgerEntryRow>;
-	listUsage?: (query: CreditUsageQuery) => Promise<CreditUsageRow[]>;
+	listUsage: (query: CreditUsageQuery) => Promise<CreditUsageRow[]>;
+}
+
+export function parseCreditLedgerSource(
+	value: string,
+): CreditLedgerSourceCategory {
+	switch (value) {
+		case "adaptive_credit":
+		case "system_grant":
+		case "manual_correction":
+			return value;
+		default:
+			throw new Error("Unsupported credit ledger source category");
+	}
+}
+
+function validateCreditQuote(quote: CreditQuote): void {
+	if (
+		quote.maximumCredits < 0 ||
+		quote.estimatedCredits < 0 ||
+		quote.estimatedCredits > quote.maximumCredits
+	) {
+		throw new Error("Credit quote exceeds its configured maximum");
+	}
 }
 
 export function createCreditLedgerPersistence(
@@ -106,10 +131,6 @@ export function createCreditLedgerPersistence(
 			return row;
 		},
 		async listUsage(query) {
-			const conditions = [eq(creditOperations.userId, query.userId)];
-			if (query.projectId)
-				conditions.push(eq(creditOperations.projectId, query.projectId));
-			if (query.stage) conditions.push(eq(creditOperations.stage, query.stage));
 			return database
 				.select({
 					operationId: creditOperations.id,
@@ -125,15 +146,26 @@ export function createCreditLedgerPersistence(
 				})
 				.from(creditOperations)
 				.innerJoin(projects, eq(creditOperations.projectId, projects.id))
-				.where(and(...conditions));
+				.where(and(...buildCreditUsageConditions(query)));
 		},
 	};
 }
 
-function requiredPersistenceMethod<Name extends keyof CreditLedgerPersistence>(
-	persistence: CreditLedgerPersistence,
-	name: Name,
-): NonNullable<CreditLedgerPersistence[Name]> {
+export function buildCreditUsageConditions(query: CreditUsageQuery) {
+	const conditions = [
+		eq(creditOperations.userId, query.userId),
+		eq(projects.userId, query.userId),
+	];
+	if (query.projectId)
+		conditions.push(eq(creditOperations.projectId, query.projectId));
+	if (query.stage) conditions.push(eq(creditOperations.stage, query.stage));
+	return conditions;
+}
+
+function requiredPersistenceMethod<
+	Name extends keyof CreditLedgerPersistence,
+	Persistence extends Pick<CreditLedgerPersistence, Name>,
+>(persistence: Persistence, name: Name): NonNullable<Persistence[Name]> {
 	const method = persistence[name];
 	if (!method)
 		throw new Error(`Credit ledger persistence method is required: ${name}`);
@@ -141,9 +173,10 @@ function requiredPersistenceMethod<Name extends keyof CreditLedgerPersistence>(
 }
 
 export async function createCreditOperation(
-	persistence: CreditLedgerPersistence,
+	persistence: Pick<CreditLedgerPersistence, "createOperation">,
 	input: CreditOperationCreateInput,
 ): Promise<CreditOperationRow> {
+	validateCreditQuote(input.quote);
 	const createOperation = requiredPersistenceMethod(
 		persistence,
 		"createOperation",
@@ -166,7 +199,7 @@ export async function createCreditOperation(
 }
 
 export async function findCreditOperationByIdempotencyKey(
-	persistence: CreditLedgerPersistence,
+	persistence: Pick<CreditLedgerPersistence, "findOperationByIdempotencyKey">,
 	input: { userId: string; idempotencyKey: string },
 ): Promise<CreditOperationRow | undefined> {
 	const findOperation = requiredPersistenceMethod(
@@ -177,7 +210,7 @@ export async function findCreditOperationByIdempotencyKey(
 }
 
 export async function appendCreditLedgerEntry(
-	persistence: CreditLedgerPersistence,
+	persistence: Pick<CreditLedgerPersistence, "appendLedgerEntry">,
 	input: CreditLedgerAppendInput,
 ): Promise<CreditLedgerEntryRow> {
 	if (!Number.isInteger(input.amount) || input.amount === 0) {
@@ -194,14 +227,14 @@ export async function appendCreditLedgerEntry(
 		operationId: input.operationId,
 		amount: input.amount,
 		entryType: input.entryType,
-		sourceCategory: input.source,
+		sourceCategory: parseCreditLedgerSource(input.source),
 		pricingVersion: input.pricingVersion,
 		metadata: input.metadata,
 	});
 }
 
 export async function listCreditUsage(
-	persistence: CreditLedgerPersistence,
+	persistence: Pick<CreditLedgerPersistence, "listUsage">,
 	query: CreditUsageQuery,
 ): Promise<CreditUsageRow[]> {
 	if (!query.userId) throw new Error("Credit usage queries require userId");

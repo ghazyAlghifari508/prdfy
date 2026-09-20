@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
 	boolean,
 	check,
+	foreignKey,
 	index,
 	integer,
 	jsonb,
@@ -144,8 +145,13 @@ export interface CreditOperationReconciliation {
 export interface CreditLedgerMetadata {
 	reason?: string;
 	measuredUnits?: number;
-	providerRequestId?: string;
 }
+
+export type CreditOperationStage = "codebase" | "prd" | "ac" | "task";
+export type CreditLedgerSourceCategory =
+	| "adaptive_credit"
+	| "system_grant"
+	| "manual_correction";
 
 export const creditOperations = pgTable(
 	"credit_operations",
@@ -158,7 +164,7 @@ export const creditOperations = pgTable(
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
 		kind: text("kind").$type<CreditOperationKind>().notNull(),
-		stage: text("stage").notNull(),
+		stage: text("stage").$type<CreditOperationStage>().notNull(),
 		idempotencyKey: text("idempotency_key").notNull(),
 		state: text("state")
 			.$type<CreditOperationState>()
@@ -199,8 +205,14 @@ export const creditOperations = pgTable(
 		index("credit_operations_state_expires_at_idx").on(t.state, t.expiresAt),
 		check(
 			"credit_operations_credit_bounds_check",
-			sql`estimated_credits >= 0 AND reserved_credits >= 0 AND maximum_credits >= 0 AND (final_charge IS NULL OR final_charge >= 0)`,
+			sql`estimated_credits >= 0 AND reserved_credits >= 0 AND maximum_credits >= 0 AND estimated_credits <= maximum_credits AND reserved_credits <= maximum_credits AND (final_charge IS NULL OR (final_charge >= 0 AND final_charge <= maximum_credits))`,
 		),
+		uniqueIndex("credit_operations_user_id_id_unique").on(t.userId, t.id),
+		foreignKey({
+			columns: [t.userId, t.projectId],
+			foreignColumns: [projects.userId, projects.id],
+			name: "credit_operations_user_project_fk",
+		}),
 	],
 );
 
@@ -214,7 +226,9 @@ export const creditLedgerEntries = pgTable(
 		operationId: text("operation_id").references(() => creditOperations.id),
 		amount: integer("amount").notNull(),
 		entryType: text("entry_type").$type<CreditLedgerEntryType>().notNull(),
-		sourceCategory: text("source_category").notNull(),
+		sourceCategory: text("source_category")
+			.$type<CreditLedgerSourceCategory>()
+			.notNull(),
 		pricingVersion: text("pricing_version")
 			.$type<CreditPricingVersion>()
 			.notNull(),
@@ -231,6 +245,11 @@ export const creditLedgerEntries = pgTable(
 			t.operationId,
 		),
 		check("credit_ledger_entries_amount_nonzero_check", sql`amount <> 0`),
+		foreignKey({
+			columns: [t.userId, t.operationId],
+			foreignColumns: [creditOperations.userId, creditOperations.id],
+			name: "credit_ledger_entries_user_operation_fk",
+		}),
 	],
 );
 
@@ -277,7 +296,10 @@ export const projects = pgTable(
 		createdAt: timestamp("created_at").defaultNow(),
 		updatedAt: timestamp("updated_at").defaultNow(),
 	},
-	(t) => [index("projects_user_id_idx").on(t.userId)],
+	(t) => [
+		index("projects_user_id_idx").on(t.userId),
+		uniqueIndex("projects_user_id_id_unique").on(t.userId, t.id),
+	],
 );
 
 // Prd Versions

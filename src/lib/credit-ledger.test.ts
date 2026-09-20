@@ -1,17 +1,26 @@
+import { readFileSync } from "node:fs";
+import { sql } from "drizzle-orm";
+import { getTableConfig } from "drizzle-orm/pg-core";
+import { PgDialect } from "drizzle-orm/pg-core/dialect";
 import { describe, expect, it, vi } from "vitest";
-
+import { creditLedgerEntries, creditOperations } from "@/db/schema";
 import {
 	appendCreditLedgerEntry,
+	buildCreditUsageConditions,
 	type CreditLedgerPersistence,
 	createCreditOperation,
 	findCreditOperationByIdempotencyKey,
 	listCreditUsage,
+	parseCreditLedgerSource,
 } from "@/lib/credit-ledger";
 
 describe("credit ledger persistence contracts", () => {
 	it("keeps operation idempotency scoped to the authenticated user", async () => {
 		const find = vi.fn().mockResolvedValue({ id: "operation-1" });
-		const persistence: CreditLedgerPersistence = {
+		const persistence: Pick<
+			CreditLedgerPersistence,
+			"findOperationByIdempotencyKey"
+		> = {
 			findOperationByIdempotencyKey: find,
 		};
 
@@ -28,7 +37,7 @@ describe("credit ledger persistence contracts", () => {
 
 	it("creates an operation with the typed Task 1 quote fields", async () => {
 		const create = vi.fn().mockResolvedValue({ id: "operation-1" });
-		const persistence: CreditLedgerPersistence = {
+		const persistence: Pick<CreditLedgerPersistence, "createOperation"> = {
 			createOperation: create,
 		};
 
@@ -58,9 +67,33 @@ describe("credit ledger persistence contracts", () => {
 		});
 	});
 
+	it("rejects a quote whose estimate exceeds its maximum", async () => {
+		const create = vi.fn();
+		await expect(
+			createCreditOperation(
+				{ createOperation: create },
+				{
+					userId: "user-1",
+					projectId: "project-1",
+					operation: "prd_generation",
+					stage: "prd",
+					idempotencyKey: "request-2",
+					quote: {
+						operation: "prd_generation",
+						pricingVersion: "adaptive-v1",
+						estimatedCredits: 3,
+						maximumCredits: 2,
+						metrics: {},
+					},
+				},
+			),
+		).rejects.toThrow("maximum");
+		expect(create).not.toHaveBeenCalled();
+	});
+
 	it("appends ledger entries without exposing mutation or deletion operations", async () => {
 		const append = vi.fn().mockResolvedValue({ id: "entry-1" });
-		const persistence: CreditLedgerPersistence = {
+		const persistence: Pick<CreditLedgerPersistence, "appendLedgerEntry"> = {
 			appendLedgerEntry: append,
 		};
 
@@ -86,7 +119,7 @@ describe("credit ledger persistence contracts", () => {
 
 	it("requires user ownership when reading usage metadata", async () => {
 		const list = vi.fn().mockResolvedValue([]);
-		const persistence: CreditLedgerPersistence = {
+		const persistence: Pick<CreditLedgerPersistence, "listUsage"> = {
 			listUsage: list,
 		};
 
@@ -101,5 +134,54 @@ describe("credit ledger persistence contracts", () => {
 			projectId: "project-1",
 			stage: "prd",
 		});
+	});
+
+	it("builds usage predicates for both operation and project ownership", () => {
+		const conditions = buildCreditUsageConditions({
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd",
+		});
+		const query = new PgDialect().sqlToQuery(sql.join(conditions, sql` AND `));
+		expect(query.sql).toContain('"credit_operations"."user_id"');
+		expect(query.sql).toContain('"projects"."user_id"');
+		expect(query.sql).toContain('"credit_operations"."project_id"');
+		expect(query.sql).toContain('"credit_operations"."stage"');
+	});
+
+	it("declares ownership and credit-bound constraints in the Drizzle table config", () => {
+		const operationConfig = getTableConfig(creditOperations);
+		const ledgerConfig = getTableConfig(creditLedgerEntries);
+
+		expect(
+			operationConfig.foreignKeys.map((foreignKey) => foreignKey.getName()),
+		).toContain("credit_operations_user_project_fk");
+		expect(
+			ledgerConfig.foreignKeys.map((foreignKey) => foreignKey.getName()),
+		).toContain("credit_ledger_entries_user_operation_fk");
+		expect(operationConfig.checks.map((check) => check.name)).toContain(
+			"credit_operations_credit_bounds_check",
+		);
+		expect(ledgerConfig.checks.map((check) => check.name)).toContain(
+			"credit_ledger_entries_amount_nonzero_check",
+		);
+	});
+
+	it("accepts only project-owned ledger source categories", () => {
+		expect(parseCreditLedgerSource("adaptive_credit")).toBe("adaptive_credit");
+		expect(() => parseCreditLedgerSource("provider")).toThrow(
+			"Unsupported credit ledger source category",
+		);
+	});
+
+	it("ships a database trigger for ledger immutability", () => {
+		const migration = readFileSync(
+			"drizzle/0015_moaning_ozymandias.sql",
+			"utf8",
+		);
+		expect(migration).toContain(
+			'BEFORE UPDATE OR DELETE ON "credit_ledger_entries"',
+		);
+		expect(migration).toContain("credit ledger entries are append-only");
 	});
 });

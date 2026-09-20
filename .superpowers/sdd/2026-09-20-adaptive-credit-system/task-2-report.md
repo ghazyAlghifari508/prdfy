@@ -19,3 +19,18 @@
 - `pnpm exec vitest run src/lib/credit-ledger.test.ts`: PASS, 4 tests.
 - `pnpm exec biome check src/db/schema.ts src/lib/credit-ledger.ts src/lib/credit-ledger.test.ts`: PASS.
 - `pnpm exec tsc --noEmit`: BLOCKED by pre-existing `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.` No unrelated dependency changes were made.
+
+## Reviewer Fixes
+
+- Added composite ownership foreign keys for operation/project and ledger/operation associations, plus explicit project-owner predicates in usage reads.
+- Added database credit-bound checks for estimate, reservation, and final charge relationships.
+- Added project-owned stage and ledger source categories, restricted metadata, and source parsing at the persistence boundary.
+- Added a PostgreSQL trigger migration that rejects ledger updates and deletes; ledger inserts remain available for Task 3 settlement flows.
+- Added direct deterministic tests for generated ownership predicates, Drizzle foreign-key/check metadata, quote bounds, source parsing, and the append-only database trigger.
+
+## Follow-up Verification
+
+- `pnpm exec vitest run src/lib/credit-ledger.test.ts`: PASS, 9 tests.
+- `pnpm exec biome check src/db/schema.ts src/lib/credit-ledger.ts src/lib/credit-ledger.test.ts`: PASS.
+- `pnpm exec tsc --noEmit`: BLOCKED only by baseline `packages/cli/src/index.ts(17,25): Cannot find module 'commander' or its corresponding type declarations.`
+- Bypass scan over changed TypeScript files: PASS, no forbidden type bypass patterns found.
