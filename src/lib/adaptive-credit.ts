@@ -70,63 +70,51 @@ export interface CreditUsageInput {
 	maximumCredits: number;
 }
 
-const metricWeights = {
-	promptChars: 0.25,
-	prdSourceChars: 0.5,
-	taskCount: 0.5,
-	featureCount: 0.5,
-	personaCount: 0.25,
-	workflowCount: 0.5,
-	requirementCount: 0.25,
-	constraintCount: 0.25,
-	fileCount: 0.5,
-	sourceBytes: 0.5,
-	languageCount: 0.25,
-	dependencyCount: 0.25,
-	relationshipCount: 0.25,
-} as const;
-
 function nonNegativeFinite(value: number | undefined): number {
 	return value !== undefined && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function thresholdUnits(value: number | undefined, threshold: number): number {
-	return Math.ceil(nonNegativeFinite(value) / threshold);
+	const normalizedValue = nonNegativeFinite(value);
+	return normalizedValue < threshold
+		? 0
+		: Math.ceil(normalizedValue / threshold);
 }
 
 function surcharge(metrics: CreditComplexityMetrics): number {
 	const thresholds = ADAPTIVE_CREDIT_PRICING.thresholds;
+	const weights = ADAPTIVE_CREDIT_PRICING.weights;
 	const project = metrics.project ?? {};
 	const codebase = metrics.codebase ?? {};
 
 	return (
 		thresholdUnits(metrics.promptChars, thresholds.promptChars) *
-			metricWeights.promptChars +
+			weights.promptChars +
 		thresholdUnits(metrics.prdSourceChars, thresholds.prdSourceChars) *
-			metricWeights.prdSourceChars +
+			weights.prdSourceChars +
 		thresholdUnits(metrics.taskCount, thresholds.taskCount) *
-			metricWeights.taskCount +
+			weights.taskCount +
 		thresholdUnits(project.featureCount, thresholds.featureCount) *
-			metricWeights.featureCount +
+			weights.featureCount +
 		thresholdUnits(project.personaCount, thresholds.personaCount) *
-			metricWeights.personaCount +
+			weights.personaCount +
 		thresholdUnits(project.workflowCount, thresholds.workflowCount) *
-			metricWeights.workflowCount +
+			weights.workflowCount +
 		thresholdUnits(project.requirementCount, thresholds.requirementCount) *
-			metricWeights.requirementCount +
+			weights.requirementCount +
 		thresholdUnits(project.constraintCount, thresholds.constraintCount) *
-			metricWeights.constraintCount +
+			weights.constraintCount +
 		thresholdUnits(codebase.fileCount, thresholds.fileCount) *
-			metricWeights.fileCount +
+			weights.fileCount +
 		thresholdUnits(codebase.sourceBytes, thresholds.sourceBytes) *
-			metricWeights.sourceBytes +
+			weights.sourceBytes +
 		thresholdUnits(codebase.languageCount, thresholds.languageCount) *
-			metricWeights.languageCount +
+			weights.languageCount +
 		thresholdUnits(codebase.dependencyCount, thresholds.dependencyCount) *
-			metricWeights.dependencyCount +
+			weights.dependencyCount +
 		thresholdUnits(codebase.relationshipCount, thresholds.relationshipCount) *
-			metricWeights.relationshipCount +
-		(metrics.hasCodebaseContext === true ? 0.5 : 0)
+			weights.relationshipCount +
+		(metrics.hasCodebaseContext === true ? weights.codebaseContext : 0)
 	);
 }
 
@@ -150,7 +138,12 @@ export function estimateCreditQuote(input: CreditEstimateInput): CreditQuote {
 }
 
 export function calculateFinalCreditCost(input: CreditUsageInput): number {
-	const maximumCredits = Math.max(0, Math.floor(input.maximumCredits));
+	const configuredMaximum =
+		ADAPTIVE_CREDIT_PRICING.operations[input.operation].maximumCredits;
+	const maximumCredits = Math.min(
+		configuredMaximum,
+		Math.max(0, Math.floor(input.maximumCredits)),
+	);
 	const measuredUnits = nonNegativeFinite(input.usage.measuredUnits);
 	return Math.min(maximumCredits, Math.ceil(measuredUnits));
 }

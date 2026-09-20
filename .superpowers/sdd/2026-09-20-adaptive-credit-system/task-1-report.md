@@ -66,3 +66,61 @@
 - Full repository typecheck cannot pass until the existing `commander` dependency/type resolution issue in `packages/cli/src/index.ts` is addressed outside Task 1 scope.
 - The repository-wide bypass scan has pre-existing output, including generated route code and legacy/test boundaries. Task 1 adds no new bypass pattern.
 - The pricing weights and thresholds are the approved deterministic product-level v1 configuration for this task; later service integration must use these constants rather than duplicating them in routes.
+
+## Review Fix Report
+
+### Findings Addressed
+
+- `thresholdUnits` now returns zero below the configured threshold and only applies a surcharge at or above the threshold.
+- All metric weights now live under `ADAPTIVE_CREDIT_PRICING`, alongside thresholds, operation base costs, and maximum caps.
+- Added a deterministic below-threshold neutral regression test.
+- Changed the fractional-cost test to exercise `calculateFinalCreditCost` directly with measured usage rather than relying on estimator behavior.
+- `calculateFinalCreditCost` now resolves the operation's configured maximum and clamps the caller-provided cap to it, so a caller cannot authorize a higher charge. The operation input is now used for the configured cap lookup.
+- Added a regression test proving a caller-provided cap above the configured maximum is rejected by clamping.
+
+### Fix Verification Commands and Outputs
+
+Focused covering test:
+
+```text
+Command: pnpm exec vitest run src/lib/adaptive-credit.test.ts
+Result:
+Test Files  1 passed (1)
+Tests       8 passed (8)
+```
+
+Changed-file Biome check:
+
+```text
+Command: pnpm exec biome check src/lib/adaptive-credit.ts src/lib/adaptive-credit.test.ts src/lib/constants.ts
+Result:
+Checked 3 files in 53ms. No fixes applied.
+```
+
+Repository typecheck:
+
+```text
+Command: pnpm exec tsc --noEmit
+Result:
+packages/cli/src/index.ts(17,25): error TS2307: Cannot find module 'commander' or its corresponding type declarations.
+```
+
+The known `commander` dependency/type-resolution baseline blocker remains outside Task 1 scope.
+
+Type-bypass scan:
+
+```text
+Command: rg -n "as never|as any|\\bas any\\b|: any|@ts-ignore|@ts-expect-error|as unknown as" src
+Result:
+Existing matches remain in generated route code and pre-existing application/test boundaries. No matches were found in src/lib/adaptive-credit.ts or src/lib/adaptive-credit.test.ts.
+```
+
+Formatting command used before the covering check:
+
+```text
+Command: pnpm exec biome format --write src/lib/adaptive-credit.ts src/lib/adaptive-credit.test.ts src/lib/constants.ts
+Result:
+Formatted 3 files in 32ms. Fixed 3 files.
+```
+
+The unrelated untracked files under `.superpowers/sdd/2026-09-20-adaptive-credit-system/` were not staged or modified.

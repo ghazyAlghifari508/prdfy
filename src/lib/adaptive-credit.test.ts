@@ -45,18 +45,35 @@ describe("adaptive credit pricing", () => {
 		);
 	});
 
-	it("rounds fractional measured cost upward to an integer credit", () => {
-		const quote = estimateCreditQuote({
-			operation: "task_generation",
+	it("keeps metrics below their thresholds neutral", () => {
+		const baseQuote = estimateCreditQuote({
+			operation: "prd_generation",
+			metrics: emptyMetrics,
+		});
+		const belowThresholdQuote = estimateCreditQuote({
+			operation: "prd_generation",
 			metrics: {
-				promptChars: 1,
+				promptChars: ADAPTIVE_CREDIT_PRICING.thresholds.promptChars - 1,
+				project: {
+					featureCount: ADAPTIVE_CREDIT_PRICING.thresholds.featureCount - 1,
+				},
 			},
 		});
 
-		expect(Number.isInteger(quote.estimatedCredits)).toBe(true);
-		expect(quote.estimatedCredits).toBeGreaterThanOrEqual(
-			ADAPTIVE_CREDIT_PRICING.operations.task_generation.baseCredits,
+		expect(belowThresholdQuote.estimatedCredits).toBe(
+			baseQuote.estimatedCredits,
 		);
+	});
+
+	it("rounds fractional measured cost upward to an integer credit", () => {
+		const finalCost = calculateFinalCreditCost({
+			operation: "task_generation",
+			usage: { measuredUnits: 1.01 },
+			maximumCredits:
+				ADAPTIVE_CREDIT_PRICING.operations.task_generation.maximumCredits,
+		});
+
+		expect(finalCost).toBe(2);
 	});
 
 	it("keeps the configured maximum charge at or above the estimate", () => {
@@ -137,5 +154,15 @@ describe("adaptive credit pricing", () => {
 				maximumCredits: 3,
 			}),
 		).toBe(3);
+	});
+
+	it("never accepts a caller cap above the configured operation maximum", () => {
+		expect(
+			calculateFinalCreditCost({
+				operation: "prd_generation",
+				usage: { measuredUnits: 99 },
+				maximumCredits: 99,
+			}),
+		).toBe(ADAPTIVE_CREDIT_PRICING.operations.prd_generation.maximumCredits);
 	});
 });
