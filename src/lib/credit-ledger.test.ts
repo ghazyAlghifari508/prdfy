@@ -45,6 +45,7 @@ describe("credit ledger persistence contracts", () => {
 		await createCreditOperation(persistence, {
 			userId: "user-1",
 			projectId: "project-1",
+			subscriptionId: "subscription-1",
 			operation: "prd_generation",
 			stage: "prd",
 			idempotencyKey: "request-1",
@@ -76,6 +77,7 @@ describe("credit ledger persistence contracts", () => {
 				{
 					userId: "user-1",
 					projectId: "project-1",
+					subscriptionId: "subscription-1",
 					operation: "prd_generation",
 					stage: "prd",
 					idempotencyKey: "request-2",

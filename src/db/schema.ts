@@ -142,6 +142,10 @@ export interface CreditOperationReconciliation {
 	resolvedAt?: string;
 }
 
+export interface CreditOperationUsage {
+	measuredUnits: number;
+}
+
 export interface CreditLedgerMetadata {
 	reason?: string;
 	measuredUnits?: number;
@@ -163,6 +167,9 @@ export const creditOperations = pgTable(
 		projectId: text("project_id")
 			.notNull()
 			.references(() => projects.id, { onDelete: "cascade" }),
+		subscriptionId: text("subscription_id")
+			.notNull()
+			.references(() => subscriptions.id, { onDelete: "restrict" }),
 		kind: text("kind").$type<CreditOperationKind>().notNull(),
 		stage: text("stage").$type<CreditOperationStage>().notNull(),
 		idempotencyKey: text("idempotency_key").notNull(),
@@ -178,6 +185,8 @@ export const creditOperations = pgTable(
 			.$type<CreditPricingVersion>()
 			.notNull(),
 		metrics: jsonb("metrics").$type<CreditComplexityMetrics>().notNull(),
+		usage: jsonb("usage").$type<CreditOperationUsage>(),
+		capApplied: boolean("cap_applied").notNull().default(false),
 		artifactReference: text("artifact_reference"),
 		analysisReference: text("analysis_reference"),
 		failure: jsonb("failure").$type<CreditOperationFailure>(),
@@ -212,6 +221,11 @@ export const creditOperations = pgTable(
 			columns: [t.userId, t.projectId],
 			foreignColumns: [projects.userId, projects.id],
 			name: "credit_operations_user_project_fk",
+		}),
+		foreignKey({
+			columns: [t.userId, t.subscriptionId],
+			foreignColumns: [subscriptions.userId, subscriptions.id],
+			name: "credit_operations_user_subscription_fk",
 		}),
 	],
 );

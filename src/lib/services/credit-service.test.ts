@@ -135,6 +135,63 @@ describe("credit service lifecycle", () => {
 			"release",
 			"debit",
 		]);
+		expect(store.ledger.reduce((total, entry) => total + entry.amount, 0)).toBe(
+			-4,
+		);
+		expect(() =>
+			service.settleCreditOperation({
+				userId: "user-1",
+				operationId: operation.id,
+				finalCharge: 2,
+				artifactReference: "prd-version-1",
+				measuredUnits: 1.1,
+			}),
+		).toThrow("active");
+	});
+
+	it("does not settle or release an unreserved quoted operation", () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const operation = {
+			id: "quoted-1",
+			userId: "user-1",
+			projectId: "project-1",
+			subscriptionId: "sub-1",
+			kind: "prd_generation" as const,
+			stage: "prd" as const,
+			idempotencyKey: "quoted-key",
+			state: "quoted" as const,
+			estimatedCredits: 1,
+			reservedCredits: 0,
+			maximumCredits: 1,
+			finalCharge: null,
+			pricingVersion: "adaptive-v1" as const,
+			metrics: {},
+			capApplied: false,
+			artifactReference: null,
+			failureReason: null,
+			expiresAt: null,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		};
+		store.operations.set(operation.id, operation);
+
+		expect(() =>
+			service.settleCreditOperation({
+				userId: "user-1",
+				operationId: operation.id,
+				finalCharge: 1,
+				artifactReference: "artifact-1",
+				measuredUnits: 1,
+			}),
+		).toThrow("active");
+		expect(() =>
+			service.releaseCreditOperation({
+				userId: "user-1",
+				operationId: operation.id,
+				reason: "invalid",
+			}),
+		).toThrow("active");
 	});
 
 	it("releases a failed operation without a final debit", async () => {
@@ -206,6 +263,56 @@ describe("credit service lifecycle", () => {
 		expect(refunded.state).toBe("refunded");
 		expect(store.subscriptions.get("sub-1")?.creditsUsed).toBe(0);
 		expect(store.ledger.at(-1)?.entryType).toBe("refund");
+	});
+
+	it("persists the reservation expiry and actual usage on the operation", async () => {
+		const store = makeStore();
+		const service = createCreditService(store);
+		const expiresAt = new Date("2000-01-01T00:00:00.000Z");
+		const operation = await service.reserveCreditOperation({
+			userId: "user-1",
+			projectId: "project-1",
+			stage: "prd",
+			idempotencyKey: "expiry-key",
+			quote,
+			expiresAt,
+		});
+		const stored = store.operations.get(operation.id);
+		expect(stored?.expiresAt).toEqual(expiresAt);
+		await service.markCreditOperationRunning({
+			userId: "user-1",
+			operationId: operation.id,
+		});
+		await service.settleCreditOperation({
+			userId: "user-1",
+			operationId: operation.id,
+			finalCharge: 2,
+			artifactReference: "artifact-1",
+			measuredUnits: 2.5,
+		});
+		expect(store.operations.get(operation.id)?.usage).toEqual({
+			measuredUnits: 2.5,
+		});
+	});
+
+	it("rejects non-finite or fractional quote amounts before reservation", () => {
+		const service = createCreditService(makeStore());
+		for (const invalid of [
+			{ estimatedCredits: Number.NaN, maximumCredits: 4 },
+			{ estimatedCredits: 1.5, maximumCredits: 4 },
+			{ estimatedCredits: 2, maximumCredits: Number.POSITIVE_INFINITY },
+			{ estimatedCredits: 5, maximumCredits: 4 },
+		]) {
+			expect(() =>
+				service.reserveCreditOperation({
+					userId: "user-1",
+					projectId: "project-1",
+					stage: "prd",
+					idempotencyKey: `invalid-${String(invalid.estimatedCredits)}`,
+					quote: { ...quote, ...invalid },
+				}),
+			).toThrow("quote");
+		}
 	});
 
 	it("reconciles expired reservations and leaves unrelated users untouched", async () => {

@@ -25,6 +25,7 @@ export type CreditLedgerEntryRow = typeof creditLedgerEntries.$inferSelect;
 export interface CreditOperationCreateInput {
 	userId: string;
 	projectId: string;
+	subscriptionId: string;
 	operation: CreditOperationKind;
 	stage: CreditOperationStage;
 	idempotencyKey: string;
@@ -112,6 +113,10 @@ export function parseCreditLedgerSource(
 
 function validateCreditQuote(quote: CreditQuote): void {
 	if (
+		!Number.isInteger(quote.estimatedCredits) ||
+		!Number.isInteger(quote.maximumCredits) ||
+		!Number.isFinite(quote.estimatedCredits) ||
+		!Number.isFinite(quote.maximumCredits) ||
 		quote.maximumCredits < 0 ||
 		quote.estimatedCredits < 0 ||
 		quote.estimatedCredits > quote.maximumCredits
@@ -208,6 +213,7 @@ export async function createCreditOperation(
 		id: crypto.randomUUID(),
 		userId: input.userId,
 		projectId: input.projectId,
+		subscriptionId: input.subscriptionId,
 		kind: input.operation,
 		stage: input.stage,
 		idempotencyKey: input.idempotencyKey,
