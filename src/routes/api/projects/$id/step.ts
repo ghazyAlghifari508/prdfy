@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getRequestHeaders } from "@tanstack/react-start/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
@@ -35,25 +34,32 @@ export const Route = createFileRoute("/api/projects/$id/step")({
 				if (!step || !ALLOWED_STEPS.has(step))
 					return Response.json({ error: "Invalid step" }, { status: 400 });
 
-				const [existing] = await db
-					.select({ step: projects.step })
-					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
-					.limit(1);
-				if (!existing)
-					return Response.json({ error: "Project not found" }, { status: 404 });
-
 				// ponytail: step is monotonic - this endpoint fires on navigation intent
 				// (navbar "Generate AC"), so a user revisiting AC after Task must not
 				// rewind step and strand History on the AC page. No-op = still 200.
-				const next = advanceStep(existing.step, step as FlowStep);
-				if (!next) return Response.json({ success: true, step: existing.step });
-
-				await db
-					.update(projects)
-					.set({ step: next })
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)));
-				return Response.json({ success: true, step: next });
+				// The row lock serializes concurrent writers so two requests
+				// reading the same old step cannot overwrite a newer one.
+				const result = await db.transaction(async (tx) => {
+					const [existing] = await tx
+						.select({ step: projects.step })
+						.from(projects)
+						.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+						.limit(1)
+						.for("update");
+					if (!existing) return null;
+					const next = advanceStep(existing.step, step as FlowStep);
+					if (!next) return { step: existing.step };
+					await tx
+						.update(projects)
+						.set({ step: next })
+						.where(
+							and(eq(projects.id, projectId), eq(projects.userId, user.id)),
+						);
+					return { step: next };
+				});
+				if (!result)
+					return Response.json({ error: "Project not found" }, { status: 404 });
+				return Response.json({ success: true, step: result.step });
 			},
 		},
 	},
