@@ -80,18 +80,19 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 						{ status: 400 },
 					);
 
-				const [project] = await db
+			// Ownership check and status write run in one transaction on
+			// the locked project row so the authorization cannot go stale
+			// between the check and the update.
+			const updated = await db.transaction(async (tx) => {
+				const [project] = await tx
 					.select({ id: projects.id })
 					.from(projects)
 					.where(
 						and(eq(projects.id, projectId), eq(projects.userId, actingUserId!)),
 					)
-					.limit(1);
-				if (!project)
-					return Response.json(
-						{ error: "Project not found or access denied" },
-						{ status: 404 },
-					);
+					.limit(1)
+					.for("update");
+				if (!project) return [];
 
 				const updateData: Record<string, unknown> = {
 					status,
@@ -100,7 +101,7 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 				if (status === "in_progress") updateData.startedAt = new Date();
 				if (status === "completed" || status === "failed")
 					updateData.completedAt = new Date();
-				const updated = await db
+				return tx
 					.update(tasks)
 					.set(updateData)
 					.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
@@ -111,11 +112,12 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 						startedAt: tasks.startedAt,
 						completedAt: tasks.completedAt,
 					});
-				if (!updated.length)
-					return Response.json(
-						{ error: "task not found in this project" },
-						{ status: 404 },
-					);
+			});
+			if (!updated.length)
+				return Response.json(
+					{ error: "task not found in this project" },
+					{ status: 404 },
+				);
 
 				if (keyRecordId) {
 					db.update(apiKeys)

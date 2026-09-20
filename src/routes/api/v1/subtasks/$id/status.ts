@@ -54,7 +54,11 @@ export const Route = createFileRoute("/api/v1/subtasks/$id/status")({
 						{ status: 400 },
 					);
 
-				const [task] = await db
+			// Ownership check and array read-modify-write run in one
+			// transaction on the locked task row so concurrent edits to the
+			// same subtask list cannot overwrite each other.
+			const result = await db.transaction(async (tx) => {
+				const [task] = await tx
 					.select({
 						id: tasks.id,
 						projectId: tasks.projectId,
@@ -62,31 +66,38 @@ export const Route = createFileRoute("/api/v1/subtasks/$id/status")({
 					})
 					.from(tasks)
 					.where(eq(tasks.id, taskId))
-					.limit(1);
+					.limit(1)
+					.for("update");
 				if (
 					!task ||
 					!(await verifyProjectOwnership(auth.userId, task.projectId))
 				)
-					return Response.json({ error: "Task not found" }, { status: 404 });
+					return null;
 
 				const subs = Array.isArray(task.subtasks)
 					? [...(task.subtasks as Record<string, unknown>[])]
 					: [];
 				if (subtaskIndex >= subs.length)
-					return Response.json(
-						{
-							error: `subtaskIndex ${subtaskIndex} out of range (0-${subs.length - 1})`,
-						},
-						{ status: 400 },
-					);
-
+					return { outOfRange: true as const, size: subs.length };
 				subs[subtaskIndex] = { ...subs[subtaskIndex], status };
-				await db
+				await tx
 					.update(tasks)
 					.set({ subtasks: subs, updatedAt: new Date() })
 					.where(eq(tasks.id, taskId));
+				return { outOfRange: false as const };
+			});
+			if (!result)
+				return Response.json({ error: "Task not found" }, { status: 404 });
+			if (result.outOfRange) {
+				return Response.json(
+					{
+						error: `subtaskIndex ${subtaskIndex} out of range (0-${result.size - 1})`,
+					},
+					{ status: 400 },
+				);
+			}
 
-				return Response.json({ taskId, subtaskIndex, status });
+			return Response.json({ taskId, subtaskIndex, status });
 			},
 		},
 	},
