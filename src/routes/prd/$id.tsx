@@ -99,7 +99,7 @@ export const Route = createFileRoute("/prd/$id")({
 		try {
 			return await loadPrd({ data: params.id });
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
@@ -109,7 +109,7 @@ export const Route = createFileRoute("/prd/$id")({
 	}),
 	component: PrdPage,
 	errorComponent: ({ error }) => {
-		if (error?.message === "NOT_FOUND") {
+		if (error instanceof Error && error.message === "NOT_FOUND") {
 			return (
 				<div className="p-10 text-center text-fog">PRD tidak ditemukan.</div>
 			);

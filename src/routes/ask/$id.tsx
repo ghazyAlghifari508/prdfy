@@ -121,7 +121,7 @@ export const Route = createFileRoute("/ask/$id")({
 			}
 			return data;
 		} catch (e) {
-			if ((e as Error).message === "Unauthorized")
+			if (e instanceof Error && e.message === "Unauthorized")
 				throw redirect({ to: "/login" });
 			throw e;
 		}
@@ -131,7 +131,7 @@ export const Route = createFileRoute("/ask/$id")({
 	}),
 	component: AskPage,
 	errorComponent: ({ error }) => {
-		if (error?.message === "NOT_FOUND") {
+		if (error instanceof Error && error.message === "NOT_FOUND") {
 			return (
 				<div className="p-10 text-center text-fog">Proyek tidak ditemukan.</div>
 			);
