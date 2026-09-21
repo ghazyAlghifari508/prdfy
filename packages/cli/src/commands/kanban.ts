@@ -21,10 +21,19 @@ interface KanbanColumns {
 	failed: TaskCard[];
 }
 
+export function sanitizeTerminalString(input: unknown): string {
+	if (typeof input !== "string") return "";
+	return input
+		.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+		.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "")
+		.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+}
+
 export async function kanbanCommand(projectId: string) {
 	try {
+		const safeProjectId = sanitizeTerminalString(projectId);
 		const data = await apiGet<{ columns: KanbanColumns }>(
-			`/api/v1/projects/${encodeURIComponent(projectId)}/kanban`,
+			`/api/v1/projects/${encodeURIComponent(safeProjectId)}/kanban`,
 		);
 
 		const cols = data?.columns;
@@ -46,13 +55,6 @@ export async function kanbanCommand(projectId: string) {
 			cols.failed.length,
 		);
 
-		const sanitizeName = (name: string) =>
-			Array.from(name)
-				.filter((ch) => {
-					const code = ch.charCodeAt(0);
-					return code >= 32 && code !== 127 && code !== 0x1b && code !== 0x9b;
-				})
-				.join("");
 		const pad = (s: string, len: number) => s.padEnd(len);
 
 		console.log(chalk.bold("\n  Kanban Board\n"));
@@ -70,16 +72,16 @@ export async function kanbanCommand(projectId: string) {
 			const f = cols.failed[i];
 
 			const pName = p
-				? chalk.gray(pad(sanitizeName(p.name).slice(0, 20), 20))
+				? chalk.gray(pad(sanitizeTerminalString(p.name).slice(0, 20), 20))
 				: chalk.gray(pad("", 20));
 			const ipName = ip
-				? chalk.blue(pad(sanitizeName(ip.name).slice(0, 20), 20))
+				? chalk.blue(pad(sanitizeTerminalString(ip.name).slice(0, 20), 20))
 				: chalk.gray(pad("", 20));
 			const cName = c
-				? chalk.green(pad(sanitizeName(c.name).slice(0, 20), 20))
+				? chalk.green(pad(sanitizeTerminalString(c.name).slice(0, 20), 20))
 				: chalk.gray(pad("", 20));
 			const fName = f
-				? chalk.red(pad(sanitizeName(f.name).slice(0, 20), 20))
+				? chalk.red(pad(sanitizeTerminalString(f.name).slice(0, 20), 20))
 				: chalk.gray(pad("", 20));
 
 			console.log(`  ${pName}  ${ipName}  ${cName}  ${fName}`);

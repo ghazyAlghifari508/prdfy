@@ -25,6 +25,7 @@ import { scanRepository } from "../lib/repository.js";
 import {
 	createSyncClient,
 	type FileChunkInput,
+	type FileChunkUploadResponse,
 	planFileChunks,
 	type SyncClient,
 	type SyncManifestEntry,
@@ -232,21 +233,36 @@ export async function syncCodebase(
 			);
 		}
 
-		const inputs: FileChunkInput[] = [];
-		for (const entry of eligible) {
-			const bytes = await readFile(join(root, ...entry.path.split("/")));
-			inputs.push({
-				path: entry.path,
-				base64: bytes.toString("base64"),
-				hash: entry.hash,
-			});
+		let contentStatus: FileChunkUploadResponse = { status: "uploading" };
+		let chunkOffset = 0;
+		if (eligible.length === 0) {
+			contentStatus = await client.uploadFileChunksWithRetry(
+				projectId,
+				{ sessionId: handshake.sessionId, attemptId: handshake.attemptId },
+				[],
+				0,
+			);
+		} else {
+			for (const entry of eligible) {
+				const bytes = await readFile(join(root, ...entry.path.split("/")));
+				const chunks = planFileChunks([
+					{
+						path: entry.path,
+						base64: bytes.toString("base64"),
+						hash: entry.hash,
+					},
+				]);
+				if (chunks.length > 0) {
+					contentStatus = await client.uploadFileChunksWithRetry(
+						projectId,
+						{ sessionId: handshake.sessionId, attemptId: handshake.attemptId },
+						chunks,
+						chunkOffset,
+					);
+					chunkOffset += chunks.length;
+				}
+			}
 		}
-		const chunks = planFileChunks(inputs);
-		const contentStatus = await client.uploadFileChunksWithRetry(
-			projectId,
-			{ sessionId: handshake.sessionId, attemptId: handshake.attemptId },
-			chunks,
-		);
 		const uploadedBytes = eligible.reduce(
 			(total, entry) => total + entry.size,
 			0,

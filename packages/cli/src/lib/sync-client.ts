@@ -232,6 +232,7 @@ export interface SyncClient {
 		projectId: string,
 		session: SyncSession,
 		chunks: readonly FileChunkPayload[],
+		startIndex?: number,
 	): Promise<FileChunkUploadResponse>;
 	completeWithRetry(
 		projectId: string,
@@ -308,6 +309,7 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 		projectId: string,
 		session: SyncSession,
 		chunks: readonly FileChunkPayload[],
+		startIndex = 0,
 	): Promise<FileChunkUploadResponse> {
 		let last: FileChunkUploadResponse = { status: "uploading" };
 		for (let i = 0; i < chunks.length; i += 1) {
@@ -321,7 +323,11 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 				encoding: chunk.encoding,
 				data: chunk.data,
 				contentHash: chunk.contentHash,
-				idempotencyKey: makeIdempotencyKey(session.attemptId, "file", i),
+				idempotencyKey: makeIdempotencyKey(
+					session.attemptId,
+					"file",
+					startIndex + i,
+				),
 			});
 		}
 		return last;
@@ -346,8 +352,10 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 			withSyncRetry(() => handshake(projectId)),
 		uploadManifestWithRetry: (projectId, session, entries) =>
 			withSyncRetry(() => uploadManifest(projectId, session, entries)),
-		uploadFileChunksWithRetry: (projectId, session, chunks) =>
-			withSyncRetry(() => uploadFileChunks(projectId, session, chunks)),
+		uploadFileChunksWithRetry: (projectId, session, chunks, startIndex = 0) =>
+			withSyncRetry(() =>
+				uploadFileChunks(projectId, session, chunks, startIndex),
+			),
 		completeWithRetry: (projectId, input) =>
 			withSyncRetry(() => complete(projectId, input)),
 	};

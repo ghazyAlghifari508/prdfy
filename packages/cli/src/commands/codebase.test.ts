@@ -81,6 +81,7 @@ function mockClient(overrides: Record<string, unknown> = {}) {
 				_projectId: string,
 				_session: typeof SESSION,
 				_chunks: ChunkArg[],
+				_startIndex?: number,
 			) => ({ status: "uploading" }),
 		),
 		completeWithRetry: vi.fn(
@@ -191,7 +192,9 @@ describe("syncCodebase happy path", () => {
 		logSpy.mockRestore();
 
 		expect(client.uploadManifestWithRetry).toHaveBeenCalledOnce();
-		expect(client.uploadFileChunksWithRetry).toHaveBeenCalled();
+		expect(client.uploadFileChunksWithRetry).toHaveBeenCalledTimes(2);
+		expect(client.uploadFileChunksWithRetry.mock.calls[0]?.[3]).toBe(0);
+		expect(client.uploadFileChunksWithRetry.mock.calls[1]?.[3]).toBe(1);
 		expect(client.completeWithRetry).toHaveBeenCalledOnce();
 	});
 
