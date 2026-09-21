@@ -814,14 +814,26 @@ describe("replay-payload identity (Task 9)", () => {
 		language: "TypeScript",
 	};
 
-	it("accepts only identical manifest replays", () => {
+	it("accepts replays whose entries are all present with stored identity", () => {
 		const stored = [
 			entry,
 			{ path: "src/other.ts", size: 10, hash: "b".repeat(64) },
 		];
-		expect(isManifestReplayCompatible(stored, [entry])).toBe(false);
-		expect(isManifestReplayCompatible(stored, [])).toBe(false);
+		// Multi-batch retry: batch 0 replayed after batch 1 already merged.
+		expect(isManifestReplayCompatible(stored, [entry])).toBe(true);
 		expect(isManifestReplayCompatible(stored, stored)).toBe(true);
+		expect(isManifestReplayCompatible(stored, [])).toBe(false);
+		expect(isManifestReplayCompatible([], [])).toBe(true);
+	});
+
+	it("rejects replays larger than the stored manifest (forged batches)", () => {
+		const stored = [entry];
+		expect(
+			isManifestReplayCompatible(stored, [
+				entry,
+				{ path: "src/other.ts", size: 10, hash: "b".repeat(64) },
+			]),
+		).toBe(false);
 	});
 
 	it("rejects manifest replays with missing or divergent entries", () => {

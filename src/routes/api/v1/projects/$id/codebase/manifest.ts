@@ -97,8 +97,22 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 					);
 				if (claim.status === "replay") {
 					// Replay-payload identity check (Task 9): the retried batch
-					// must agree with what the first write merged. A divergent
-					// retry fails closed instead of silently returning success.
+					// must carry the same batch index and its entries must all
+					// already exist in the stored manifest with identical
+					// identity (multi-batch retries replay the whole loop after
+					// later batches merged, so stored is always a superset).
+					// Anything else is conflicting key reuse — fail closed.
+					const storedResponse = claim.response as {
+						batchIndex?: unknown;
+					} | null;
+					if (!storedResponse || storedResponse.batchIndex !== body.batchIndex)
+						return Response.json(
+							{
+								error: "Idempotency key is already bound to another operation",
+								code: "SNAPSHOT_CONFLICT",
+							},
+							{ status: 409 },
+						);
 					const stored = manifestEntrySchema
 						.array()
 						.safeParse(snapshot.manifest ?? []);

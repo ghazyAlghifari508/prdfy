@@ -659,13 +659,18 @@ function sameManifestIdentity(
 	);
 }
 
-/** A replay must reproduce the exact manifest batch identity. A subset,
- *  missing path, or divergent entry means conflicting reuse of the key. */
+/** Containment identity: the stored manifest accumulates every merged batch,
+ *  so a legitimate retry of one earlier batch always sees a superset (the CLI
+ *  retries the WHOLE batch loop with the same keys after any transient
+ *  failure). Every replayed entry must exist in stored with the same
+ *  identity; a forged/unknown path, divergent entry, or a batch larger than
+ *  the stored manifest fails closed. */
 export function isManifestReplayCompatible(
 	stored: readonly ManifestEntry[],
 	replayed: readonly ManifestEntry[],
 ): boolean {
-	if (stored.length !== replayed.length) return false;
+	if (replayed.length === 0) return stored.length === 0;
+	if (replayed.length > stored.length) return false;
 	const byPath = new Map(stored.map((entry) => [entry.path, entry]));
 	for (const entry of replayed) {
 		const previous = byPath.get(entry.path);
