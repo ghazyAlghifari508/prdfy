@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
 	buildTaskMetrics,
 	formatInsufficientCreditsError,
@@ -38,10 +38,10 @@ export const Route = createFileRoute("/api/task/generate")({
 				const user = await requireUser(request.headers);
 
 				const { db } = await import("@/db");
-				const { codebaseSnapshots, projects, subscriptions } = await import(
-					"@/db/schema"
-				);
+				const { codebaseSnapshots, creditOperations, projects, subscriptions } =
+					await import("@/db/schema");
 				const {
+					CreditSubscriptionOriginError,
 					createCreditQuote,
 					reserveActiveCreditOperation,
 					isReleasableReservation,
@@ -227,15 +227,75 @@ export const Route = createFileRoute("/api/task/generate")({
 					});
 				} catch (err) {
 					console.error("[task/generate] reserveCreditOperation failed:", err);
+					// Map the failure honestly: only genuine credit exhaustion is
+					// a 403. Ownership problems are 404, idempotency races are
+					// 409, and unexpected failures (DB outage, quote errors)
+					// are 5xx so clients/operators can retry and reconcile.
+					const message =
+						err instanceof Error ? err.message : "Reservation failed";
+					if (
+						err instanceof CreditSubscriptionOriginError ||
+						message === "Insufficient available credit"
+					) {
+						return Response.json(
+							formatInsufficientCreditsError({
+								quote,
+								availableCredits,
+								stageLabel: "generate Task",
+							}),
+							{ status: 403 },
+						);
+					}
+					if (message === "Credit operation ownership mismatch") {
+						return Response.json(
+							{ error: "Project not found" },
+							{ status: 404 },
+						);
+					}
+					if (
+						message === "Credit operation idempotency conflict" ||
+						message === "Credit operation reservation transition conflict"
+					) {
+						return Response.json(
+							{ error: "Task sedang digenerate. Tunggu hingga selesai." },
+							{ status: 409 },
+						);
+					}
 					return Response.json(
-						formatInsufficientCreditsError({
-							quote,
-							availableCredits,
-							stageLabel: "generate Task",
-						}),
-						{ status: 403 },
+						{ error: "Gagal menyiapkan generate Task. Coba lagi." },
+						{ status: 500 },
 					);
 				}
+
+				// A stale stream must never clear a newer generation's lock: the
+				// error paths below reset taskStatus only while no newer active
+				// credit operation for this project+stage exists. Fails open
+				// (resets) when the check itself errors, preserving liveness.
+				const ownsProjectLock = async () => {
+					try {
+						const [latest] = await db
+							.select({ id: creditOperations.id })
+							.from(creditOperations)
+							.where(
+								and(
+									eq(creditOperations.userId, user.id),
+									eq(creditOperations.projectId, projectId),
+									eq(creditOperations.stage, "task"),
+									inArray(creditOperations.state, [
+										"quoted",
+										"reserved",
+										"running",
+										"settling",
+									]),
+								),
+							)
+							.orderBy(desc(creditOperations.createdAt))
+							.limit(1);
+						return !latest || latest.id === reservation.id;
+					} catch {
+						return true;
+					}
+				};
 
 				const claimTask = () =>
 					db
@@ -407,13 +467,17 @@ export const Route = createFileRoute("/api/task/generate")({
 							if (eventDone || eventErrored) return;
 							eventErrored = true;
 							await safeRelease(msg);
-							try {
-								await db
-									.update(projects)
-									.set({ taskStatus: "pending" })
-									.where(eq(projects.id, projectId));
-							} catch (e) {
-								console.error("task_status reset failed:", e);
+							// The error event below must always reach the client;
+							// only the lock reset is ownership-gated.
+							if (await ownsProjectLock()) {
+								try {
+									await db
+										.update(projects)
+										.set({ taskStatus: "pending" })
+										.where(eq(projects.id, projectId));
+								} catch (e) {
+									console.error("task_status reset failed:", e);
+								}
 							}
 							emit({ type: "error", error: msg });
 							try {
@@ -442,13 +506,15 @@ export const Route = createFileRoute("/api/task/generate")({
 							// against it and do not release it either.
 							console.error("markCreditOperationRunning error:", err);
 							eventErrored = true;
-							try {
-								await db
-									.update(projects)
-									.set({ taskStatus: "pending" })
-									.where(eq(projects.id, projectId));
-							} catch (e) {
-								console.error("task_status reset failed:", e);
+							if (await ownsProjectLock()) {
+								try {
+									await db
+										.update(projects)
+										.set({ taskStatus: "pending" })
+										.where(eq(projects.id, projectId));
+								} catch (e) {
+									console.error("task_status reset failed:", e);
+								}
 							}
 							emit({
 								type: "error",
