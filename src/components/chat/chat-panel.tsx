@@ -19,6 +19,7 @@ import {
 	savePendingPrdPrompt,
 	savePrdDraft,
 } from "@/lib/prompt-handoff";
+import { readSseStream } from "@/lib/sse-stream";
 import { cn } from "@/lib/utils";
 import { useChatStore, useUIStore } from "@/store";
 import type { Plan } from "@/types/database";
@@ -202,7 +203,6 @@ export const ChatPanel = memo(function ChatPanel({
 	const [resumeErrorMsg, setResumeErrorMsg] = useState("");
 	const [partialContentStore, setPartialContentStore] = useState("");
 	const [originalMessageStore, setOriginalMessageStore] = useState("");
-	const [userPlan, _setUserPlan] = useState<Plan>(initialUserPlan);
 	const [isRevising, setIsRevising] = useState(false);
 	// Section generation progress tracking - persisted in Zustand so it
 	// survives router.refresh() after generation completes.
@@ -225,7 +225,6 @@ export const ChatPanel = memo(function ChatPanel({
 	const router = useRouter();
 	const navigate = useNavigate();
 	const searchStr = useLocation({ select: (l) => l.searchStr });
-	const searchParams = new URLSearchParams(searchStr);
 	const messages = useChatStore((s) => s.messages);
 	const isStreaming = useChatStore((s) => s.isStreaming);
 	const isGeneratingPRD = useChatStore((s) => s.isGeneratingPRD);
@@ -281,6 +280,18 @@ export const ChatPanel = memo(function ChatPanel({
 			isSubmittingRef.current = false;
 		}
 	}, [isStreaming]);
+
+	// Abort active streaming fetch on unmount or project switch so callbacks
+	// cannot update global store or parent components with stale project data.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: projectId intentionally re-arms cleanup on project switch
+	useEffect(() => {
+		return () => {
+			if (abortControllerRef.current) {
+				abortControllerRef.current.abort();
+				abortControllerRef.current = null;
+			}
+		};
+	}, [projectId]);
 
 	// ── Handlers ──
 
@@ -434,156 +445,143 @@ export const ChatPanel = memo(function ChatPanel({
 					return;
 				}
 
-				const reader = response.body?.getReader();
-				const decoder = new TextDecoder();
-				let buffer = "";
+				for await (const data of readSseStream(response.body)) {
+					try {
+						const parsed = JSON.parse(data);
 
-				while (reader) {
-					const { done, value } = await reader.read();
-					if (done) break;
+						if (parsed.type === "started") {
+							// no-op: heartbeat from server, just lets the client know
+							// generation is in flight.
+						} else if (parsed.type === "thinking") {
+							setThinkingText((prev) => prev + parsed.content);
+						} else if (parsed.type === "delta") {
+							if (thinkingTextRef.current) setThinkingText("");
+							_sawAnyDelta = true;
+							fullContent += parsed.content;
 
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split("\n");
-					buffer = lines.pop() || "";
-
-					for (const line of lines) {
-						if (!line.startsWith("data: ")) continue;
-						const data = line.slice(6);
-
-						try {
-							const parsed = JSON.parse(data);
-
-							if (parsed.type === "started") {
-								// no-op: heartbeat from server, just lets the client know
-								// generation is in flight.
-							} else if (parsed.type === "thinking") {
-								setThinkingText((prev) => prev + parsed.content);
-							} else if (parsed.type === "delta") {
-								if (thinkingTextRef.current) setThinkingText("");
-								_sawAnyDelta = true;
-								fullContent += parsed.content;
-
-								// ponytail: batch state commits via rAF throttle (scheduleFlush).
-								// Per-token setStreamingPRDContent caused full markdown re-parse
-								// + Navbar re-render hundreds of times per second. Now coalesced
-								// to ~60fps — same perceived latency, fraction of render work.
-								pendingContentRef.current = existingPartialContent
-									? existingPartialContent + fullContent
-									: fullContent;
-								scheduleFlush();
-							} else if (parsed.type === "done") {
-								// ponytail: flush any pending batched content synchronously before
-								// done-handler reads/overrides state — ensures last tokens render.
-								cancelFlush();
-								flushContent();
-								pendingContentRef.current = "";
-								gotDoneEvent = true;
-								if (parsed.conversationId) {
-									setConversationId(parsed.conversationId);
-								}
-								// Mark ALL sections found in the final content as completed.
-								// Re-parse from the full accumulated content since at done
-								// time every section is fully written - no spinner should remain.
-								const finalContentHere = existingPartialContent
-									? existingPartialContent + fullContent
-									: fullContent;
-								const allDone = extractSections(finalContentHere);
-								if (allDone.length > 0) {
-									setCompletedSections(allDone);
-								}
-								setCurrentSection(null);
-								if (parsed.projectId && onProjectCreated && !projectId) {
-									// New project: clear Zustand state before navigation
-									setGeneratingPRD(false);
-									setStreamingPRDContent("");
-									onProjectCreated(parsed.projectId);
-								} else if (chatMode === "generate") {
-									setGeneratingPRD(false);
-									setStreamingPRDContent("");
-									if (typeof parsed.content === "string" && parsed.content) {
-										onPrdRevised?.(parsed.content);
-									}
-									startTransition(() => {
-										router.invalidate();
-									});
-								} else if (chatMode === "revise") {
-									setGeneratingPRD(false);
-									setIsRevising(false);
-									// Preserve the streaming natural-language bubble before
-									// streamingContent gets cleared in finally.
-									const streamingNaturalLanguage =
-										streamingContentRef.current || streamingContent;
-									// Restore completedSections from the FRESH merged PRD.
-									// parsed.content from server has all sections 1-8; parent
-									// prop currentPrdContent may be stale (not yet updated).
-									const freshContent =
-										(typeof parsed.content === "string" && parsed.content) ||
-										currentPrdContent;
-									if (freshContent) {
-										const allSecs = extractSections(freshContent);
-										if (allSecs.length > 0) setCompletedSections(allSecs);
-									}
-									// Server now persists this same preamble as assistantReply
-									// (see route.ts) - one bubble only, so refresh shows the
-									// exact text the user saw live instead of a second,
-									// separately-generated summary.
-									const finalReply =
-										parsed.summaryMessage || streamingNaturalLanguage;
-									if (finalReply) {
-										addMessage({
-											id: crypto.randomUUID(),
-											role: "assistant",
-											content: finalReply,
-											timestamp: Date.now(),
-										});
-									}
-									// Push the server-merged full PRD (sections 1-8) up to the
-									// PRD viewer immediately - don't wait for a refresh.
-									if (typeof parsed.content === "string" && parsed.content) {
-										onPrdRevised?.(parsed.content);
-									}
-								}
-							} else if (parsed.type === "error") {
-								cancelFlush();
-								pendingContentRef.current = "";
-								gotErrorEvent = true;
-								const errorMsg =
-									parsed.error ||
-									(chatMode === "generate" ||
-									chatMode === "revise" ||
-									chatMode === "resume"
-										? "Gagal menyusun PRD. Silakan coba lagi."
-										: "Gagal memproses pesan. Silakan coba lagi.");
-
-								// If error occurs during PRD generation and we already have some partial content
-								const currentDisplayContent = existingPartialContent
-									? existingPartialContent + fullContent
-									: fullContent;
-								if (
-									(chatMode === "generate" || chatMode === "resume") &&
-									currentDisplayContent.length > 0
-								) {
-									setGeneratingPRD(false);
-									setResumeErrorMsg(errorMsg);
-									setPartialContentStore(currentDisplayContent);
-									setOriginalMessageStore(originalMessage);
-									setShowResumeModal(true);
-									return; // Don't add chat bubble, let user interact with modal
-								}
-
-								showToast(errorMsg, "error");
-								addMessage({
-									id: crypto.randomUUID(),
-									role: "assistant",
-									content: `❌ **Pengiriman Gagal**\n\n${errorMsg}\n\n*Pesan kamu telah dikembalikan ke kotak input. Silakan coba kirim ulang.*`,
-									timestamp: Date.now(),
-								});
-
-								setGeneratingPRD(false);
-								setInput(originalMessage);
-								return;
+							// ponytail: batch state commits via rAF throttle (scheduleFlush).
+							// Per-token setStreamingPRDContent caused full markdown re-parse
+							// + Navbar re-render hundreds of times per second. Now coalesced
+							// to ~60fps — same perceived latency, fraction of render work.
+							pendingContentRef.current = existingPartialContent
+								? existingPartialContent + fullContent
+								: fullContent;
+							scheduleFlush();
+						} else if (parsed.type === "done") {
+							// ponytail: flush any pending batched content synchronously before
+							// done-handler reads/overrides state — ensures last tokens render.
+							cancelFlush();
+							flushContent();
+							pendingContentRef.current = "";
+							gotDoneEvent = true;
+							if (parsed.conversationId) {
+								setConversationId(parsed.conversationId);
 							}
-						} catch {}
+							// Mark ALL sections found in the final content as completed.
+							// Re-parse from the full accumulated content since at done
+							// time every section is fully written - no spinner should remain.
+							const finalContentHere = existingPartialContent
+								? existingPartialContent + fullContent
+								: fullContent;
+							const allDone = extractSections(finalContentHere);
+							if (allDone.length > 0) {
+								setCompletedSections(allDone);
+							}
+							setCurrentSection(null);
+							if (parsed.projectId && onProjectCreated && !projectId) {
+								// New project: clear Zustand state before navigation
+								setGeneratingPRD(false);
+								setStreamingPRDContent("");
+								onProjectCreated(parsed.projectId);
+							} else if (chatMode === "generate") {
+								setGeneratingPRD(false);
+								setStreamingPRDContent("");
+								if (typeof parsed.content === "string" && parsed.content) {
+									onPrdRevised?.(parsed.content);
+								}
+								startTransition(() => {
+									router.invalidate();
+								});
+							} else if (chatMode === "revise") {
+								setGeneratingPRD(false);
+								setIsRevising(false);
+								// Preserve the streaming natural-language bubble before
+								// streamingContent gets cleared in finally.
+								const streamingNaturalLanguage =
+									streamingContentRef.current || streamingContent;
+								// Restore completedSections from the FRESH merged PRD.
+								// parsed.content from server has all sections 1-8; parent
+								// prop currentPrdContent may be stale (not yet updated).
+								const freshContent =
+									(typeof parsed.content === "string" && parsed.content) ||
+									currentPrdContent;
+								if (freshContent) {
+									const allSecs = extractSections(freshContent);
+									if (allSecs.length > 0) setCompletedSections(allSecs);
+								}
+								// Server now persists this same preamble as assistantReply
+								// (see route.ts) - one bubble only, so refresh shows the
+								// exact text the user saw live instead of a second,
+								// separately-generated summary.
+								const finalReply =
+									parsed.summaryMessage || streamingNaturalLanguage;
+								if (finalReply) {
+									addMessage({
+										id: crypto.randomUUID(),
+										role: "assistant",
+										content: finalReply,
+										timestamp: Date.now(),
+									});
+								}
+								// Push the server-merged full PRD (sections 1-8) up to the
+								// PRD viewer immediately - don't wait for a refresh.
+								if (typeof parsed.content === "string" && parsed.content) {
+									onPrdRevised?.(parsed.content);
+								}
+							}
+							break;
+						} else if (parsed.type === "error") {
+							cancelFlush();
+							pendingContentRef.current = "";
+							gotErrorEvent = true;
+							const errorMsg =
+								parsed.error ||
+								(chatMode === "generate" ||
+								chatMode === "revise" ||
+								chatMode === "resume"
+									? "Gagal menyusun PRD. Silakan coba lagi."
+									: "Gagal memproses pesan. Silakan coba lagi.");
+
+							// If error occurs during PRD generation and we already have some partial content
+							const currentDisplayContent = existingPartialContent
+								? existingPartialContent + fullContent
+								: fullContent;
+							if (
+								(chatMode === "generate" || chatMode === "resume") &&
+								currentDisplayContent.length > 0
+							) {
+								setGeneratingPRD(false);
+								setResumeErrorMsg(errorMsg);
+								setPartialContentStore(currentDisplayContent);
+								setOriginalMessageStore(originalMessage);
+								setShowResumeModal(true);
+								return; // Don't add chat bubble, let user interact with modal
+							}
+
+							showToast(errorMsg, "error");
+							addMessage({
+								id: crypto.randomUUID(),
+								role: "assistant",
+								content: `❌ **Pengiriman Gagal**\n\n${errorMsg}\n\n*Pesan kamu telah dikembalikan ke kotak input. Silakan coba kirim ulang.*`,
+								timestamp: Date.now(),
+							});
+
+							setGeneratingPRD(false);
+							setInput(originalMessage);
+							return;
+						}
+					} catch {
+						console.warn("SSE parse failed in chat-panel:", data.slice(0, 80));
 					}
 				}
 
@@ -656,10 +654,29 @@ export const ChatPanel = memo(function ChatPanel({
 					});
 				}
 			} catch (err: unknown) {
-				if (err instanceof Error && err.name === "AbortError") {
+				const isAbort = err instanceof Error && err.name === "AbortError";
+				if (isAbort) {
 					showToast("Proses dihentikan.", "info");
 				} else {
+					console.error("Chat streaming error:", err);
 					showToast("Terjadi kesalahan koneksi.", "error");
+				}
+				// On any error or abort, generation has ended without a successful done
+				// event — clear generating state so the UI isn't stuck with a perpetual spinner.
+				if (chatMode === "generate" || chatMode === "resume") {
+					setGeneratingPRD(false);
+					setStreamingPRDContent("");
+					// If we accumulated partial content before the failure, preserve it
+					// and offer the resume modal so the user can recover.
+					const currentDisplayContent = existingPartialContent
+						? existingPartialContent + fullContent
+						: fullContent;
+					if (!isAbort && currentDisplayContent.trim().length > 0) {
+						setResumeErrorMsg("Koneksi terputus saat menyusun PRD.");
+						setPartialContentStore(currentDisplayContent);
+						setOriginalMessageStore(originalMessage);
+						setShowResumeModal(true);
+					}
 				}
 			} finally {
 				cancelFlush();
@@ -862,11 +879,20 @@ export const ChatPanel = memo(function ChatPanel({
 	);
 
 	// ── Auto-submit from /ask question flow ──
+	// biome-ignore lint/correctness/useExhaustiveDependencies: projectId intentionally resets the guard on project switch
 	useEffect(() => {
-		// Reset auto-submit guard when re-mounting project (ChatPanel stays mounted
-		// with CSS display:none, so ref persists across navigations otherwise).
+		// Reset auto-submit guard when switching projects
 		autoSubmitAttemptedRef.current = false;
-		if (isReadOnly || !enableAutoSubmit || isStreaming || messages.length > 0)
+	}, [projectId]);
+
+	useEffect(() => {
+		if (
+			autoSubmitAttemptedRef.current ||
+			isReadOnly ||
+			!enableAutoSubmit ||
+			isStreaming ||
+			messages.length > 0
+		)
 			return;
 
 		const pending = consumePendingPrdPrompt();
@@ -886,16 +912,25 @@ export const ChatPanel = memo(function ChatPanel({
 	}, [
 		enableAutoSubmit,
 		handleSendWithMessage,
+		isReadOnly,
 		isStreaming,
 		messages.length,
 		setGeneratingPRD,
 	]);
 
-	// Auto-resume PRD generation after payment return
+	// Auto-resume PRD generation after payment return.
+	// Keyed by the raw search string + a per-orderId guard: `new
+	// URLSearchParams(searchStr)` is a fresh object every render, so the old
+	// dep re-ran the resume flow (duplicate sync + generate) while the
+	// Midtrans query params were still in the URL.
+	const resumedPrdPaymentsRef = useRef<Set<string>>(new Set());
 	useEffect(() => {
-		const orderId = searchParams.get("order_id");
-		const payment = searchParams.get("payment");
+		const params = new URLSearchParams(searchStr);
+		const orderId = params.get("order_id");
+		const payment = params.get("payment");
 		if (!orderId || payment !== "success" || !projectId) return;
+		if (resumedPrdPaymentsRef.current.has(orderId)) return;
+		resumedPrdPaymentsRef.current.add(orderId);
 		(async () => {
 			try {
 				const res = await syncPaymentStatus({ data: orderId });
@@ -919,14 +954,7 @@ export const ChatPanel = memo(function ChatPanel({
 				console.error("Auto-resume payment sync failed:", e);
 			}
 		})();
-	}, [
-		searchParams,
-		handleSendWithMessage,
-		navigate,
-		projectId,
-		router,
-		setGeneratingPRD,
-	]);
+	}, [searchStr, handleSendWithMessage, navigate, projectId, setGeneratingPRD]);
 
 	// ── Render ──
 
