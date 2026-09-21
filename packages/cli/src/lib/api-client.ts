@@ -92,7 +92,14 @@ export async function apiRequest<T>(
 	try {
 		let serialized: string | undefined;
 		if (options.body !== undefined) {
-			serialized = JSON.stringify(options.body);
+			try {
+				serialized = JSON.stringify(options.body);
+			} catch {
+				throw new ApiError("Request body could not be serialized to JSON", {
+					code: "INVALID_REQUEST",
+					retryable: false,
+				});
+			}
 			if (options.maxBodyBytes !== undefined) {
 				const byteLength = new TextEncoder().encode(serialized).length;
 				if (byteLength > options.maxBodyBytes) {
@@ -109,9 +116,10 @@ export async function apiRequest<T>(
 			res = await fetch(`${options.baseUrl ?? getApiUrl()}${path}`, {
 				method: options.method ?? (serialized ? "POST" : "GET"),
 				headers: {
-					Authorization: `Bearer ${options.authToken ?? getApiKey()}`,
 					...(serialized ? { "Content-Type": "application/json" } : {}),
 					...options.headers,
+					// Authentication header must not be overridden by arbitrary headers
+					Authorization: `Bearer ${options.authToken ?? getApiKey()}`,
 				},
 				body: serialized,
 				signal: controller.signal,
@@ -154,6 +162,9 @@ export async function apiRequest<T>(
 						: undefined,
 				retryable: isRetryableStatus(res.status),
 			});
+		}
+		if (res.status === 204) {
+			return undefined as T;
 		}
 		return (await res.json()) as T;
 	} finally {

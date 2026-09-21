@@ -7,32 +7,57 @@ import chalk from "chalk";
 import { saveConfig } from "../lib/config.js";
 
 function promptHidden(prompt: string): Promise<string> {
-	return new Promise((resolve) => {
-		const rl = createInterface({
-			input: process.stdin,
-			output: process.stdout,
-		});
+	return new Promise((resolve, reject) => {
 		const stdin = process.stdin;
 		const wasRaw = stdin.isRaw;
 
-		process.stdout.write(prompt);
-
-		if (stdin.isTTY) {
-			stdin.setRawMode(true);
+		if (!stdin.isTTY) {
+			// Non-TTY environment (piped stdin / script)
+			const rl = createInterface({ input: stdin });
+			rl.once("line", (line) => {
+				rl.close();
+				resolve(line.trim());
+			});
+			rl.once("error", (err) => {
+				rl.close();
+				reject(err);
+			});
+			return;
 		}
 
+		process.stdout.write(prompt);
+		stdin.setRawMode(true);
+
 		let input = "";
+		const cleanup = () => {
+			if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
+			stdin.removeListener("data", onData);
+			stdin.removeListener("end", onEnd);
+			stdin.removeListener("error", onError);
+		};
+
+		const onEnd = () => {
+			cleanup();
+			process.stdout.write("\n");
+			resolve(input);
+		};
+
+		const onError = (err: Error) => {
+			cleanup();
+			reject(err);
+		};
+
 		const onData = (char: Buffer) => {
 			const c = char.toString();
 			if (c === "\n" || c === "\r") {
-				if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
-				stdin.removeListener("data", onData);
-				rl.close();
+				cleanup();
 				process.stdout.write("\n");
 				resolve(input);
 			} else if (c === "\u0003") {
 				// Ctrl+C
-				process.exit(0);
+				cleanup();
+				process.stdout.write("\n");
+				process.exit(130);
 			} else if (c === "\u007F" || c === "\b") {
 				if (input.length > 0) {
 					input = input.slice(0, -1);
@@ -44,6 +69,8 @@ function promptHidden(prompt: string): Promise<string> {
 			}
 		};
 		stdin.on("data", onData);
+		stdin.once("end", onEnd);
+		stdin.once("error", onError);
 	});
 }
 
@@ -52,13 +79,38 @@ export async function loginCommand(options: {
 	apiUrl?: string;
 }) {
 	try {
-		const apiKey = options.apiKey || (await promptHidden("Masukkan API key: "));
+		const apiKey =
+			options.apiKey ||
+			process.env.PRDFY_API_KEY ||
+			(await promptHidden("Masukkan API key: "));
 		if (!apiKey.trim()) {
 			console.log(chalk.red("API key tidak boleh kosong."));
 			process.exit(1);
 		}
 
-		const apiUrl = options.apiUrl || "http://localhost:3000";
+		const rawApiUrl =
+			options.apiUrl || process.env.PRDFY_API_URL || "http://localhost:3000";
+		let apiUrl: string;
+		try {
+			const parsed = new URL(rawApiUrl);
+			if (
+				parsed.protocol !== "https:" &&
+				parsed.hostname !== "localhost" &&
+				parsed.hostname !== "127.0.0.1"
+			) {
+				throw new Error(
+					"API URL must use HTTPS unless pointing to localhost/127.0.0.1",
+				);
+			}
+			apiUrl = parsed.origin;
+		} catch (err) {
+			console.log(
+				chalk.red(
+					`Invalid API URL: ${err instanceof Error ? err.message : String(err)}`,
+				),
+			);
+			process.exit(1);
+		}
 
 		saveConfig({ apiKey: apiKey.trim(), apiUrl });
 		console.log(chalk.green("✓ API key berhasil disimpan."));

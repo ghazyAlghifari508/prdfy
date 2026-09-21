@@ -148,9 +148,10 @@ export async function syncCodebase(
 	deps: { createClient?: (token: string, apiUrl: string) => SyncClient } = {},
 ): Promise<SyncResult> {
 	const output: SyncOutputMode = options.output ?? "human";
+	const syncToken = options.syncToken || process.env.PRDFY_SYNC_TOKEN;
 	if (
 		!options.projectId ||
-		!options.syncToken ||
+		!syncToken ||
 		(output !== "human" && output !== "json")
 	) {
 		const res = failure(
@@ -163,7 +164,7 @@ export async function syncCodebase(
 		return res;
 	}
 
-	const { projectId, syncToken } = options;
+	const { projectId } = options;
 	const root = options.root ?? process.cwd();
 
 	let manifest: RepositoryManifest;
@@ -207,9 +208,9 @@ export async function syncCodebase(
 				syncToken: token,
 				timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
 			}));
-	const client = createClient(syncToken, options.apiUrl ?? resolveApiUrl());
 
 	try {
+		const client = createClient(syncToken, options.apiUrl ?? resolveApiUrl());
 		const handshake = await client.handshakeWithRetry(projectId);
 		if (output === "human") {
 			console.log(`Session ${handshake.sessionId}: ${handshake.status}`);
@@ -246,9 +247,13 @@ export async function syncCodebase(
 			{ sessionId: handshake.sessionId, attemptId: handshake.attemptId },
 			chunks,
 		);
+		const uploadedBytes = eligible.reduce(
+			(total, entry) => total + entry.size,
+			0,
+		);
 		if (output === "human") {
 			console.log(
-				`Content: ${eligible.length} file(s), ${manifest.totalBytes} byte(s) (${contentStatus.status})`,
+				`Content: ${eligible.length} file(s), ${uploadedBytes} byte(s) (${contentStatus.status})`,
 			);
 		}
 
@@ -267,7 +272,7 @@ export async function syncCodebase(
 			fileCount: completion.fileCount ?? manifest.fileCount,
 			excludedCount: completion.excludedCount ?? manifest.excludedCount,
 			uploadedFiles: ok ? eligible.length : 0,
-			uploadedBytes: ok ? manifest.totalBytes : 0,
+			uploadedBytes: ok ? uploadedBytes : 0,
 			...(completion.snapshotId ? { snapshotId: completion.snapshotId } : {}),
 			...(!ok
 				? {

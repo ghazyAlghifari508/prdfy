@@ -120,6 +120,9 @@ export async function withSyncRetry<T>(
 	options: RetryOptions = {},
 ): Promise<T> {
 	const maxAttempts = options.maxAttempts ?? SYNC_MAX_ATTEMPTS;
+	if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+		throw new Error("maxAttempts must be a positive integer");
+	}
 	let lastError: unknown;
 	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 		try {

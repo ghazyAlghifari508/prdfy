@@ -10,8 +10,12 @@ export async function subtaskUpdateCommand(
 	options: { index: string; status: string },
 ) {
 	try {
-		const subtaskIndex = parseInt(options.index, 10);
-		if (Number.isNaN(subtaskIndex) || subtaskIndex < 0) {
+		const subtaskIndex = Number(options.index);
+		if (
+			!/^\d+$/.test(options.index || "") ||
+			!Number.isSafeInteger(subtaskIndex) ||
+			subtaskIndex < 0
+		) {
 			console.log(chalk.red("Error: --index harus angka non-negatif."));
 			process.exit(1);
 		}
@@ -20,7 +24,7 @@ export async function subtaskUpdateCommand(
 			taskId: string;
 			subtaskIndex: number;
 			status: string;
-		}>(`/api/v1/subtasks/${taskId}/status`, {
+		}>(`/api/v1/subtasks/${encodeURIComponent(taskId)}/status`, {
 			subtaskIndex,
 			status: options.status,
 		});

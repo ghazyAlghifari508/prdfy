@@ -13,7 +13,9 @@ interface PrdResponse {
 
 export async function prdCommand(projectId: string) {
 	try {
-		const data = await apiGet<PrdResponse>(`/api/v1/projects/${projectId}/prd`);
+		const data = await apiGet<PrdResponse>(
+			`/api/v1/projects/${encodeURIComponent(projectId)}/prd`,
+		);
 		console.log(chalk.bold(`\nPRD (v${data.version}):\n`));
 		console.log(data.content);
 		console.log();

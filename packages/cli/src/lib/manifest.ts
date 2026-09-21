@@ -200,6 +200,17 @@ export async function buildManifest(
 	const maxFileBytes = options.maxFileBytes ?? CODEBASE_MAX_FILE_BYTES;
 	const maxSnapshotBytes =
 		options.maxSnapshotBytes ?? CODEBASE_MAX_SNAPSHOT_BYTES;
+	if (
+		(options.maxFileBytes !== undefined &&
+			(!Number.isFinite(options.maxFileBytes) || options.maxFileBytes <= 0)) ||
+		(options.maxSnapshotBytes !== undefined &&
+			(!Number.isFinite(options.maxSnapshotBytes) ||
+				options.maxSnapshotBytes <= 0))
+	) {
+		throw new Error(
+			"Invalid manifest options: bounds must be positive numbers",
+		);
+	}
 
 	const entries: ManifestEntry[] = [];
 	const excluded: ExcludedEntry[] = [...scan.excluded];
@@ -242,6 +253,20 @@ export async function buildManifest(
 		}
 
 		const size = bytes.length;
+		// Recheck size in case file grew concurrently between scan and read
+		if (size > maxFileBytes) {
+			entries.push({
+				path: file.path,
+				size,
+				hash: hashBytes(bytes),
+				language: detectLanguage(file.path),
+				contentEligible: false,
+				exclusionReason: "too-large:file",
+			});
+			excluded.push({ path: file.path, reason: "too-large:file" });
+			continue;
+		}
+
 		// Zero-byte files carry no content to analyze and can never satisfy the
 		// strict non-empty chunk upload contract, so they are a local exclusion
 		// (counted in excludedCount) and never reach the server manifest.

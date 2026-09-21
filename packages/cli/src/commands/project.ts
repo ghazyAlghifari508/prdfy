@@ -8,7 +8,7 @@ import { apiGet } from "../lib/api-client.js";
 export async function projectGetCommand(projectId: string) {
 	try {
 		const data = await apiGet<Record<string, unknown>>(
-			`/api/v1/projects/${projectId}`,
+			`/api/v1/projects/${encodeURIComponent(projectId)}`,
 		);
 		console.log(JSON.stringify(data, null, 2));
 	} catch (err) {

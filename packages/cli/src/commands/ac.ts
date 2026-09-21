@@ -13,7 +13,9 @@ interface AcResponse {
 
 export async function acCommand(projectId: string) {
 	try {
-		const data = await apiGet<AcResponse>(`/api/v1/projects/${projectId}/ac`);
+		const data = await apiGet<AcResponse>(
+			`/api/v1/projects/${encodeURIComponent(projectId)}/ac`,
+		);
 		console.log(chalk.bold(`\nAcceptance Criteria (v${data.version}):\n`));
 		console.log(data.content);
 		console.log();

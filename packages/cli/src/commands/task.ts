@@ -27,9 +27,11 @@ export async function taskListCommand(
 	options: { status?: string },
 ) {
 	try {
-		const qs = options.status ? `?status=${options.status}` : "";
+		const qs = options.status
+			? `?status=${encodeURIComponent(options.status)}`
+			: "";
 		const data = await apiGet<{ tasks: TaskResponse[] }>(
-			`/api/v1/projects/${projectId}/tasks${qs}`,
+			`/api/v1/projects/${encodeURIComponent(projectId)}/tasks${qs}`,
 		);
 
 		if (data.tasks.length === 0) {
@@ -82,7 +84,7 @@ export async function taskUpdateCommand(
 ) {
 	try {
 		const result = await apiPost<{ id: string; status: string }>(
-			`/api/v1/tasks/${taskId}/status`,
+			`/api/v1/tasks/${encodeURIComponent(taskId)}/status`,
 			{ status: options.status },
 		);
 		console.log(chalk.green(`✓ Task ${result.id} → ${result.status}`));
@@ -97,13 +99,11 @@ export async function taskUpdateCommand(
 export async function taskNextCommand(projectId: string) {
 	try {
 		const data = await apiGet<{ tasks: TaskResponse[] }>(
-			`/api/v1/projects/${projectId}/tasks?status=pending`,
+			`/api/v1/projects/${encodeURIComponent(projectId)}/tasks?status=pending`,
 		);
 
 		if (data.tasks.length === 0) {
-			console.log(
-				chalk.green("✓ Semua task sudah selesai! Tidak ada task pending."),
-			);
+			console.log(chalk.green("✓ Tidak ada task pending."));
 			return;
 		}
 

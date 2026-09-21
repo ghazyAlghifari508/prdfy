@@ -8,7 +8,11 @@
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version?: string };
+const pkg = require("../../package.json") as { version?: unknown };
+
+if (typeof pkg.version !== "string" || pkg.version.trim().length === 0) {
+	throw new Error("Invalid or missing CLI version in package.json");
+}
 
 /** Current CLI version (mirrors `packages/cli/package.json`). */
-export const CLI_VERSION: string = pkg.version ?? "0.0.0";
+export const CLI_VERSION: string = pkg.version;

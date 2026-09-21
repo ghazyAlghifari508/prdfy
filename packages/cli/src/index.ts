@@ -122,9 +122,9 @@ codebaseCmd
 	.command("sync")
 	.description("Sync a filtered local repository snapshot to PrdFy")
 	.requiredOption("--project-id <id>", "Project UUID")
-	.requiredOption(
+	.option(
 		"--sync-token <token>",
-		"Project-scoped sync token (passed in memory, never stored)",
+		"Project-scoped sync token (prefer PRDFY_SYNC_TOKEN env var; never stored)",
 	)
 	.option("--root <path>", "Repository root (default: current directory)")
 	.option("--output <mode>", "Output mode (human|json)", "human")
@@ -150,5 +150,5 @@ const invokedAsMain =
 	typeof process.argv[1] === "string" &&
 	import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedAsMain) {
-	program.parse(process.argv);
+	await program.parseAsync(process.argv);
 }

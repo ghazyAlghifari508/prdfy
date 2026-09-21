@@ -77,7 +77,7 @@ export async function scanRepository(
 	root: string,
 	rules: IgnoreRules,
 ): Promise<RepositoryScan> {
-	const resolvedRoot = resolve(root);
+	const resolvedRoot = await realpath(resolve(root)).catch(() => resolve(root));
 	const rootStat = await stat(resolvedRoot).catch((err) => {
 		throw new Error(
 			`Cannot scan repository root: ${err instanceof Error ? err.message : String(err)}`,
@@ -170,12 +170,18 @@ export async function scanRepository(
 		// Readability probe (no bytes loaded): unreadable files are excluded
 		// here so the scan never fails later; content loading stays in
 		// `manifest.ts`.
+		let handle: Awaited<ReturnType<typeof open>> | undefined;
 		try {
-			const handle = await open(absolutePath, "r");
-			await handle.close();
+			handle = await open(absolutePath, "r");
 		} catch {
 			excluded.push({ path: normalized, reason: "unreadable:file" });
 			return;
+		} finally {
+			if (handle) {
+				try {
+					await handle.close();
+				} catch {}
+			}
 		}
 
 		const builtIn = isBuiltInExcluded(normalized, false);

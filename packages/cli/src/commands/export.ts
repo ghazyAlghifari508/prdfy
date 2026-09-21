@@ -38,7 +38,9 @@ function extractTechStack(prd: string): string {
 		if (matchedHeading) continue;
 		if (!capture) continue;
 		if (/^##\s/.test(line) && !headings.some((h) => h.test(line))) {
-			if (depth > 0) break;
+			capture = false;
+			depth = 0;
+			continue;
 		}
 		if (capture && depth === 0 && !headings.some((h) => h.test(line))) {
 			// first non-heading line after match starts subsection capture
@@ -57,11 +59,22 @@ export async function exportRulesCommand(
 	projectId: string,
 	_options: { format?: string } = {},
 ) {
-	const format = _options.format ?? "claude";
+	const rawFormat = _options.format ?? "claude";
+	const format = rawFormat.toLowerCase();
+	if (!["claude", "cursor", "agents"].includes(format)) {
+		console.error(
+			`Error: Format "${rawFormat}" tidak didukung. Pilihan: claude, cursor, agents`,
+		);
+		process.exit(1);
+	}
 	try {
 		const [prdData, acData] = await Promise.all([
-			apiGet<PrdAcResponse>(`/api/v1/projects/${projectId}/prd`),
-			apiGet<PrdAcResponse>(`/api/v1/projects/${projectId}/ac`),
+			apiGet<PrdAcResponse>(
+				`/api/v1/projects/${encodeURIComponent(projectId)}/prd`,
+			),
+			apiGet<PrdAcResponse>(
+				`/api/v1/projects/${encodeURIComponent(projectId)}/ac`,
+			),
 		]);
 
 		const techStack = extractTechStack(prdData.content);
