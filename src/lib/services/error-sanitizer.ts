@@ -5,7 +5,11 @@ export function sanitizeErrorForClient(error: unknown, context?: "ac"): string {
 	if (!(error instanceof Error))
 		return "Terjadi kesalahan yang tidak diketahui.";
 
+	// Normalize once: matching is case-insensitive throughout, and every
+	// branch below matches narrowly scoped tokens (status codes, structured
+	// markers) instead of generic substrings like "Edge" or "fetch".
 	const msg = error.message;
+	const lower = msg.toLocaleLowerCase("en");
 
 	if (context === "ac") {
 		if (msg.includes("Respons kosong"))
@@ -24,28 +28,34 @@ export function sanitizeErrorForClient(error: unknown, context?: "ac"): string {
 	)
 		return msg;
 
-	if (
-		msg.toLowerCase().includes("timed out") ||
-		msg.toLowerCase().includes("aborted")
-	) {
+	if (lower.includes("timed out") || lower.includes("aborted")) {
 		return "Penyimpanan ke database terlalu lama (timeout). Silakan klik tombol 'Retry Simpan' untuk mencoba menyimpan ulang hasil.";
 	}
 
-	if (msg.includes("504") || msg.includes("timeout") || msg.includes("Edge")) {
+	if (
+		lower.includes("504") ||
+		lower.includes("gateway timeout") ||
+		lower.includes("timedout")
+	) {
 		return "Generate PRD terlalu lama (server timeout). PRD mungkin sudah tersimpan sebagian - refresh halaman. Tips: pakai model ringan seperti Ling 3.0 Flash untuk generate yang lebih cepat.";
 	}
 
-	if (msg.includes("9Router") || msg.includes("fetch")) {
+	if (
+		lower.includes("9router") ||
+		lower.includes("failed to fetch") ||
+		lower.includes("fetch failed") ||
+		lower.includes("networkerror")
+	) {
 		return "Maaf, layanan AI sedang tidak tersedia atau sibuk. Silakan coba lagi dalam beberapa saat.";
 	}
 
-	if (msg.includes("rate") || msg.includes("429"))
+	if (lower.includes("429") || lower.includes("too many requests"))
 		return "Terlalu banyak permintaan. Silakan tunggu sebentar.";
 
 	if (
-		msg.includes("pgrst") ||
-		msg.includes("PostgrestError") ||
-		msg.includes("insforge")
+		lower.includes("pgrst") ||
+		lower.includes("postgresterror") ||
+		lower.includes("insforge")
 	) {
 		return "Terjadi kesalahan pada server. Silakan coba lagi.";
 	}

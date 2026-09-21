@@ -22,10 +22,16 @@ export async function generateZipBuffer(files: {
 	ac?: string;
 	tasks?: string;
 }): Promise<Buffer> {
-	const { default: JSZip } = await import("jszip");
-	const zip = new JSZip();
-	if (files.prd) zip.file("prd.md", files.prd);
-	if (files.ac) zip.file("ac.md", files.ac);
-	if (files.tasks) zip.file("tasks.json", files.tasks);
-	return zip.generateAsync({ type: "nodebuffer" });
+	// Presence (not truthiness) decides inclusion: an intentionally empty
+	// document must still export as an empty file.
+	try {
+		const { default: JSZip } = await import("jszip");
+		const zip = new JSZip();
+		if (files.prd !== undefined) zip.file("prd.md", files.prd);
+		if (files.ac !== undefined) zip.file("ac.md", files.ac);
+		if (files.tasks !== undefined) zip.file("tasks.json", files.tasks);
+		return await zip.generateAsync({ type: "nodebuffer" });
+	} catch (e) {
+		throw new Error("Gagal membuat arsip ZIP.", { cause: e });
+	}
 }

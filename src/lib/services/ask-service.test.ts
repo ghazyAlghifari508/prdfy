@@ -1,6 +1,96 @@
 import { describe, expect, it } from "vitest";
 import { parseAskOptionsJson } from "./ask-service";
 
+describe("parseAskOptionsJson bounds", () => {
+	it("rejects whitespace-only ids, questions, and options", () => {
+		expect(
+			parseAskOptionsJson(
+				JSON.stringify({
+					questions: [
+						{ id: "   ", question: "Valid?", type: "text" },
+						{ id: "b", question: "Valid?", type: "text" },
+						{ id: "c", question: "Valid?", type: "text" },
+					],
+				}),
+			),
+		).toBeNull();
+		expect(
+			parseAskOptionsJson(
+				JSON.stringify({
+					questions: [
+						{ id: "a", question: "   ", type: "text" },
+						{ id: "b", question: "Valid?", type: "text" },
+						{ id: "c", question: "Valid?", type: "text" },
+					],
+				}),
+			),
+		).toBeNull();
+		expect(
+			parseAskOptionsJson(
+				JSON.stringify({
+					questions: [
+						{
+							id: "a",
+							question: "Valid?",
+							type: "select",
+							options: ["  ", "Real"],
+						},
+						{ id: "b", question: "Valid?", type: "text" },
+						{ id: "c", question: "Valid?", type: "text" },
+					],
+				}),
+			),
+		).toBeNull();
+	});
+
+	it("rejects option arrays beyond the per-question cap", () => {
+		expect(
+			parseAskOptionsJson(
+				JSON.stringify({
+					questions: [
+						{
+							id: "a",
+							question: "Valid?",
+							type: "select",
+							options: Array.from({ length: 13 }, (_, i) => `opt-${i}`),
+						},
+						{ id: "b", question: "Valid?", type: "text" },
+						{ id: "c", question: "Valid?", type: "text" },
+					],
+				}),
+			),
+		).toBeNull();
+	});
+
+	it("trims accepted strings", () => {
+		expect(
+			parseAskOptionsJson(
+				JSON.stringify({
+					questions: [
+						{
+							id: "  padded  ",
+							question: "  Padded?  ",
+							type: "select",
+							options: ["  X  "],
+						},
+						{ id: "b", question: "Valid?", type: "text" },
+						{ id: "c", question: "Valid?", type: "text" },
+					],
+				}),
+			),
+		).toEqual([
+			{
+				id: "padded",
+				question: "Padded?",
+				type: "select",
+				options: ["X"],
+			},
+			{ id: "b", question: "Valid?", type: "text" },
+			{ id: "c", question: "Valid?", type: "text" },
+		]);
+	});
+});
+
 describe("parseAskOptionsJson", () => {
 	it("parses a valid question list with mixed types", () => {
 		const result = parseAskOptionsJson(

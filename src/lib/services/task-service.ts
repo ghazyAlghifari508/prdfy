@@ -27,30 +27,84 @@ export interface TaskTree {
 	}>;
 }
 
+const MAX_TASK_NAME_CHARS = 500;
+const MAX_TASK_DESC_CHARS = 5000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown, max: number): value is string {
+	return typeof value === "string" && !!value.trim() && value.length <= max;
+}
+
 export function parseTaskJson(jsonString: string): TaskTree | null {
 	try {
-		const parsed = JSON.parse(jsonString);
-		if (
-			!parsed.features ||
-			!Array.isArray(parsed.features) ||
-			parsed.features.length === 0
-		)
-			return null;
-		for (const feature of parsed.features) {
-			if (!feature.name || !Array.isArray(feature.tasks)) return null;
+		const parsed: unknown = JSON.parse(jsonString);
+		if (!isRecord(parsed)) return null;
+		const { features } = parsed;
+		if (!Array.isArray(features) || features.length === 0) return null;
+		// Rebuild a validated tree instead of trusting + casting the raw
+		// payload: every persisted string field is verified here.
+		const out: TaskTree = { features: [] };
+		for (const feature of features) {
+			if (!isRecord(feature)) return null;
+			if (!isNonEmptyString(feature.name, MAX_TASK_NAME_CHARS)) return null;
+			if (!Array.isArray(feature.tasks)) return null;
+			const outFeature: TaskTree["features"][number] = {
+				name: feature.name.trim(),
+				tasks: [],
+			};
 			for (const task of feature.tasks) {
-				if (!task.name || !Array.isArray(task.subtasks)) return null;
+				if (!isRecord(task)) return null;
+				if (!isNonEmptyString(task.name, MAX_TASK_NAME_CHARS)) return null;
+				if (
+					task.description !== undefined &&
+					(typeof task.description !== "string" ||
+						task.description.length > MAX_TASK_DESC_CHARS)
+				)
+					return null;
+				if (!Array.isArray(task.subtasks)) return null;
+				const outTask: TaskTree["features"][number]["tasks"][number] = {
+					name: task.name.trim(),
+					description:
+						typeof task.description === "string" ? task.description : "",
+					subtasks: [],
+				};
 				for (const subtask of task.subtasks) {
-					if (!subtask.name) return null;
-					if (subtask.details !== undefined && !Array.isArray(subtask.details))
+					if (!isRecord(subtask)) return null;
+					if (!isNonEmptyString(subtask.name, MAX_TASK_NAME_CHARS))
 						return null;
-					subtask.details = Array.isArray(subtask.details)
-						? subtask.details
-						: [];
+					if (
+						subtask.description !== undefined &&
+						(typeof subtask.description !== "string" ||
+							subtask.description.length > MAX_TASK_DESC_CHARS)
+					)
+						return null;
+					const details =
+						subtask.details === undefined ? [] : subtask.details;
+					if (
+						!Array.isArray(details) ||
+						!details.every(
+							(d): d is string =>
+								typeof d === "string" && d.length <= MAX_TASK_DESC_CHARS,
+						)
+					)
+						return null;
+					outTask.subtasks.push({
+						name: subtask.name.trim(),
+						description:
+							typeof subtask.description === "string"
+								? subtask.description
+								: "",
+						details: [...details],
+					});
 				}
+				outFeature.tasks.push(outTask);
 			}
+			out.features.push(outFeature);
 		}
-		return parsed as TaskTree;
+		return out;
 	} catch {
 		return null;
 	}
@@ -69,32 +123,30 @@ export async function saveTaskTree(
 > {
 	try {
 		const artifactId = crypto.randomUUID();
-		let totalTasks = 0;
+		// Build all rows first, then one bulk insert: per-task round trips
+		// held the transaction (and its locks) open for large trees.
+		let order = 0;
+		const rows = taskTree.features.flatMap((feature) =>
+			feature.tasks.map((task) => ({
+				id: crypto.randomUUID(),
+				projectId,
+				title: task.name,
+				description: task.description || null,
+				featureName: feature.name,
+				status: "pending",
+				subtasks: task.subtasks.map((s) => ({
+					name: s.name,
+					description: s.description,
+					details: s.details ?? [],
+					status: "pending" as const,
+				})),
+				order: order++,
+			})),
+		);
+		const totalTasks = rows.length;
 		await db.transaction(async (tx) => {
 			await tx.delete(tasks).where(eq(tasks.projectId, projectId));
-
-			let order = 0;
-			for (const feature of taskTree.features) {
-				for (const task of feature.tasks) {
-					totalTasks++;
-					const subtaskRows = task.subtasks.map((s) => ({
-						name: s.name,
-						description: s.description,
-						details: s.details ?? [],
-						status: "pending" as const,
-					}));
-					await tx.insert(tasks).values({
-						id: crypto.randomUUID(),
-						projectId,
-						title: task.name,
-						description: task.description || null,
-						featureName: feature.name,
-						status: "pending",
-						subtasks: subtaskRows,
-						order: order++,
-					});
-				}
-			}
+			if (rows.length > 0) await tx.insert(tasks).values(rows);
 
 			// Row lock serializes concurrent savers so a stale step read
 			// can never rewind a newer value (mirrors saveAcVersion).
@@ -144,7 +196,10 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 
 		const featureMap = new Map<string, TaskTree["features"][number]>();
 		for (const row of rows) {
-			const fname = row.featureName || "Umum";
+			const fname =
+				typeof row.featureName === "string" && row.featureName
+					? row.featureName
+					: "Umum";
 			const feature =
 				featureMap.get(fname) ??
 				(() => {
@@ -156,20 +211,23 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 					return f;
 				})();
 
-			const subtasks = Array.isArray(row.subtasks)
-				? (
-						row.subtasks as Array<{
-							name: string;
-							description: string;
-							details?: string[];
-							status?: string;
-						}>
-					).map((s) => ({
-						name: s.name,
-						description: s.description || "",
-						details: s.details ?? [],
-					}))
-				: [];
+			// Same normalization as getKanbanData: drop malformed subtask
+			// entries instead of trusting jsonb casts.
+			const subtasks = (
+				Array.isArray(row.subtasks) ? row.subtasks : []
+			).filter(
+				(s): s is Record<string, unknown> =>
+					s !== null &&
+					typeof s === "object" &&
+					typeof (s as Record<string, unknown>).name === "string",
+			).map((s) => ({
+				name: s.name as string,
+				description:
+					typeof s.description === "string" ? s.description : "",
+				details: Array.isArray(s.details)
+					? s.details.filter((d): d is string => typeof d === "string")
+					: [],
+			}));
 
 			// ponytail: feature guaranteed present via lazy-init above; push onto it
 			feature.tasks.push({
@@ -270,42 +328,78 @@ export async function getKanbanData(projectId: string): Promise<{
 		failed: [],
 	};
 
+	const VALID_CARD_STATUSES = new Set([
+		"pending",
+		"in_progress",
+		"completed",
+		"failed",
+	] as const);
+	type CardStatus = "pending" | "in_progress" | "completed" | "failed";
+	const toIso = (d: unknown): string | null => {
+		if (!d) return null;
+		if (d instanceof Date)
+			return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+		const parsed = new Date(d as string);
+		return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+	};
+
 	for (const t of taskRows) {
-		const sub = Array.isArray(t.subtasks)
-			? (t.subtasks as Array<Record<string, unknown>>)
-			: [];
+		// Normalize DB values into the declared card shape instead of
+		// casting: invalid statuses fall back to pending, malformed subtask
+		// entries are dropped, non-string dependencies are filtered out.
+		const sub = Array.isArray(t.subtasks) ? t.subtasks : [];
+		const validSubs = sub.filter(
+			(s): s is Record<string, unknown> =>
+				s !== null &&
+				typeof s === "object" &&
+				typeof (s as Record<string, unknown>).name === "string",
+		);
+		const rawStatus = t.status ?? "pending";
+		const status: CardStatus = VALID_CARD_STATUSES.has(
+			rawStatus as CardStatus,
+		)
+			? (rawStatus as CardStatus)
+			: "pending";
 		const card = {
 			id: t.id,
 			type: "task" as const,
 			featureName: t.featureName || "Umum",
 			name: t.title,
 			description: t.description ?? "",
-			status: (t.status ?? "pending") as
-				| "pending"
-				| "in_progress"
-				| "completed"
-				| "failed",
-			subtaskCount: sub.length,
-			subtaskCompleted: sub.filter((s) => s.status === "completed").length,
+			status,
+			subtaskCount: validSubs.length,
+			subtaskCompleted: validSubs.filter((s) => s.status === "completed")
+				.length,
 			dependencies: Array.isArray(t.dependencies)
-				? (t.dependencies as string[])
+				? t.dependencies.filter((d): d is string => typeof d === "string")
 				: [],
-			startedAt: t.startedAt ? (t.startedAt as Date).toISOString() : null,
-			completedAt: t.completedAt ? (t.completedAt as Date).toISOString() : null,
-			subtasks: sub.map((s) => ({
+			startedAt: toIso(t.startedAt),
+			completedAt: toIso(t.completedAt),
+			subtasks: validSubs.map((s) => ({
 				name: s.name as string,
-				status: (s.status as string) ?? "pending",
+				status:
+					typeof s.status === "string" && VALID_CARD_STATUSES.has(s.status as CardStatus)
+						? (s.status as string)
+						: "pending",
 			})),
 		};
 		(columns[card.status] ?? columns.pending).push(card);
 	}
 
 	const latestAcAt = acRow?.createdAt ?? null;
-	const tasksCreatedAt = taskRows[0]?.createdAt ?? null;
+	// Minimum creation timestamp across rows — display order is by `order`,
+	// so row[0] is not necessarily the oldest task.
+	let oldestTaskAt: Date | null = null;
+	for (const t of taskRows) {
+		if (!t.createdAt) continue;
+		const d = t.createdAt instanceof Date ? t.createdAt : new Date(t.createdAt);
+		if (!Number.isFinite(d.getTime())) continue;
+		if (!oldestTaskAt || d < oldestTaskAt) oldestTaskAt = d;
+	}
 	const acChanged = Boolean(
 		latestAcAt &&
-			tasksCreatedAt &&
-			new Date(latestAcAt as Date) > new Date(tasksCreatedAt as Date),
+			oldestTaskAt &&
+			new Date(latestAcAt).getTime() > oldestTaskAt.getTime(),
 	);
 
 	return {

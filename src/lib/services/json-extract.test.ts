@@ -20,4 +20,15 @@ describe("extractJson", () => {
 		const raw = 'noise before {"a": 1} noise after';
 		expect(JSON.parse(extractJson(raw))).toEqual({ a: 1 });
 	});
+
+	it("prefers the valid fence when a later unrelated fence exists", () => {
+		const raw =
+			'```json\n{"a": 1}\n```\n\nSome closing notes:\n```text\nbye\n```';
+		expect(JSON.parse(extractJson(raw))).toEqual({ a: 1 });
+	});
+
+	it("ignores braces inside prose and JSON strings when scanning", () => {
+		const raw = 'Use `{foo}` and return {"ok":true} trailing';
+		expect(JSON.parse(extractJson(raw))).toEqual({ ok: true });
+	});
 });

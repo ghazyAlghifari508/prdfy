@@ -5,7 +5,7 @@
  * ponytail: projects has no `preferences` col → ensureConversation ignores the
  * preferences arg (mode derived from presence, but not persisted).
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { conversations, messages, projects } from "@/db/schema";
 
@@ -14,11 +14,18 @@ export interface ConversationMessage {
 	content: string;
 }
 
+const MAX_HISTORY_LIMIT = 100;
+
 export async function getConversationHistory(
 	conversationId: string,
 	userId: string,
 	limit = 20,
 ): Promise<{ messages: ConversationMessage[]; valid: boolean }> {
+	// Clamp caller-controlled limits; newest-first then reversed so long
+	// conversations keep the latest turns instead of the oldest ones.
+	const take = Number.isSafeInteger(limit)
+		? Math.min(Math.max(limit, 1), MAX_HISTORY_LIMIT)
+		: 20;
 	const [conv] = await db
 		.select({ id: conversations.id })
 		.from(conversations)
@@ -35,8 +42,9 @@ export async function getConversationHistory(
 		.select({ role: messages.role, content: messages.content })
 		.from(messages)
 		.where(eq(messages.conversationId, conversationId))
-		.orderBy(asc(messages.createdAt))
-		.limit(limit);
+		.orderBy(desc(messages.createdAt))
+		.limit(take);
+	rows.reverse();
 
 	return {
 		valid: true,
