@@ -17,6 +17,7 @@ import {
 	consumeResumeIntent,
 	consumeSuppressAutoGen,
 } from "@/lib/prompt-handoff";
+import { readSseStream } from "@/lib/sse-stream";
 import { cn } from "@/lib/utils";
 import { useChatStore, useUIStore } from "@/store";
 import type { Plan } from "@/types/database";
@@ -34,8 +35,17 @@ interface AcDetailProps {
 // ponytail: module-level in-flight guard. StrictMode's phantom
 // unmount->remount aborts the first fetch but the remount fires a second
 // generate before the server frees its claim — dedupe at module scope so both
-// mounts share one generation per project instead of racing two.
-const inFlightAcProjects = new Set<string>();
+// mounts share one generation per project instead of racing two. Keyed by the
+// owning controller so an older request's cleanup can never release a guard
+// that a newer request has since acquired.
+const inFlightAcProjects = new Map<string, AbortController>();
+
+/** Release the guard only when this request still owns it. */
+function releaseAcGuard(projectId: string, owner: AbortController) {
+	if (inFlightAcProjects.get(projectId) === owner) {
+		inFlightAcProjects.delete(projectId);
+	}
+}
 
 export function AcDetail({
 	projectId,
@@ -48,7 +58,6 @@ export function AcDetail({
 	const router = useRouter();
 	const navigate = useNavigate();
 	const searchStr = useLocation({ select: (l) => l.searchStr });
-	const searchParams = new URLSearchParams(searchStr);
 	const showToast = useUIStore((s) => s.showToast);
 	const setGeneratingAC = useChatStore((s) => s.setGeneratingAC);
 	const creditsExhausted = useChatStore((s) => s.creditsExhausted);
@@ -122,17 +131,19 @@ export function AcDetail({
 			}
 			if (inFlightAcProjects.has(projectId)) return;
 		}
-		inFlightAcProjects.add(projectId);
+
+		abortRef.current?.abort();
+		const controller = new AbortController();
+		abortRef.current = controller;
+		// Acquire the guard keyed by this controller — only this request can
+		// release it, so an aborted older stream can't free a newer one's slot.
+		inFlightAcProjects.set(projectId, controller);
 		setIsGenerating(true);
 		setGeneratingAC(true);
 		setStreamingContent("");
 		contentRef.current = "";
 		setHasError(false);
 		setSaveFailed(false);
-
-		abortRef.current?.abort();
-		const controller = new AbortController();
-		abortRef.current = controller;
 
 		try {
 			const response = await fetch("/api/ac/generate", {
@@ -144,7 +155,7 @@ export function AcDetail({
 				signal: controller.signal,
 			});
 			if (!response.ok) {
-				const error = await response.json();
+				const error = await response.json().catch(() => ({}));
 				if (response.status === 403) {
 					if (error.code === "UPGRADE_REQUIRED") {
 						showToast(
@@ -162,12 +173,13 @@ export function AcDetail({
 					return;
 				}
 				if (response.status === 409) {
-					// ponytail: drop OUR membership first — the finally-block would
-					// mask whether anyone else still owns the stream. Owner alive
-					// (double-click) → stay silent, their UI is streaming. No owner
-					// (StrictMode phantom aborted it) → the claim was stale; paint
-					// the retryable error state instead of a fake-loading dead end.
-					inFlightAcProjects.delete(projectId);
+					// Release our own guard slot (we own it), then check whether
+					// any *other* live request still owns a generation. Owner
+					// alive (double-click) → stay silent, their UI is streaming.
+					// No owner (StrictMode phantom aborted it) → the claim was
+					// stale; paint the retryable error state instead of a
+					// fake-loading dead end.
+					releaseAcGuard(projectId, controller);
 					if (!inFlightAcProjects.has(projectId)) {
 						setHasError(true);
 						showToast(
@@ -181,55 +193,48 @@ export function AcDetail({
 				}
 				throw new Error(error.error || "Failed to generate AC");
 			}
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error("No reader available");
-			const decoder = new TextDecoder();
-			let buffer = "";
 			let receivedTerminalEvent = false;
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split("\n");
-				buffer = lines.pop() || "";
-				for (const line of lines) {
-					if (line.startsWith("data: ")) {
-						try {
-							const data = JSON.parse(line.slice(6));
-							if (data.type === "thinking") {
-								setThinkingText((prev) => prev + data.content);
-							} else if (data.type === "delta") {
-								if (thinkingText) setThinkingText("");
-								contentRef.current += data.content;
-								setStreamingContent((prev) => prev + data.content);
-							} else if (data.type === "done") {
-								receivedTerminalEvent = true;
-								// Optimistic: tampilkan streamingContent langsung tanpa nunggu loader
-								setLocalAcContent(contentRef.current);
-								router.invalidate();
-								showToast(
-									"Acceptance Criteria berhasil digenerate!",
-									"success",
-								);
-								setIsGenerating(false);
-								setGeneratingAC(false);
-							} else if (data.type === "error") {
-								receivedTerminalEvent = true;
-								setIsGenerating(false);
-								setGeneratingAC(false);
-								// Content already streamed but the DB save (Phase 2) failed - offer
-								// recovery instead of the generic error state (PRD US-2, AC-2.1/2.2).
-								if (contentRef.current.length > 0) {
-									setSaveFailed(true);
-								} else {
-									setHasError(true);
-								}
-								showToast(data.error || "Gagal generate AC", "error");
-							}
-						} catch {
-							/* skip malformed SSE line */
-						}
+			// The shared parser flushes the trailing buffer so a final done/error
+			// frame without a newline is never dropped, and stops the moment a
+			// terminal event arrives so nothing after it can overwrite the result.
+			for await (const data of readSseStream(response.body)) {
+				let event: { type?: string; content?: string; error?: string };
+				try {
+					event = JSON.parse(data);
+				} catch {
+					continue;
+				}
+				if (event.type === "thinking") {
+					setThinkingText((prev) => prev + (event.content ?? ""));
+				} else if (event.type === "delta") {
+					// Clear unconditionally — reading the stale render-time
+					// `thinkingText` here left the panel visible after the first
+					// token arrived. React bails out when already empty.
+					setThinkingText("");
+					contentRef.current += event.content ?? "";
+					setStreamingContent((prev) => prev + (event.content ?? ""));
+				} else if (event.type === "done") {
+					receivedTerminalEvent = true;
+					// Optimistic: tampilkan streamingContent langsung tanpa nunggu loader
+					setLocalAcContent(contentRef.current);
+					router.invalidate();
+					showToast("Acceptance Criteria berhasil digenerate!", "success");
+					setIsGenerating(false);
+					setGeneratingAC(false);
+					break;
+				} else if (event.type === "error") {
+					receivedTerminalEvent = true;
+					setIsGenerating(false);
+					setGeneratingAC(false);
+					// Content already streamed but the DB save (Phase 2) failed - offer
+					// recovery instead of the generic error state (PRD US-2, AC-2.1/2.2).
+					if (contentRef.current.length > 0) {
+						setSaveFailed(true);
+					} else {
+						setHasError(true);
 					}
+					showToast(event.error || "Gagal generate AC", "error");
+					break;
 				}
 			}
 			// Stream closed without a done/error event (connection dropped mid-stream) -
@@ -276,7 +281,7 @@ export function AcDetail({
 			setIsGenerating(false);
 			setGeneratingAC(false);
 		} finally {
-			inFlightAcProjects.delete(projectId);
+			releaseAcGuard(projectId, controller);
 		}
 	}, [
 		projectId,
@@ -285,7 +290,6 @@ export function AcDetail({
 		router,
 		setGeneratingAC,
 		setCreditsExhausted,
-		thinkingText,
 	]);
 
 	// Sync server acStatus into store so navbar "Generate Task" stays disabled on refresh (Zustand is in-memory only)
@@ -317,11 +321,20 @@ export function AcDetail({
 		plan,
 	]);
 
-	// Auto-resume AC generation after payment return
+	// Auto-resume AC generation after payment return.
+	// Keyed by the raw search string + a per-orderId guard: `new
+	// URLSearchParams(searchStr)` is a fresh object every render, and
+	// handleGenerate changes identity mid-generation, so without this the
+	// resume flow could fire duplicate sync/generate calls while the
+	// Midtrans query params are still in the URL.
+	const resumedAcPaymentsRef = useRef<Set<string>>(new Set());
 	useEffect(() => {
-		const orderId = searchParams.get("order_id");
-		const payment = searchParams.get("payment");
+		const params = new URLSearchParams(searchStr);
+		const orderId = params.get("order_id");
+		const payment = params.get("payment");
 		if (!orderId || payment !== "success") return;
+		if (resumedAcPaymentsRef.current.has(orderId)) return;
+		resumedAcPaymentsRef.current.add(orderId);
 		(async () => {
 			try {
 				const res = await syncPaymentStatus({ data: orderId });
@@ -337,7 +350,7 @@ export function AcDetail({
 				console.error("Auto-resume payment sync failed:", e);
 			}
 		})();
-	}, [searchParams, handleGenerate, navigate, projectId]);
+	}, [searchStr, handleGenerate, navigate, projectId]);
 
 	// Abort in-flight generation on unmount/project switch only - kept as a
 	// separate effect (not the trigger effect's cleanup). Also resets
