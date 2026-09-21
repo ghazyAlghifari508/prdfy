@@ -14,10 +14,11 @@ import {
 	uploadTransitionSteps,
 } from "@/lib/codebase-sync";
 import {
-	getIdempotentReplay,
+	claimIdempotency,
+	finalizeIdempotencyClaim,
 	guardSyncUpload,
 	readBoundedJson,
-	storeIdempotentResponse,
+	releaseIdempotencyClaim,
 } from "@/lib/codebase-sync-upload.server";
 
 export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
@@ -27,9 +28,11 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 			// `{ sessionId, attemptId, batchIndex, batchTotal, entries,
 			// idempotencyKey }` per bounded batch. Batches merge into the
 			// handshake-bound snapshot manifest; duplicate batches replay
-			// idempotently; conflicting entries fail closed. Bearer sync
-			// credential only (see `codebase-sync-upload.server.ts` for the
-			// scope-separation rationale).
+			// idempotently; conflicting entries fail closed. The idempotency
+			// key is claimed before the merge runs, so concurrent retries of
+			// one batch cannot both merge. Bearer sync credential only (see
+			// `codebase-sync-upload.server.ts` for the scope-separation
+			// rationale).
 			POST: async ({
 				request,
 				params,
@@ -73,22 +76,37 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 					});
 				const { session, snapshot } = guard.ctx;
 
-				// Merge normalized entries. Identical re-sends are benign;
-				// same path with different identity fails closed.
-				const stored = manifestEntrySchema
-					.array()
-					.safeParse(snapshot.manifest ?? []);
-				if (!stored.success)
+				const claim = await claimIdempotency({
+					key: body.idempotencyKey,
+					sessionId: session.id,
+					snapshotId: snapshot.id,
+					kind: "manifest",
+				});
+				if (claim.status === "conflict")
 					return Response.json(
-						{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
-						{ status: 500 },
+						{
+							error: "Idempotency key is already bound to another operation",
+							code: "SNAPSHOT_CONFLICT",
+						},
+						{ status: 409 },
 					);
-
-				const replay = await getIdempotentReplay(body.idempotencyKey);
-				if (replay) {
+				if (claim.status === "in-progress")
+					return Response.json(
+						{ error: "Batch upload is in progress", code: "SYNC_IN_PROGRESS" },
+						{ status: 409 },
+					);
+				if (claim.status === "replay") {
 					// Replay-payload identity check (Task 9): the retried batch
 					// must agree with what the first write merged. A divergent
 					// retry fails closed instead of silently returning success.
+					const stored = manifestEntrySchema
+						.array()
+						.safeParse(snapshot.manifest ?? []);
+					if (!stored.success)
+						return Response.json(
+							{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
+							{ status: 500 },
+						);
 					if (!isManifestReplayCompatible(stored.data, body.entries))
 						return Response.json(
 							{
@@ -97,90 +115,105 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/manifest")({
 							},
 							{ status: 409 },
 						);
-					return Response.json(replay.response, {
-						status: replay.statusCode,
-					});
+					return Response.json(claim.response, { status: claim.statusCode });
 				}
 
-				// The session must be on the upload path (handshake happened).
-				// Each step is asserted valid before persisting `uploading`.
-				let steps: ReturnType<typeof uploadTransitionSteps>;
+				// Claimed: this request owns the key. Any path that ends without
+				// finalizing releases the claim so a legitimate retry is never
+				// wedged behind a pending sentinel.
+				let finalized = false;
 				try {
-					steps = uploadTransitionSteps(
-						session.status as Parameters<typeof uploadTransitionSteps>[0],
-					);
-				} catch {
-					return Response.json(
-						{
-							error: "Sync handshake required before upload",
-							code: "SYNC_FAILED",
-						},
-						{ status: 409 },
-					);
-				}
+					const stored = manifestEntrySchema
+						.array()
+						.safeParse(snapshot.manifest ?? []);
+					if (!stored.success)
+						return Response.json(
+							{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
+							{ status: 500 },
+						);
 
-				// Merge against the already-loaded manifest (parsed above for the
-				// replay identity check). Sequential-only guard (Task 5 → 9):
-				// the merge is a read-modify-write without a row lock because
-				// the supported CLI sends batches strictly sequentially
-				// (`uploadManifest`: `for` + `await` in sync-client.ts), so two
-				// merges for one snapshot can never interleave. A future
-				// concurrent client must move this merge into a transaction
-				// with SELECT … FOR UPDATE before enabling parallelism.
-				const byPath = new Map(stored.data.map((entry) => [entry.path, entry]));
-				for (const rawEntry of body.entries) {
-					const entry = {
-						...rawEntry,
-						hash: rawEntry.hash.toLowerCase(),
-					};
-					const previous = byPath.get(entry.path);
-					if (previous) {
-						if (
-							previous.size !== entry.size ||
-							previous.hash.toLowerCase() !== entry.hash ||
-							(previous.language ?? undefined) !== (entry.language ?? undefined)
-						) {
-							return Response.json(
-								{
-									error: "Manifest entry conflicts with uploaded manifest",
-									code: "SNAPSHOT_CONFLICT",
-								},
-								{ status: 409 },
-							);
-						}
-					} else {
-						byPath.set(entry.path, entry);
+					// The session must be on the upload path (handshake happened).
+					// Each step is asserted valid before persisting `uploading`.
+					let steps: ReturnType<typeof uploadTransitionSteps>;
+					try {
+						steps = uploadTransitionSteps(
+							session.status as Parameters<typeof uploadTransitionSteps>[0],
+						);
+					} catch {
+						return Response.json(
+							{
+								error: "Sync handshake required before upload",
+								code: "SYNC_FAILED",
+							},
+							{ status: 409 },
+						);
 					}
-				}
-				const merged = [...byPath.values()];
 
-				for (const [from, to] of steps) assertSyncTransition(from, to);
-				await db
-					.update(codebaseSnapshots)
-					.set({ manifest: merged })
-					.where(eq(codebaseSnapshots.id, snapshot.id));
-				if (steps.length > 0) {
+					// Merge against the stored manifest. Sequential-only guard
+					// (Task 5 → 9): the supported CLI sends batches strictly
+					// sequentially (`uploadManifest`: `for` + `await` in
+					// sync-client.ts), so two merges for one snapshot never
+					// interleave. A future concurrent client must move this
+					// merge into a transaction with SELECT ... FOR UPDATE
+					// before enabling parallelism.
+					const byPath = new Map(
+						stored.data.map((entry) => [entry.path, entry]),
+					);
+					for (const rawEntry of body.entries) {
+						const entry = {
+							...rawEntry,
+							hash: rawEntry.hash.toLowerCase(),
+						};
+						const previous = byPath.get(entry.path);
+						if (previous) {
+							if (
+								previous.size !== entry.size ||
+								previous.hash.toLowerCase() !== entry.hash ||
+								(previous.language ?? undefined) !==
+									(entry.language ?? undefined)
+							) {
+								return Response.json(
+									{
+										error: "Manifest entry conflicts with uploaded manifest",
+										code: "SNAPSHOT_CONFLICT",
+									},
+									{ status: 409 },
+								);
+							}
+						} else {
+							byPath.set(entry.path, entry);
+						}
+					}
+					const merged = [...byPath.values()];
+
+					for (const [from, to] of steps) assertSyncTransition(from, to);
 					await db
-						.update(codebaseSyncSessions)
-						.set({ status: "uploading", updatedAt: new Date() })
-						.where(eq(codebaseSyncSessions.id, session.id));
-				}
+						.update(codebaseSnapshots)
+						.set({ manifest: merged })
+						.where(eq(codebaseSnapshots.id, snapshot.id));
+					if (steps.length > 0) {
+						await db
+							.update(codebaseSyncSessions)
+							.set({ status: "uploading", updatedAt: new Date() })
+							.where(eq(codebaseSyncSessions.id, session.id));
+					}
 
-				const response = {
-					status: "uploading",
-					snapshotId: snapshot.id,
-					receivedEntries: merged.length,
-					batchIndex: body.batchIndex,
-				};
-				await storeIdempotentResponse({
-					key: body.idempotencyKey,
-					sessionId: session.id,
-					snapshotId: snapshot.id,
-					kind: "manifest",
-					statusCode: 200,
-					response,
-				});
-				return Response.json(response);
+					const response = {
+						status: "uploading",
+						snapshotId: snapshot.id,
+						receivedEntries: merged.length,
+						batchIndex: body.batchIndex,
+					};
+					await finalizeIdempotencyClaim({
+						key: body.idempotencyKey,
+						statusCode: 200,
+						response,
+					});
+					finalized = true;
+					return Response.json(response);
+				} finally {
+					if (!finalized) await releaseIdempotencyClaim(body.idempotencyKey);
+				}
 			},
 		},
 	},

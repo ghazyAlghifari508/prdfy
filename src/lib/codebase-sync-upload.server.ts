@@ -17,7 +17,7 @@
 // project binding + session binding + usability checks below ARE the
 // capability enforcement for this boundary.
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	codebaseSnapshots,
@@ -36,7 +36,10 @@ import {
 	SyncBindingError,
 } from "./codebase-sync";
 import { hashSyncToken } from "./codebase-sync.server";
-import { CODEBASE_MAX_CHUNK_BYTES } from "./constants";
+import {
+	CODEBASE_MAX_CHUNK_BYTES,
+	CODEBASE_SYNC_CLAIM_STALE_MS,
+} from "./constants";
 import { checkRateLimit } from "./rate-limit";
 
 export interface SyncUploadContext {
@@ -280,46 +283,123 @@ export interface IdempotentReplay {
 	response: unknown;
 }
 
-// Duplicate-request idempotent replay: a retried request carries the same
-// idempotency key, so the stored response is returned without duplicating
-// records. Callers verify the replayed payload's identity against stored
-// state (isManifestReplayCompatible / isFileReplayCompatible /
-// isCompleteReplayCompatible) BEFORE returning the replay — a divergent
-// retry fails closed instead of silently succeeding.
-export async function getIdempotentReplay(
-	key: string,
-): Promise<IdempotentReplay | null> {
-	const [row] = await db
-		.select({
-			statusCode: codebaseSyncIdempotencyKeys.statusCode,
-			response: codebaseSyncIdempotencyKeys.response,
-		})
-		.from(codebaseSyncIdempotencyKeys)
-		.where(eq(codebaseSyncIdempotencyKeys.key, key))
-		.limit(1);
-	if (!row) return null;
-	return { statusCode: row.statusCode, response: row.response };
-}
+export type IdempotentClaim =
+	| { status: "claimed" }
+	| ({ status: "replay" } & IdempotentReplay)
+	| { status: "in-progress" }
+	| { status: "conflict" };
 
-// Stored responses are status payloads only (counts/ids) — never tokens or
-// source content — so replay cannot leak snapshot data.
-export async function storeIdempotentResponse(input: {
+// Idempotent upload protocol (Task 9 hardening): the key is CLAIMED
+// atomically BEFORE the mutation runs, so two concurrent retries of the same
+// request can never both perform the upload — the loser observes the pending
+// claim and either replays the winner's stored response (once finalized) or
+// fails closed. Claim rows carry `statusCode = 0` as the pending sentinel;
+// only 2xx/4xx/5xx finalize values are real. Callers must `finalize` after
+// producing the response or `release` on any early return/throw, so a failed
+// attempt never wedges the key in pending state for a legitimate retry.
+// Lookup binds session/snapshot/kind: reusing one key across operations
+// fails closed instead of replaying a foreign response.
+const PENDING_CLAIM_STATUS = 0;
+
+export async function claimIdempotency(input: {
 	key: string;
 	sessionId: string;
 	snapshotId: string;
 	kind: string;
-	statusCode: number;
-	response: Record<string, unknown>;
-}): Promise<void> {
-	await db
+}): Promise<IdempotentClaim> {
+	const [inserted] = await db
 		.insert(codebaseSyncIdempotencyKeys)
 		.values({
 			key: input.key,
 			sessionId: input.sessionId,
 			snapshotId: input.snapshotId,
 			kind: input.kind,
-			statusCode: input.statusCode,
-			response: input.response,
+			statusCode: PENDING_CLAIM_STATUS,
+			response: {},
 		})
-		.onConflictDoNothing({ target: codebaseSyncIdempotencyKeys.key });
+		.onConflictDoNothing({ target: codebaseSyncIdempotencyKeys.key })
+		.returning({ key: codebaseSyncIdempotencyKeys.key });
+	if (inserted) return { status: "claimed" };
+
+	const [existing] = await db
+		.select({
+			sessionId: codebaseSyncIdempotencyKeys.sessionId,
+			snapshotId: codebaseSyncIdempotencyKeys.snapshotId,
+			kind: codebaseSyncIdempotencyKeys.kind,
+			statusCode: codebaseSyncIdempotencyKeys.statusCode,
+			response: codebaseSyncIdempotencyKeys.response,
+		})
+		.from(codebaseSyncIdempotencyKeys)
+		.where(eq(codebaseSyncIdempotencyKeys.key, input.key))
+		.limit(1);
+	// Row vanished between insert-conflict and select (cascade delete): the
+	// owning session/snapshot is gone; fail closed rather than trust it.
+	if (!existing) return { status: "conflict" };
+	if (
+		existing.sessionId !== input.sessionId ||
+		existing.snapshotId !== input.snapshotId ||
+		existing.kind !== input.kind
+	) {
+		return { status: "conflict" };
+	}
+	if (existing.statusCode === PENDING_CLAIM_STATUS) {
+		// A pending claim only blocks while its owner is live. The CLI's
+		// per-request timeout is 30s, so a pending row older than
+		// CODEBASE_SYNC_CLAIM_STALE_MS was abandoned by a crashed request.
+		// Atomically steal it (single update guarded on the still-pending
+		// age): exactly one racing retry wins and proceeds as the claimant.
+		const cutoff = new Date(Date.now() - CODEBASE_SYNC_CLAIM_STALE_MS);
+		const [stolen] = await db
+			.update(codebaseSyncIdempotencyKeys)
+			.set({
+				sessionId: input.sessionId,
+				snapshotId: input.snapshotId,
+				kind: input.kind,
+				statusCode: PENDING_CLAIM_STATUS,
+				response: {},
+				createdAt: new Date(),
+			})
+			.where(
+				and(
+					eq(codebaseSyncIdempotencyKeys.key, input.key),
+					eq(codebaseSyncIdempotencyKeys.statusCode, PENDING_CLAIM_STATUS),
+					lt(codebaseSyncIdempotencyKeys.createdAt, cutoff),
+				),
+			)
+			.returning({ key: codebaseSyncIdempotencyKeys.key });
+		if (stolen) return { status: "claimed" };
+		return { status: "in-progress" };
+	}
+	return {
+		status: "replay",
+		statusCode: existing.statusCode,
+		response: existing.response,
+	};
+}
+
+export async function finalizeIdempotencyClaim(input: {
+	key: string;
+	statusCode: number;
+	response: Record<string, unknown>;
+}): Promise<void> {
+	await db
+		.update(codebaseSyncIdempotencyKeys)
+		.set({ statusCode: input.statusCode, response: input.response })
+		.where(
+			and(
+				eq(codebaseSyncIdempotencyKeys.key, input.key),
+				eq(codebaseSyncIdempotencyKeys.statusCode, PENDING_CLAIM_STATUS),
+			),
+		);
+}
+
+export async function releaseIdempotencyClaim(key: string): Promise<void> {
+	await db
+		.delete(codebaseSyncIdempotencyKeys)
+		.where(
+			and(
+				eq(codebaseSyncIdempotencyKeys.key, key),
+				eq(codebaseSyncIdempotencyKeys.statusCode, PENDING_CLAIM_STATUS),
+			),
+		);
 }

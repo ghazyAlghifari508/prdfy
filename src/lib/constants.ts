@@ -68,6 +68,12 @@ export const CODEBASE_MAX_FILE_BYTES = 1024 * 1024;
 export const CODEBASE_MAX_CHUNK_BYTES = 256 * 1024;
 // Minimum supported CLI version for `prdfy codebase sync`.
 export const CODEBASE_CLI_MIN_VERSION = "2.0.0";
+// A pending idempotency claim older than this is treated as abandoned by a
+// crashed request and may be atomically stolen by a retry. Bound from the
+// CLI's 30s per-request timeout: a live owner finalizes or releases well
+// within one timeout, so two timeouts is generous headroom with no false
+// steals.
+export const CODEBASE_SYNC_CLAIM_STALE_MS = 2 * 30_000;
 // Maximum user-facing sync error message length served to browsers. Longer
 // server-written messages are truncated so status polling stays bounded.
 export const CODEBASE_MAX_ERROR_MESSAGE_CHARS = 500;

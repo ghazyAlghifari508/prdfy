@@ -1,6 +1,48 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
+import * as uploadServer from "./codebase-sync-upload.server";
 import { readBoundedJson } from "./codebase-sync-upload.server";
 import { CODEBASE_MAX_CHUNK_BYTES } from "./constants";
+
+describe("idempotent claim protocol surface", () => {
+	it("exposes atomic claim/finalize/release and drops the old read-then-insert pair", () => {
+		expect(typeof uploadServer.claimIdempotency).toBe("function");
+		expect(typeof uploadServer.finalizeIdempotencyClaim).toBe("function");
+		expect(typeof uploadServer.releaseIdempotencyClaim).toBe("function");
+		// The non-atomic helpers that allowed two concurrent retries to both
+		// mutate are gone.
+		expect(
+			"getIdempotentReplay" in
+				(uploadServer as unknown as Record<string, unknown>),
+		).toBe(false);
+		expect(
+			"storeIdempotentResponse" in
+				(uploadServer as unknown as Record<string, unknown>),
+		).toBe(false);
+	});
+
+	it("every upload route claims before its mutation and releases on failure", async () => {
+		for (const route of [
+			"../routes/api/v1/projects/$id/codebase/manifest.ts",
+			"../routes/api/v1/projects/$id/codebase/files.ts",
+			"../routes/api/v1/projects/$id/codebase/complete.ts",
+		]) {
+			const source = await readFile(new URL(route, import.meta.url), "utf8");
+			const claimIndex = source.indexOf("await claimIdempotency(");
+			expect(claimIndex, route).toBeGreaterThan(-1);
+			expect(source, route).toContain("finalizeIdempotencyClaim(");
+			expect(source, route).toContain("releaseIdempotencyClaim(");
+			// The claim must be taken before any write to snapshot/session data.
+			const firstWrite = source.search(
+				/db\s*\n?\s*\.\s*(update|insert|transaction)\(/,
+			);
+			expect(
+				firstWrite,
+				`${route}: claim should precede writes`,
+			).toBeGreaterThan(claimIndex);
+		}
+	});
+});
 
 function fakeRequest(
 	chunks: Uint8Array[],

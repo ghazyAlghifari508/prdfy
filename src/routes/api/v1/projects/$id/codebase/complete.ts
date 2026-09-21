@@ -20,10 +20,11 @@ import {
 } from "@/lib/codebase-sync";
 import { verifyFileContentHash } from "@/lib/codebase-sync.server";
 import {
-	getIdempotentReplay,
+	claimIdempotency,
+	finalizeIdempotencyClaim,
 	guardSyncUpload,
 	readBoundedJson,
-	storeIdempotentResponse,
+	releaseIdempotencyClaim,
 } from "@/lib/codebase-sync-upload.server";
 
 export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
@@ -37,15 +38,9 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 			// entry has complete contiguous chunks, bounds hold, and each
 			// reassembled file hashes to its manifest hash. Partial/failed
 			// snapshots stay `uploading` and are never usable by analysis.
-			// Completion replay (same or new key) returns the stored result
-			// without mutating — but ONLY while the session is still usable:
-			// once analysis has run (session ready/failed) or the session
-			// expired, the guard above rejects (401/410) before the replay
-			// lookup, so post-analysis completion replays are rejected, not
-			// replayed. Safe for MVP because the CLI always completes before
-			// the browser triggers analysis (analysis POST requires an
-			// uploaded snapshot and never replays completion itself).
-			// Bearer sync credential only (see
+			// The idempotency key is claimed before the transition, so two
+			// concurrent completions cannot both run; the loser replays or
+			// fails closed. Bearer sync credential only (see
 			// `codebase-sync-upload.server.ts` for the scope-separation
 			// rationale).
 			POST: async ({
@@ -91,15 +86,37 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 					});
 				const { session, snapshot } = guard.ctx;
 
-				const replay = await getIdempotentReplay(body.idempotencyKey);
-				if (replay) {
+				const claim = await claimIdempotency({
+					key: body.idempotencyKey,
+					sessionId: session.id,
+					snapshotId: snapshot.id,
+					kind: "complete",
+				});
+				if (claim.status === "conflict")
+					return Response.json(
+						{
+							error: "Idempotency key is already bound to another operation",
+							code: "SNAPSHOT_CONFLICT",
+						},
+						{ status: 409 },
+					);
+				if (claim.status === "in-progress")
+					return Response.json(
+						{
+							error: "Completion is already in progress",
+							code: "SYNC_IN_PROGRESS",
+						},
+						{ status: 409 },
+					);
+
+				if (claim.status === "replay") {
 					// Replay-payload identity check (Task 9): completion carries
 					// only counts, so the retried counts must equal the stored
 					// result's counts. Divergent counts mean the client is
 					// completing a different snapshot view — fail closed.
 					const storedCounts =
-						replay.response != null && typeof replay.response === "object"
-							? (replay.response as {
+						claim.response != null && typeof claim.response === "object"
+							? (claim.response as {
 									fileCount?: unknown;
 									excludedCount?: unknown;
 								})
@@ -128,97 +145,110 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 							},
 							{ status: 409 },
 						);
-					return Response.json(replay.response, {
-						status: replay.statusCode,
-					});
+					return Response.json(claim.response, { status: claim.statusCode });
 				}
 
-				// Idempotent completion: an already-uploaded snapshot returns
-				// its stored result (new keys are recorded for future replay).
-				if (snapshot.status === "uploaded") {
-					const response = {
-						status: "uploaded",
-						snapshotId: snapshot.id,
-						fileCount: snapshot.fileCount,
-						excludedCount: snapshot.excludedCount,
-					};
-					await storeIdempotentResponse({
-						key: body.idempotencyKey,
-						sessionId: session.id,
-						snapshotId: snapshot.id,
-						kind: "complete",
-						statusCode: 200,
-						response,
-					});
-					return Response.json(response);
-				}
-
-				if (session.status !== "uploading" || snapshot.status !== "uploading")
-					return Response.json(
-						{
-							error: "Snapshot upload is not in progress",
-							code: "SYNC_FAILED",
-						},
-						{ status: 409 },
-					);
-
-				const storedManifest = manifestEntrySchema
-					.array()
-					.safeParse(snapshot.manifest ?? []);
-				if (!storedManifest.success)
-					return Response.json(
-						{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
-						{ status: 500 },
-					);
-
-				const rows = await db
-					.select()
-					.from(codebaseSnapshotFiles)
-					.where(eq(codebaseSnapshotFiles.snapshotId, snapshot.id));
-
-				// Structural verification first (counts, contiguity, orphans,
-				// per-file and snapshot bounds) — pure and DB-agnostic.
-				let contentSize: number;
+				// Claimed: verification, the atomic transition, and finalization
+				// happen under this single claim. Any path that ends without
+				// finalizing releases the claim so a legitimate retry is not
+				// wedged behind a pending sentinel.
+				let finalized = false;
 				try {
-					({ contentSize } = checkSnapshotCompletion({
-						manifest: storedManifest.data,
-						chunks: rows.map((row) => ({
-							path: row.path,
-							chunkIndex: row.chunkIndex,
-							chunkTotal: row.chunkTotal,
-							dataBase64Length: row.data.length,
-							decodedBytes: row.size ?? 0,
-						})),
-						fileCount: body.fileCount,
-						excludedCount: body.excludedCount,
-					}));
-				} catch (error) {
-					if (error instanceof SnapshotCompletionError) {
-						const status = error.code === "SNAPSHOT_TOO_LARGE" ? 413 : 409;
-						return Response.json(
-							{ error: "Snapshot verification failed", code: error.code },
-							{ status },
-						);
+					// Idempotent completion: an already-uploaded snapshot returns
+					// its result (the fresh claim is finalized with it).
+					if (snapshot.status === "uploaded") {
+						const response = {
+							status: "uploaded",
+							snapshotId: snapshot.id,
+							fileCount: snapshot.fileCount,
+							excludedCount: snapshot.excludedCount,
+						};
+						await finalizeIdempotencyClaim({
+							key: body.idempotencyKey,
+							statusCode: 200,
+							response,
+						});
+						finalized = true;
+						return Response.json(response);
 					}
-					throw error;
-				}
 
-				// Hash verification per file: reassemble ordered chunks and
-				// compare against the manifest hash (rows agree with the
-				// manifest by construction of the files endpoint, but the
-				// manifest is the source of truth here).
-				const byPath = new Map<string, typeof rows>();
-				for (const row of rows) {
-					const group = byPath.get(row.path) ?? [];
-					group.push(row);
-					byPath.set(row.path, group);
-				}
-				for (const entry of storedManifest.data) {
-					const group = (byPath.get(entry.path) ?? []).sort(
-						(a, b) => a.chunkIndex - b.chunkIndex,
-					);
-					for (const row of group) {
-						if (row.contentHash.toLowerCase() !== entry.hash.toLowerCase()) {
+					if (session.status !== "uploading" || snapshot.status !== "uploading")
+						return Response.json(
+							{
+								error: "Snapshot upload is not in progress",
+								code: "SYNC_FAILED",
+							},
+							{ status: 409 },
+						);
+
+					const storedManifest = manifestEntrySchema
+						.array()
+						.safeParse(snapshot.manifest ?? []);
+					if (!storedManifest.success)
+						return Response.json(
+							{ error: "Sync snapshot is corrupted", code: "SYNC_FAILED" },
+							{ status: 500 },
+						);
+
+					const rows = await db
+						.select()
+						.from(codebaseSnapshotFiles)
+						.where(eq(codebaseSnapshotFiles.snapshotId, snapshot.id));
+
+					// Structural verification first (counts, contiguity, orphans,
+					// per-file and snapshot bounds) — pure and DB-agnostic.
+					let contentSize: number;
+					try {
+						({ contentSize } = checkSnapshotCompletion({
+							manifest: storedManifest.data,
+							chunks: rows.map((row) => ({
+								path: row.path,
+								chunkIndex: row.chunkIndex,
+								chunkTotal: row.chunkTotal,
+								dataBase64Length: row.data.length,
+								decodedBytes: row.size ?? 0,
+							})),
+							fileCount: body.fileCount,
+							excludedCount: body.excludedCount,
+						}));
+					} catch (error) {
+						if (error instanceof SnapshotCompletionError) {
+							const status = error.code === "SNAPSHOT_TOO_LARGE" ? 413 : 409;
+							return Response.json(
+								{ error: "Snapshot verification failed", code: error.code },
+								{ status },
+							);
+						}
+						throw error;
+					}
+
+					// Hash verification per file: reassemble ordered chunks and
+					// compare against the manifest hash (rows agree with the
+					// manifest by construction of the files endpoint, but the
+					// manifest is the source of truth here).
+					const byPath = new Map<string, typeof rows>();
+					for (const row of rows) {
+						const group = byPath.get(row.path) ?? [];
+						group.push(row);
+						byPath.set(row.path, group);
+					}
+					for (const entry of storedManifest.data) {
+						const group = (byPath.get(entry.path) ?? []).sort(
+							(a, b) => a.chunkIndex - b.chunkIndex,
+						);
+						for (const row of group) {
+							if (row.contentHash.toLowerCase() !== entry.hash.toLowerCase()) {
+								return Response.json(
+									{
+										error: "Snapshot verification failed",
+										code: "SNAPSHOT_HASH_MISMATCH",
+									},
+									{ status: 409 },
+								);
+							}
+						}
+						const assembled = group.map((row) => row.data).join("");
+						if (!verifyFileContentHash(assembled, entry.hash)) {
 							return Response.json(
 								{
 									error: "Snapshot verification failed",
@@ -228,55 +258,45 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/complete")({
 							);
 						}
 					}
-					const assembled = group.map((row) => row.data).join("");
-					if (!verifyFileContentHash(assembled, entry.hash)) {
-						return Response.json(
-							{
-								error: "Snapshot verification failed",
-								code: "SNAPSHOT_HASH_MISMATCH",
-							},
-							{ status: 409 },
-						);
-					}
+
+					// Atomic transition: snapshot AND session move to `uploaded`
+					// together, or neither does. uploadTransitionSteps already
+					// validated the session upload path on chunk receipt; the
+					// final uploading -> uploaded step is asserted in-transaction.
+					assertSyncTransition(session.status as "uploading", "uploaded");
+					await db.transaction(async (tx) => {
+						await tx
+							.update(codebaseSnapshots)
+							.set({
+								status: "uploaded",
+								fileCount: body.fileCount,
+								excludedCount: body.excludedCount,
+								contentSize,
+								manifest: storedManifest.data,
+							})
+							.where(eq(codebaseSnapshots.id, snapshot.id));
+						await tx
+							.update(codebaseSyncSessions)
+							.set({ status: "uploaded", updatedAt: new Date() })
+							.where(eq(codebaseSyncSessions.id, session.id));
+					});
+
+					const response = {
+						status: "uploaded",
+						snapshotId: snapshot.id,
+						fileCount: body.fileCount,
+						excludedCount: body.excludedCount,
+					};
+					await finalizeIdempotencyClaim({
+						key: body.idempotencyKey,
+						statusCode: 200,
+						response,
+					});
+					finalized = true;
+					return Response.json(response);
+				} finally {
+					if (!finalized) await releaseIdempotencyClaim(body.idempotencyKey);
 				}
-
-				// Atomic transition: snapshot AND session move to `uploaded`
-				// together, or neither does. uploadTransitionSteps already
-				// validated the session upload path on chunk receipt; the
-				// final uploading -> uploaded step is asserted in-transaction.
-				assertSyncTransition(session.status as "uploading", "uploaded");
-				await db.transaction(async (tx) => {
-					await tx
-						.update(codebaseSnapshots)
-						.set({
-							status: "uploaded",
-							fileCount: body.fileCount,
-							excludedCount: body.excludedCount,
-							contentSize,
-							manifest: storedManifest.data,
-						})
-						.where(eq(codebaseSnapshots.id, snapshot.id));
-					await tx
-						.update(codebaseSyncSessions)
-						.set({ status: "uploaded", updatedAt: new Date() })
-						.where(eq(codebaseSyncSessions.id, session.id));
-				});
-
-				const response = {
-					status: "uploaded",
-					snapshotId: snapshot.id,
-					fileCount: body.fileCount,
-					excludedCount: body.excludedCount,
-				};
-				await storeIdempotentResponse({
-					key: body.idempotencyKey,
-					sessionId: session.id,
-					snapshotId: snapshot.id,
-					kind: "complete",
-					statusCode: 200,
-					response,
-				});
-				return Response.json(response);
 			},
 		},
 	},
