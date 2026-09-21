@@ -12,9 +12,11 @@ import {
 } from "react";
 import { syncPaymentStatus } from "@/app/actions/payment";
 import {
+	clearPendingPrdPrompt,
 	clearPrdDraft,
 	consumePendingPrdPrompt,
 	consumeResumeIntent,
+	getPendingPrdPrompt,
 	getPrdDraft,
 	savePendingPrdPrompt,
 	savePrdDraft,
@@ -281,16 +283,22 @@ export const ChatPanel = memo(function ChatPanel({
 		}
 	}, [isStreaming]);
 
-	// Abort active streaming fetch on unmount or project switch so callbacks
-	// cannot update global store or parent components with stale project data.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: projectId intentionally re-arms cleanup on project switch
+	// Abort active streaming fetch only when switching to a different project
+	// so callbacks cannot update global store with stale project data, while
+	// preserving in-flight streams on component remounts or responsive reflows.
+	const previousProjectIdRef = useRef(projectId);
 	useEffect(() => {
-		return () => {
+		if (
+			previousProjectIdRef.current &&
+			projectId &&
+			previousProjectIdRef.current !== projectId
+		) {
 			if (abortControllerRef.current) {
 				abortControllerRef.current.abort();
 				abortControllerRef.current = null;
 			}
-		};
+		}
+		previousProjectIdRef.current = projectId;
 	}, [projectId]);
 
 	// ── Handlers ──
@@ -895,10 +903,11 @@ export const ChatPanel = memo(function ChatPanel({
 		)
 			return;
 
-		const pending = consumePendingPrdPrompt();
+		const pending = getPendingPrdPrompt();
 		if (!pending) return;
 
 		autoSubmitAttemptedRef.current = true;
+		clearPendingPrdPrompt();
 
 		if (pending.mode === "auto") {
 			setGeneratingPRD(true);

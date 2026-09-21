@@ -135,12 +135,10 @@ export function savePendingPrdPrompt(
 	getStorage()?.setItem(PRD_PROMPT_KEY, JSON.stringify(payload));
 }
 
-export function consumePendingPrdPrompt(): PendingPrdPrompt | null {
+export function getPendingPrdPrompt(): PendingPrdPrompt | null {
 	const storage = getStorage();
 	const raw = storage?.getItem(PRD_PROMPT_KEY);
 	if (!storage || !raw) return null;
-
-	storage.removeItem(PRD_PROMPT_KEY);
 
 	try {
 		const parsed = JSON.parse(raw) as Partial<PendingPrdPrompt>;
@@ -162,6 +160,18 @@ export function consumePendingPrdPrompt(): PendingPrdPrompt | null {
 	} catch {
 		return null;
 	}
+}
+
+export function clearPendingPrdPrompt(): void {
+	getStorage()?.removeItem(PRD_PROMPT_KEY);
+}
+
+export function consumePendingPrdPrompt(): PendingPrdPrompt | null {
+	const pending = getPendingPrdPrompt();
+	if (pending) {
+		clearPendingPrdPrompt();
+	}
+	return pending;
 }
 
 /**

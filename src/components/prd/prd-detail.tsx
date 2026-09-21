@@ -15,6 +15,7 @@ import { CreditExhaustedModal } from "@/components/chat/credit-exhausted-modal";
 import { GenerationProgress } from "@/components/shared/generation-progress";
 import { usePanelResize } from "@/hooks/use-panel-resize";
 import { isPrdLocked } from "@/lib/flow-progress";
+import { getPendingPrdPrompt } from "@/lib/prompt-handoff";
 import { cn } from "@/lib/utils";
 import { useChatStore, useUIStore } from "@/store";
 import type { Plan, PrdVersion } from "@/types/database";
@@ -168,9 +169,14 @@ export function PrdDetail({
 	useEffect(() => {
 		const store = useChatStore.getState();
 		const isDifferentProject = projectId && store.activeProjectId !== projectId;
-		if (projectId && (latestVersion?.content || isDifferentProject)) {
+		if (latestVersion?.content) {
 			setGeneratingPRD(false);
 			setStreamingPRDContent("");
+		} else if (isDifferentProject) {
+			setStreamingPRDContent("");
+			if (!getPendingPrdPrompt()) {
+				setGeneratingPRD(false);
+			}
 		} else if (!projectId) {
 			setGeneratingPRD(false);
 			setStreamingPRDContent("");
@@ -376,6 +382,7 @@ export function PrdDetail({
 							onProjectCreated={handleProjectCreated}
 							onPrdRevised={handlePrdRevised}
 							className="w-full"
+							enableAutoSubmit={true}
 							inputDisabled={!projectId && !isGeneratingPRD}
 							isReadOnly={isReadOnly}
 							currentPrdContent={currentContent}
@@ -387,25 +394,23 @@ export function PrdDetail({
 
 				{/* ═══════════ Mobile Chat View (<md) & Drawer (md to xl) ═══════════ */}
 				{/* 1. Full panel for Mobile View tab toggle (<md) */}
-				<div
-					className={cn(
-						"flex-1 overflow-hidden md:hidden",
-						activeTab !== "chat" && "hidden",
-					)}
-				>
-					<ChatPanel
-						projectId={projectId}
-						conversationId={conversationId}
-						onProjectCreated={handleProjectCreated}
-						onPrdRevised={handlePrdRevised}
-						className="h-full w-full border-none"
-						inputDisabled={!projectId && !isGeneratingPRD}
-						isReadOnly={isReadOnly}
-						currentPrdContent={currentContent}
-						userPlan={plan}
-						selectedVersionNum={selectedVersionNum}
-					/>
-				</div>
+				{activeTab === "chat" && (
+					<div className="flex-1 overflow-hidden md:hidden">
+						<ChatPanel
+							projectId={projectId}
+							conversationId={conversationId}
+							onProjectCreated={handleProjectCreated}
+							onPrdRevised={handlePrdRevised}
+							className="h-full w-full border-none"
+							enableAutoSubmit={false}
+							inputDisabled={!projectId && !isGeneratingPRD}
+							isReadOnly={isReadOnly}
+							currentPrdContent={currentContent}
+							userPlan={plan}
+							selectedVersionNum={selectedVersionNum}
+						/>
+					</div>
+				)}
 
 				{/* 2. Slide-over drawer for tablet screens (md to xl) */}
 				<div className="hidden md:block xl:hidden print:hidden">
@@ -433,6 +438,7 @@ export function PrdDetail({
 									onProjectCreated={handleProjectCreated}
 									onPrdRevised={handlePrdRevised}
 									className="w-full border-none"
+									enableAutoSubmit={false}
 									inputDisabled={!projectId && !isGeneratingPRD}
 									isReadOnly={isReadOnly}
 									currentPrdContent={currentContent}
