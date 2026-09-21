@@ -109,18 +109,25 @@ function AdminDashboardPage() {
 		metrics.trendData || [],
 	);
 	const [isLoadingTrend, setIsLoadingTrend] = useState<boolean>(false);
+	const [trendError, setTrendError] = useState<boolean>(false);
+	const [trendDays, setTrendDays] = useState<number>(7);
 	const trendRequestRef = useRef(0);
 
 	const handleRangeChange = async (days: number) => {
 		const requestId = ++trendRequestRef.current;
 		setIsLoadingTrend(true);
+		setTrendError(false);
 		try {
 			const res = await getAdminTrendMetrics({ data: { days } });
 			if (requestId === trendRequestRef.current) {
 				setTrendData(res);
+				setTrendDays(days);
 			}
 		} catch (err) {
 			console.error("Failed to fetch trend data:", err);
+			if (requestId === trendRequestRef.current) {
+				setTrendError(true);
+			}
 		} finally {
 			if (requestId === trendRequestRef.current) {
 				setIsLoadingTrend(false);
@@ -214,6 +221,18 @@ function AdminDashboardPage() {
 					<div className="absolute right-6 top-6 flex items-center gap-2 rounded-full border border-graphite bg-obsidian/80 px-3 py-1 text-[11px] text-fog backdrop-blur">
 						<span className="h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400" />
 						Memperbarui grafik...
+					</div>
+				)}
+				{trendError && !isLoadingTrend && (
+					<div className="absolute right-6 top-6 flex items-center gap-2 rounded-full border border-crimson/60 bg-obsidian/80 px-3 py-1 text-[11px] text-snow backdrop-blur">
+						Gagal memuat rentang grafik.
+						<button
+							type="button"
+							onClick={() => handleRangeChange(trendDays)}
+							className="font-[510] text-snow underline underline-offset-2 hover:text-mist"
+						>
+							Coba lagi
+						</button>
 					</div>
 				)}
 			</section>

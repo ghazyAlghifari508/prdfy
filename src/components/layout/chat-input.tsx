@@ -8,7 +8,7 @@ import {
 	Plus,
 	Smartphone,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CreditExhaustedModal } from "@/components/chat/credit-exhausted-modal";
 import {
 	DropdownMenu,
@@ -109,6 +109,8 @@ export function ChatInput({
 	const [creditsExhaustedMsg, setCreditsExhaustedMsg] = useState<string | null>(
 		null,
 	);
+	const [isSending, setIsSending] = useState(false);
+	const isSendingRef = useRef(false);
 
 	// ponytail: shared TanStack Query hook — deduped across all components
 	// that read /api/user/plan. 60s staleTime. Replaces manual fetch() calls.
@@ -133,59 +135,71 @@ export function ChatInput({
 	}, [message]);
 
 	const handleSend = async () => {
-		if (!message.trim()) return;
+		if (isSendingRef.current || !message.trim()) return;
 
-		if (message.trim().length < MIN_PROMPT_LENGTH) {
+		const trimmed = message.trim();
+		if (trimmed.length < MIN_PROMPT_LENGTH) {
 			setPromptError(
 				`Deskripsikan produkmu lebih detail (minimal ${MIN_PROMPT_LENGTH} karakter) agar AI bisa menghasilkan PRD yang berkualitas.`,
 			);
 			return;
 		}
-		setPromptError("");
-
-		// Store model & platform preference alongside the prompt
-		const originalMessage = message.trim();
-		const enrichedPrompt =
-			projectMode === "existing_codebase"
-				? originalMessage
-				: isMobileMode
-					? `[Platform: Mobile App]\n${originalMessage}`
-					: `[Platform: Web App]\n${originalMessage}`;
-
-		saveSetupPrompt(enrichedPrompt);
-		if (projectMode !== "existing_codebase") {
-			saveAskPlatform(isMobileMode ? "mobile" : "web");
-		}
-		saveAskLanguage(language);
-		// Save original message for display in chat bubble (without platform tags)
-		sessionStorage.setItem("prdfy:original-message", originalMessage);
-
-		// ponytail: use reactive session (shared nanostore with Navbar) instead
-		// of a manual getSession() round-trip per send attempt.
-		const isAuthenticated = !!session?.user?.id;
-
-		if (!isAuthenticated) {
-			// ponytail: back to home, not /ask, the project doesn't exist yet at this
-			// point, so there is no /ask/$id to land on and no bare /ask route.
-			navigate({ to: "/login", search: { redirect: "/" } });
+		if (trimmed.length > MAX_PROMPT_LENGTH) {
+			setPromptError(
+				`Deskripsi produkmu terlalu panjang (maksimal ${MAX_PROMPT_LENGTH.toLocaleString()} karakter).`,
+			);
 			return;
 		}
+		setPromptError("");
 
-		// Pre-check credits before creating project — blocks at home page,
-		// not after redirect to empty PRD/question page.
+		isSendingRef.current = true;
+		setIsSending(true);
+
 		try {
-			const freshPlan = await refetchPlan();
-			if (shouldBlockProjectCreationOnCredits(freshPlan.data?.remaining)) {
-				setCreditsExhaustedMsg(
-					"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
-				);
+			// Store model & platform preference alongside the prompt
+			const originalMessage = trimmed;
+			const enrichedPrompt =
+				projectMode === "existing_codebase"
+					? originalMessage
+					: isMobileMode
+						? `[Platform: Mobile App]\n${originalMessage}`
+						: `[Platform: Web App]\n${originalMessage}`;
+
+			try {
+				saveSetupPrompt(enrichedPrompt);
+				if (projectMode !== "existing_codebase") {
+					saveAskPlatform(isMobileMode ? "mobile" : "web");
+				}
+				saveAskLanguage(language);
+			} catch (storageErr) {
+				console.warn("Failed to stash prompt in storage:", storageErr);
+			}
+
+			// ponytail: use reactive session (shared nanostore with Navbar) instead
+			// of a manual getSession() round-trip per send attempt.
+			const isAuthenticated = !!session?.user?.id;
+
+			if (!isAuthenticated) {
+				// ponytail: back to home, not /ask, the project doesn't exist yet at this
+				// point, so there is no /ask/$id to land on and no bare /ask route.
+				navigate({ to: "/login", search: { redirect: "/" } });
 				return;
 			}
-		} catch {
-			// If plan check fails, allow flow — server will block with 403 anyway
-		}
 
-		try {
+			// Pre-check credits before creating project — blocks at home page,
+			// not after redirect to empty PRD/question page.
+			try {
+				const freshPlan = await refetchPlan();
+				if (shouldBlockProjectCreationOnCredits(freshPlan.data?.remaining)) {
+					setCreditsExhaustedMsg(
+						"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
+					);
+					return;
+				}
+			} catch {
+				// If plan check fails, allow flow — server will block with 403 anyway
+			}
+
 			const res = await fetch("/api/projects", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -202,8 +216,16 @@ export function ChatInput({
 				projectMode?: string | null;
 				sync?: SyncPromptPayload;
 			};
-			if (!res.ok || !project.id)
+			if (!res.ok || !project.id) {
+				if (res.status === 403) {
+					setCreditsExhaustedMsg(
+						project.error ||
+							"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
+					);
+					return;
+				}
 				throw new Error(project.error || "Gagal membuat proyek");
+			}
 			clearHomeDraft();
 			// Existing-codebase enters the sync flow: stash the one-time sync
 			// payload for /codebase/$id (consumed once to open the agent
@@ -227,6 +249,9 @@ export function ChatInput({
 		} catch (err) {
 			console.error("Create project error:", err);
 			setPromptError("Gagal membuat proyek. Coba lagi.");
+		} finally {
+			isSendingRef.current = false;
+			setIsSending(false);
 		}
 	};
 
@@ -354,6 +379,7 @@ export function ChatInput({
 								onChange={(e) => setMessage(e.target.value)}
 								onFocus={() => setFocused(true)}
 								onBlur={() => setFocused(false)}
+								maxLength={MAX_PROMPT_LENGTH}
 								onKeyDown={(e) => {
 									if (e.key === "Enter" && !e.shiftKey) {
 										e.preventDefault();
@@ -430,8 +456,9 @@ export function ChatInput({
 									<span
 										className={cn(
 											"font-inter text-[12px]",
-											message.trim().length > 0 &&
-												message.trim().length < MIN_PROMPT_LENGTH
+											(message.trim().length > 0 &&
+												message.trim().length < MIN_PROMPT_LENGTH) ||
+												message.length > MAX_PROMPT_LENGTH
 												? "text-crimson"
 												: "text-fog",
 										)}
@@ -443,11 +470,11 @@ export function ChatInput({
 										type="button"
 										id="hero-send-btn"
 										onClick={handleSend}
-										disabled={!message.trim()}
+										disabled={!message.trim() || isSending}
 										aria-label="Kirim prompt ide produk"
 										className={cn(
 											"flex h-9 w-9 items-center justify-center rounded-md transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98]",
-											message.trim()
+											message.trim() && !isSending
 												? "btn-primary hover:brightness-105"
 												: "bg-steel/40 text-slate",
 										)}

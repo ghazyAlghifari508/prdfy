@@ -16,6 +16,9 @@ interface GenerationProgressProps {
  * Restrained status card with elapsed timer and live streamed reasoning log.
  * Clean, distraction-free, and adheres to anti-ai-slop rules.
  */
+/** Keep at most this many chars of streamed reasoning in the DOM. */
+const MAX_THINKING_CHARS = 8000;
+
 export function GenerationProgress({
 	label,
 	thinkingText,
@@ -23,21 +26,41 @@ export function GenerationProgress({
 }: GenerationProgressProps) {
 	const [elapsed, setElapsed] = useState(0);
 	const thinkingRef = useRef<HTMLPreElement>(null);
+	const startedAtRef = useRef(Date.now());
+	const followRef = useRef(true);
 
 	useEffect(() => {
-		const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+		// Wall-clock derived elapsed: interval callbacks stall in background
+		// tabs, so counting ticks under-reports the real duration.
+		const t = setInterval(
+			() => setElapsed(Math.floor((Date.now() - startedAtRef.current) / 1000)),
+			1000,
+		);
 		return () => clearInterval(t);
 	}, []);
 
-	// Auto-scroll thinking log as new tokens stream in
+	// Auto-scroll thinking log as new tokens stream in — but only while the
+	// user is already near the bottom, so reading earlier reasoning is never
+	// yanked away.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll on new reasoning tokens
 	useEffect(() => {
-		if (thinkingRef.current) {
-			thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight;
+		const el = thinkingRef.current;
+		if (!el) return;
+		const nearBottom =
+			el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+		followRef.current = nearBottom;
+		if (nearBottom) {
+			el.scrollTop = el.scrollHeight;
 		}
 	}, [thinkingText]);
 
 	const mmss = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+	// Bounded display: long reasoning streams otherwise grow the DOM and
+	// layout cost without bound; newest content is what matters live.
+	const displayThinking =
+		thinkingText && thinkingText.length > MAX_THINKING_CHARS
+			? `…${thinkingText.slice(-MAX_THINKING_CHARS)}`
+			: thinkingText;
 
 	return (
 		<div
@@ -63,7 +86,7 @@ export function GenerationProgress({
 					</span>
 				</div>
 
-				{thinkingText ? (
+				{displayThinking ? (
 					<div className="mt-4 rounded-lg border border-graphite/70 bg-charcoal/90 p-3.5">
 						<div className="flex items-center justify-between mb-1.5">
 							<span className="font-mono text-[10px] uppercase tracking-wider text-fog/70">
@@ -74,7 +97,7 @@ export function GenerationProgress({
 							ref={thinkingRef}
 							className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-fog leading-relaxed custom-scrollbar"
 						>
-							{thinkingText}
+							{displayThinking}
 						</pre>
 					</div>
 				) : (
