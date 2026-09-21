@@ -66,6 +66,9 @@ export function assertCompletePrdOutput(content: string): void {
 
 /**
  * Strip known PRD prompt boilerplate so name heuristics see only user content.
+ * Compiled ask-flow prompts carry the raw idea followed by preference blocks
+ * (`--- Preferensi ... ---`) whose trailing lines (e.g. `Deployment: Biarkan
+ * AI yang memilih`) otherwise hijack the fallback tail-word heuristic.
  */
 function stripPrdBoilerplate(message: string): string {
 	let cleanMsg = message;
@@ -77,7 +80,25 @@ function stripPrdBoilerplate(message: string): string {
 		/\s*Gunakan section markers sesuai standar./gi,
 		"",
 	);
+	cleanMsg = cleanMsg.replace(
+		/^Tolong buatkan PRD dengan spesifikasi berikut:\s*/im,
+		"",
+	);
+	cleanMsg = cleanMsg.replace(
+		/^Please generate a PRD with the following specifications:\s*/im,
+		"",
+	);
 	cleanMsg = cleanMsg.replace(/\[Platform:.*?\]\s*/gi, "");
+	const preferenceHeader = cleanMsg.match(
+		/^\s*-{3,}\s*(?:Preferensi|Non-?Teknis|Non-?Technical|Technical)/im,
+	);
+	if (preferenceHeader?.index !== undefined) {
+		cleanMsg = cleanMsg.slice(0, preferenceHeader.index);
+	}
+	cleanMsg = cleanMsg.replace(
+		/^\s*(?:Frontend|Backend|Fullstack Framework|Database|Deployment)\s*:.*$/gim,
+		"",
+	);
 	return cleanMsg.trim();
 }
 
@@ -256,18 +277,9 @@ export function deriveProjectNameSync(message: string): string {
  * Uses AI to extract the core app concept, with regex fallback if AI fails.
  */
 export async function deriveProjectName(message: string): Promise<string> {
-	// Strip platform tags and known boilerplate
-	let cleanMsg = message;
-	cleanMsg = cleanMsg.replace(
-		/Generate PRD lengkap berdasarkan informasi berikut:\s*/gi,
-		"",
-	);
-	cleanMsg = cleanMsg.replace(
-		/\s*Gunakan section markers sesuai standar./gi,
-		"",
-	);
-	cleanMsg = cleanMsg.replace(/\[Platform:.*?\]\s*/gi, "");
-	cleanMsg = cleanMsg.trim();
+	// Reuse the same boilerplate cut as the sync path so the AI never sees the
+	// compiled preference blocks (Deployment/Database lines) as the idea.
+	const cleanMsg = stripPrdBoilerplate(message);
 
 	// AI path: ask model to extract a short project title
 	try {
