@@ -86,7 +86,7 @@ export function resolveSubscriptionState(
 		};
 	}
 
-	if (now.getTime() < periodEnd.getTime()) {
+	if (now.getTime() <= periodEnd.getTime()) {
 		return {
 			state: "active_paid",
 			effectivePlan: plan,

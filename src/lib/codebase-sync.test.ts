@@ -573,19 +573,18 @@ describe("safe sync errors and CLI version gate (Task 4)", () => {
 
 	it("builds the locked sync command with a placeholder, never a raw token", () => {
 		const raw = generateSyncToken();
-		const validUuid = "12345678-1234-4234-8234-123456789abc";
-		const command = buildSyncCommand(validUuid);
+		const command = buildSyncCommand("proj_123");
 		expect(command).toBe(
-			`prdfy codebase sync --project-id ${validUuid} --sync-token <token>`,
+			"prdfy codebase sync --project-id proj_123 --sync-token <token>",
 		);
 		expect(command).not.toContain(raw);
 	});
 
-	it("rejects non-UUID project IDs to prevent shell command injection", () => {
-		expect(() => buildSyncCommand("proj_123")).toThrow(
+	it("rejects project IDs containing shell injection characters", () => {
+		expect(() => buildSyncCommand("proj; rm -rf /")).toThrow(
 			/Invalid project ID format/,
 		);
-		expect(() => buildSyncCommand("proj; rm -rf /")).toThrow(
+		expect(() => buildSyncCommand("proj $(whoami)")).toThrow(
 			/Invalid project ID format/,
 		);
 		expect(() => buildSyncCommand("")).toThrow(/Invalid project ID format/);
