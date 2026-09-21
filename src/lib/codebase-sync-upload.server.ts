@@ -69,35 +69,67 @@ function fail(
 	return { ok: false, failure: { status, body: { error, code } } };
 }
 
-// Reads the request body as text behind the locked transport bound. Rejects
-// oversized payloads (413) before JSON parsing so a hostile client cannot
-// force unbounded memory allocation through these endpoints.
+// Reads the request body behind the locked transport bound. The declared
+// Content-Length is validated (finite non-negative integer) and checked
+// before reading, but never trusted: the body is streamed with a running
+// byte count so a chunked/undeclared body cannot materialize an unbounded
+// string before the limit fires. Rejection closes the reader stream.
 export async function readBoundedJson(
 	request: Request,
 ): Promise<
 	{ ok: true; body: unknown } | { ok: false; failure: UploadGuardFailure }
 > {
 	const contentLength = request.headers.get("content-length");
-	if (
-		contentLength !== null &&
-		Number(contentLength) > CODEBASE_MAX_CHUNK_BYTES
-	) {
-		return fail(
-			413,
-			"Upload chunk exceeds the 256 KiB transport bound",
-			"SNAPSHOT_TOO_LARGE",
-		);
+	if (contentLength !== null) {
+		const declaredBytes = Number(contentLength);
+		if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+			return fail(400, "Invalid Content-Length", "SYNC_FAILED");
+		}
+		if (declaredBytes > CODEBASE_MAX_CHUNK_BYTES) {
+			return fail(
+				413,
+				"Upload chunk exceeds the 256 KiB transport bound",
+				"SNAPSHOT_TOO_LARGE",
+			);
+		}
 	}
-	const text = await request.text().catch(() => null);
-	if (text === null || text.length > CODEBASE_MAX_CHUNK_BYTES) {
-		return fail(
-			413,
-			"Upload chunk exceeds the 256 KiB transport bound",
-			"SNAPSHOT_TOO_LARGE",
-		);
+	const reader = request.body?.getReader();
+	if (!reader) {
+		return fail(400, "Invalid JSON body", "SYNC_FAILED");
+	}
+	const pieces: Uint8Array[] = [];
+	let totalBytes = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			totalBytes += value.byteLength;
+			if (totalBytes > CODEBASE_MAX_CHUNK_BYTES) {
+				await reader.cancel().catch(() => {});
+				return fail(
+					413,
+					"Upload chunk exceeds the 256 KiB transport bound",
+					"SNAPSHOT_TOO_LARGE",
+				);
+			}
+			pieces.push(value);
+		}
+	} catch {
+		return fail(400, "Invalid JSON body", "SYNC_FAILED");
+	}
+	const total = pieces.reduce((sum, piece) => sum + piece.byteLength, 0);
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const piece of pieces) {
+		bytes.set(piece, offset);
+		offset += piece.byteLength;
 	}
 	try {
-		return { ok: true, body: JSON.parse(text) as unknown };
+		return {
+			ok: true,
+			body: JSON.parse(new TextDecoder().decode(bytes)) as unknown,
+		};
 	} catch {
 		return fail(400, "Invalid JSON body", "SYNC_FAILED");
 	}
