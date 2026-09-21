@@ -3,6 +3,7 @@
 import { AlertCircle, X } from "lucide-react";
 import { PricingComponent } from "@/components/ui/pricing-card";
 import { TopUpCard } from "@/components/ui/top-up-card";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useUserPlan } from "@/hooks/use-user-plan";
 import { type PriceTier, prdFyPlans } from "@/lib/pricing-data";
 import { saveResumeIntent } from "@/lib/prompt-handoff";
@@ -44,24 +45,32 @@ export function CreditExhaustedModal({
 	const { data: planData } = useUserPlan();
 	const plan = planData?.plan ?? currentPlan;
 	const showToast = useUIStore((s) => s.showToast);
+	const dialogRef = useFocusTrap<HTMLDivElement>({
+		isOpen,
+		onEscape: onClose,
+	});
 
 	const handlePlanSelect = async (planId: string) => {
 		if (planId === "free") return;
 		try {
 			saveResumeIntent(projectId, stage);
+			const returnUrl =
+				typeof window !== "undefined"
+					? `${window.location.pathname}${window.location.search}${window.location.hash}`
+					: "/";
 			const res = await fetch("/api/payments/create", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					planId,
-					returnUrl: window.location.pathname,
+					returnUrl,
 					projectId,
 				}),
 			});
 			const data = await res.json();
 			if (!res.ok) {
 				if (res.status === 401) {
-					window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+					window.location.href = `/login?redirect=${encodeURIComponent(returnUrl)}`;
 				} else {
 					showToast(data.error || "Gagal memproses pembayaran.", "error");
 				}
@@ -79,9 +88,11 @@ export function CreditExhaustedModal({
 
 	return (
 		<div
+			ref={dialogRef}
 			className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 animate-in fade-in duration-200 overflow-y-auto"
 			role="dialog"
 			aria-modal="true"
+			aria-labelledby="credit-exhausted-modal-title"
 			onKeyDown={(e) => {
 				if (e.key === "Escape") onClose();
 			}}
@@ -107,7 +118,12 @@ export function CreditExhaustedModal({
 					<div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-crimson/10 text-crimson">
 						<AlertCircle size={20} strokeWidth={2} />
 					</div>
-					<h3 className="font-inter text-xl font-[510] text-snow">{title}</h3>
+					<h3
+						id="credit-exhausted-modal-title"
+						className="font-inter text-xl font-[510] text-snow"
+					>
+						{title}
+					</h3>
 					<p className="mt-2 font-inter text-sm text-fog">{errorMessage}</p>
 
 					{(requiredCredits !== undefined || quote) && (

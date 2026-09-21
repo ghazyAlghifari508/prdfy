@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -9,6 +9,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { buildSyncCommand, type SyncPromptPayload } from "@/lib/codebase-sync";
 import { CODEBASE_CLI_MIN_VERSION } from "@/lib/constants";
 
@@ -78,6 +79,16 @@ export function SyncAgentModal({
 	const [copied, setCopied] = useState(false);
 	const [copyFailed, setCopyFailed] = useState(false);
 
+	useEffect(() => {
+		setCopied(false);
+		setCopyFailed(false);
+	}, [payload, open]);
+
+	const dialogRef = useFocusTrap<HTMLDivElement>({
+		isOpen: open,
+		onEscape: onClose,
+	});
+
 	if (!open) return null;
 
 	const prompt = payload ? buildAgentPrompt(payload) : null;
@@ -97,6 +108,11 @@ export function SyncAgentModal({
 
 	return (
 		<div
+			ref={dialogRef}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="sync-agent-modal-title"
+			tabIndex={-1}
 			className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 animate-in fade-in duration-200"
 			onClick={onClose}
 		>
@@ -105,7 +121,7 @@ export function SyncAgentModal({
 				onClick={(e) => e.stopPropagation()}
 			>
 				<CardHeader>
-					<CardTitle>Instruksi Agen Sync</CardTitle>
+					<CardTitle id="sync-agent-modal-title">Instruksi Agen Sync</CardTitle>
 					<CardDescription>
 						Tempel instruksi ini ke agen AI lokal Anda. Kredensial sync hanya
 						ada di dalam kolom teks di bawah.

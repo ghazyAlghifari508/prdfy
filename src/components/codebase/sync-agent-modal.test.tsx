@@ -114,6 +114,56 @@ describe("SyncAgentModal", () => {
 		expect(c.textContent).not.toContain("%");
 	});
 
+	it("renders dialog semantics and dismisses on Escape", () => {
+		const onClose = vi.fn();
+		const c = renderModal({ onClose });
+		const dialog = c.querySelector('[role="dialog"]');
+		expect(dialog).toBeDefined();
+		expect(dialog?.getAttribute("aria-modal")).toBe("true");
+		expect(dialog?.getAttribute("aria-labelledby")).toBe(
+			"sync-agent-modal-title",
+		);
+
+		const escapeEvent = new KeyboardEvent("keydown", {
+			key: "Escape",
+			bubbles: true,
+			cancelable: true,
+		});
+		document.dispatchEvent(escapeEvent);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("resets copy status when payload changes", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", {
+			...navigator,
+			clipboard: { writeText },
+		});
+		const c = renderModal();
+		const copyButton = [...c.querySelectorAll("button")].find((b) =>
+			/alin/i.test(b.textContent ?? ""),
+		);
+		await act(async () => {
+			copyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(c.textContent).toMatch(/tersalin/i);
+
+		// Now change payload
+		act(() => {
+			root?.render(
+				<SyncAgentModal
+					open
+					onClose={() => {}}
+					payload={{
+						...payload,
+						syncToken: "new-token-456",
+					}}
+				/>,
+			);
+		});
+		expect(c.textContent).not.toMatch(/tersalin/i);
+	});
+
 	it("renders nothing when closed", () => {
 		const c = renderModal({ open: false });
 		expect(c.textContent).toBe("");
