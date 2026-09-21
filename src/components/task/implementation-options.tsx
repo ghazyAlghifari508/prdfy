@@ -238,10 +238,13 @@ export function ImplementationOptions({
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = url;
-			// Extract filename from Content-Disposition or use fallback
+			// Extract filename from Content-Disposition and sanitize against path traversal
 			const cd = res.headers.get("Content-Disposition");
-			const match = cd?.match(/filename="?([^"]+)"?/);
-			a.download = match?.[1] || `prdfy-${projectId}.zip`;
+			const rawMatch = cd?.match(/filename="?([^";\r\n]+)"?/i)?.[1];
+			const safeMatch = rawMatch?.replace(/[^a-zA-Z0-9._-]/g, "_");
+			a.download = safeMatch?.endsWith(".zip")
+				? safeMatch
+				: `prdfy-${projectId}.zip`;
 			document.body.appendChild(a);
 			a.click();
 			document.body.removeChild(a);

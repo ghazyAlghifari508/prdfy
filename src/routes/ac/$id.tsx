@@ -16,31 +16,34 @@ const loadAc = createServerFn({ method: "GET" })
 	.handler(async ({ data: id }) => {
 		const user = await requireUserServer();
 		const { plan } = await getUserPlanAndQuota();
-		const [project, prdContent, acContent] = await Promise.all([
-			db
-				.select({
-					id: projects.id,
-					name: projects.name,
-					acStatus: projects.acStatus,
-					step: projects.step,
-				})
-				.from(projects)
-				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
-				.limit(1),
+
+		// Authorize project ownership FIRST before querying child PRD/AC version tables
+		const [project] = await db
+			.select({
+				id: projects.id,
+				name: projects.name,
+				acStatus: projects.acStatus,
+				step: projects.step,
+			})
+			.from(projects)
+			.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+			.limit(1);
+
+		if (!project) throw new Error("NOT_FOUND");
+
+		const [prdContent, acContent] = await Promise.all([
 			getLatestPrdContent(id),
 			getLatestAcContent(id),
 		]);
 
-		if (!project[0]) throw new Error("NOT_FOUND");
 		return {
 			projectId: id,
-			projectName: project[0].name,
-			step: (project[0] as { step?: string | null }).step ?? null,
+			projectName: project.name,
+			step: project.step ?? null,
 			latestAcContent: acContent ?? undefined,
 			latestPrdContent: prdContent ?? undefined,
 			plan,
-			acStatus:
-				(project[0] as { acStatus: string | null }).acStatus ?? "pending",
+			acStatus: project.acStatus ?? "pending",
 		};
 	});
 

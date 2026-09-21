@@ -3,7 +3,6 @@
 import DOMPurify from "dompurify";
 import mermaid from "mermaid";
 import { useTheme } from "next-themes";
-import type React from "react";
 import { memo, useDeferredValue, useEffect, useRef, useState } from "react";
 
 interface MermaidProps {
@@ -19,7 +18,7 @@ function ensureMermaidInit(theme: "dark" | "default") {
 	mermaid.initialize({
 		startOnLoad: false,
 		theme,
-		securityLevel: "loose",
+		securityLevel: "strict",
 		logLevel: 4, // ERROR only - 0 = TRACE floods console
 		htmlLabels: false,
 		flowchart: { htmlLabels: false },
@@ -134,7 +133,9 @@ export const Mermaid = memo(({ chart }: MermaidProps) => {
 					.querySelectorAll(
 						'svg[id^="dmermaid-"], svg[id^="mermaid-"], div[id^="dmermaid-"]',
 					)
-					.forEach((el) => el.remove());
+					.forEach((el) => {
+						el.remove();
+					});
 
 				const escaped = deferredChart
 					.replace(/&/g, "&amp;")
@@ -174,6 +175,7 @@ export const Mermaid = memo(({ chart }: MermaidProps) => {
 		<div
 			ref={containerRef}
 			className="my-6 overflow-x-auto bg-(--bg-card) p-4 rounded-lg border border-(--border-subtle) flex justify-center w-full"
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized SVG via DOMPurify
 			dangerouslySetInnerHTML={{ __html: svg }}
 		/>
 	);

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { tasks } from "@/db/schema";
 import {
@@ -35,20 +35,47 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 				if (!(await verifyProjectOwnership(auth.userId, projectId)))
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
+				const VALID_TASK_STATUSES = new Set([
+					"pending",
+					"in_progress",
+					"completed",
+				]);
 				const url = new URL(request.url);
 				const statusFilter = url.searchParams.get("status");
+				if (statusFilter && !VALID_TASK_STATUSES.has(statusFilter)) {
+					return Response.json(
+						{
+							error: `Invalid status filter. Allowed: ${Array.from(VALID_TASK_STATUSES).join(", ")}`,
+						},
+						{ status: 400 },
+					);
+				}
+
+				const toIsoString = (d: unknown): string | null => {
+					if (!d) return null;
+					if (d instanceof Date) return d.toISOString();
+					const parsed = new Date(d as string);
+					return Number.isFinite(parsed.getTime())
+						? parsed.toISOString()
+						: null;
+				};
+
 				const rows = await db
 					.select()
 					.from(tasks)
-					.where(eq(tasks.projectId, projectId))
+					.where(
+						statusFilter
+							? and(
+									eq(tasks.projectId, projectId),
+									eq(tasks.status, statusFilter),
+								)
+							: eq(tasks.projectId, projectId),
+					)
 					.orderBy(asc(tasks.order));
 				const acMarkdown = await getLatestAcContent(projectId);
-				const filtered = statusFilter
-					? rows.filter((t) => (t.status ?? "pending") === statusFilter)
-					: rows;
 
 				return Response.json({
-					tasks: filtered.map((t) => ({
+					tasks: rows.map((t) => ({
 						id: t.id,
 						name: t.title,
 						description: t.description,
@@ -57,12 +84,10 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 						acContext: acMarkdown
 							? extractFeatureSection(acMarkdown, t.featureName || "Umum")
 							: null,
-						startedAt: t.startedAt ? (t.startedAt as Date).toISOString() : null,
-						completedAt: t.completedAt
-							? (t.completedAt as Date).toISOString()
-							: null,
+						startedAt: toIsoString(t.startedAt),
+						completedAt: toIsoString(t.completedAt),
 						dependencies: Array.isArray(t.dependencies)
-							? (t.dependencies as string[])
+							? t.dependencies.filter((d): d is string => typeof d === "string")
 							: [],
 						subtasks: Array.isArray(t.subtasks)
 							? (t.subtasks as Array<Record<string, unknown>>).map((s) => ({

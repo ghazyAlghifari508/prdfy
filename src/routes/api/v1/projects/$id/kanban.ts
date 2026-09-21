@@ -66,27 +66,52 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 					completed: [],
 					failed: [],
 				};
+
+				const VALID_CARD_STATUSES = new Set([
+					"pending",
+					"in_progress",
+					"completed",
+					"failed",
+				]);
+
+				const toIso = (d: unknown): string | null => {
+					if (!d) return null;
+					if (d instanceof Date) return d.toISOString();
+					const parsed = new Date(d as string);
+					return Number.isFinite(parsed.getTime())
+						? parsed.toISOString()
+						: null;
+				};
+
 				for (const t of taskRows) {
 					const sub = Array.isArray(t.subtasks)
-						? (t.subtasks as Array<Record<string, unknown>>)
+						? t.subtasks.filter(
+								(s): s is Record<string, unknown> =>
+									s !== null &&
+									typeof s === "object" &&
+									typeof (s as Record<string, unknown>).name === "string",
+							)
 						: [];
+					const rawStatus = t.status ?? "pending";
+					const status: TaskCard["status"] = VALID_CARD_STATUSES.has(rawStatus)
+						? (rawStatus as TaskCard["status"])
+						: "pending";
+
 					const card: TaskCard = {
 						id: t.id,
 						type: "task",
 						featureName: t.featureName || "Umum",
 						name: t.title,
 						description: t.description,
-						status: (t.status ?? "pending") as TaskCard["status"],
+						status,
 						subtaskCount: sub.length,
 						subtaskCompleted: sub.filter((s) => s.status === "completed")
 							.length,
 						dependencies: Array.isArray(t.dependencies)
-							? (t.dependencies as string[])
+							? t.dependencies.filter((d): d is string => typeof d === "string")
 							: [],
-						startedAt: t.startedAt ? (t.startedAt as Date).toISOString() : null,
-						completedAt: t.completedAt
-							? (t.completedAt as Date).toISOString()
-							: null,
+						startedAt: toIso(t.startedAt),
+						completedAt: toIso(t.completedAt),
 						subtasks: sub.map((s) => ({
 							name: s.name as string,
 							status: (s.status as string) ?? "pending",
@@ -96,7 +121,15 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 				}
 
 				const latestAcAt = acRows[0]?.createdAt ?? null;
-				const tasksGeneratedAt = taskRows[0]?.createdAt ?? null;
+				const tasksGeneratedAt = taskRows.reduce<Date | null>((max, t) => {
+					if (!t.createdAt) return max;
+					const d =
+						t.createdAt instanceof Date
+							? t.createdAt
+							: new Date(t.createdAt as string);
+					if (!Number.isFinite(d.getTime())) return max;
+					return !max || d > max ? d : max;
+				}, null);
 				const acChanged = Boolean(
 					latestAcAt &&
 						tasksGeneratedAt &&

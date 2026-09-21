@@ -4,8 +4,13 @@ import { LoginForm } from "@/components/auth/login-form";
 
 export const Route = createFileRoute("/login")({
 	validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
-		const redirect = search.redirect as string | undefined;
-		return redirect ? { redirect } : {};
+		const raw =
+			typeof search.redirect === "string" ? search.redirect : undefined;
+		const safeRedirect =
+			raw?.startsWith("/") && !raw.startsWith("//") && !raw.includes("\\")
+				? raw
+				: undefined;
+		return safeRedirect ? { redirect: safeRedirect } : {};
 	},
 	component: LoginPage,
 });

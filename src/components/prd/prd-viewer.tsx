@@ -145,11 +145,17 @@ export const PrdViewer = memo(function PrdViewer({
 	// switching lives in Version History; no extra picker here.
 	const hasDiff = !!versions && versions.length > 1;
 	const previousVersion = useMemo(() => {
-		if (!versions || versions.length <= 1) return undefined;
-		const candidates = versions
-			.filter((v) => v.version !== currentVersion)
+		if (!versions || versions.length <= 1 || currentVersion === undefined)
+			return undefined;
+		const strictlyEarlier = versions
+			.filter((v) => v.version < currentVersion)
 			.sort((a, b) => b.version - a.version);
-		return candidates[0]?.version;
+		if (strictlyEarlier.length > 0) return strictlyEarlier[0]?.version;
+		// Fallback when viewing v1: diff against the nearest available revision
+		const others = versions
+			.filter((v) => v.version !== currentVersion)
+			.sort((a, b) => a.version - b.version);
+		return others[0]?.version;
 	}, [versions, currentVersion]);
 
 	// Auto-scroll logic when new content arrives
@@ -223,6 +229,7 @@ export const PrdViewer = memo(function PrdViewer({
 					<TableOfContents content={content} />
 				</aside>
 				{/* Drag handle — 8px strip centered across the divider */}
+				{/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle for panel resize */}
 				<div
 					className="absolute right-[-4px] top-0 z-10 h-full w-2 cursor-col-resize transition-colors hover:bg-indigo/20"
 					onMouseDown={onStartDragLeft}

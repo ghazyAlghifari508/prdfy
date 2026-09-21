@@ -9,10 +9,19 @@ import { GenerationProgress } from "@/components/shared/generation-progress";
 import { cn } from "@/lib/utils";
 import type { Plan } from "@/types/database";
 
+function slugifyHeading(text: string): string {
+	return (
+		text
+			.toLowerCase()
+			.replace(/[^\p{L}\p{N}_-]+/gu, "-")
+			.replace(/^-+|-+$/g, "") || "section"
+	);
+}
+
 const markdownComponents: Components = {
 	h2: ({ children, ...props }) => {
 		const text = String(children).replace(/<[^>]*>/g, "");
-		const id = text.toLowerCase().replace(/[^\w]+/g, "-");
+		const id = slugifyHeading(text);
 		return (
 			<h2 id={id} {...props}>
 				{children}
@@ -21,7 +30,7 @@ const markdownComponents: Components = {
 	},
 	h3: ({ children, ...props }) => {
 		const text = String(children).replace(/<[^>]*>/g, "");
-		const id = text.toLowerCase().replace(/[^\w]+/g, "-");
+		const id = slugifyHeading(text);
 		return (
 			<h3 id={id} {...props}>
 				{children}
@@ -30,7 +39,7 @@ const markdownComponents: Components = {
 	},
 	h4: ({ children, ...props }) => {
 		const text = String(children).replace(/<[^>]*>/g, "");
-		const id = text.toLowerCase().replace(/[^\w]+/g, "-");
+		const id = slugifyHeading(text);
 		return (
 			<h4 id={id} {...props}>
 				{children}

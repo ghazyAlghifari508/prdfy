@@ -67,17 +67,22 @@ export function VersionHistory({
 
 	const handleSelect = (version: PrdVersion) => {
 		setSelected(version.version);
+		setExpanded(false);
 		onSelectVersion(version.content, version.version);
 	};
 
 	return (
 		<div className={cn("relative", className)} ref={dropdownRef}>
 			<button
+				type="button"
+				aria-expanded={expanded}
+				aria-controls="version-history-menu"
 				onClick={() => setExpanded(!expanded)}
 				className="flex items-center gap-2 text-sm font-medium text-(--text-secondary) hover:text-(--text-primary) dark:hover:text-[#F0F0F0]"
 			>
 				<span>Version History (v{selected})</span>
 				<svg
+					aria-hidden="true"
 					className={`h-4 w-4 transition-transform ${expanded ? "rotate-90" : ""}`}
 					fill="none"
 					viewBox="0 0 16 16"
@@ -93,7 +98,10 @@ export function VersionHistory({
 			</button>
 
 			{expanded && (
-				<div className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-[var(--border-subtle)] bg-(--bg-card) p-2 shadow-xl space-y-1 max-h-96 overflow-y-auto">
+				<div
+					id="version-history-menu"
+					className="absolute right-0 top-full z-50 mt-2 w-64 rounded-xl border border-[var(--border-subtle)] bg-(--bg-card) p-2 shadow-xl space-y-1 max-h-96 overflow-y-auto"
+				>
 					{hasHistoryAccess ? (
 						versions.map((v) => (
 							<div
@@ -106,6 +114,7 @@ export function VersionHistory({
 								)}
 							>
 								<button
+									type="button"
 									onClick={() => handleSelect(v)}
 									className="w-full px-3 py-2 text-left text-sm"
 								>
