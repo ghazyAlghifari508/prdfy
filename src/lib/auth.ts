@@ -31,31 +31,42 @@ export const auth = betterAuth({
 						"@/lib/constants"
 					);
 					const { creditLedgerEntries } = await import("@/db/schema");
+					const { eq } = await import("drizzle-orm");
 					const now = new Date();
-					const subId = crypto.randomUUID();
-					await db.insert(subscriptions).values({
-						id: subId,
-						userId: user.id,
-						plan: "free",
-						status: "active",
-						credits: PLAN_CREDITS.free,
-						creditsUsed: 0,
-						creditsReserved: 0,
-						currentPeriodStart: now,
-						currentPeriodEnd: addDays(now, BILLING_PERIOD_DAYS),
-						reminderCount: 0,
-					});
-					await db.insert(creditLedgerEntries).values({
-						id: crypto.randomUUID(),
-						userId: user.id,
-						operationId: null,
-						amount: PLAN_CREDITS.free,
-						entryType: "grant",
-						sourceCategory: "system_grant",
-						pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
-						metadata: {
-							reason: "initial_signup_grant",
-						},
+					// Single transaction + existence check: a retried/replayed
+					// hook must never mint a second free subscription or grant.
+					await db.transaction(async (tx) => {
+						const [existing] = await tx
+							.select({ id: subscriptions.id })
+							.from(subscriptions)
+							.where(eq(subscriptions.userId, user.id))
+							.limit(1);
+						if (existing) return;
+						const subId = crypto.randomUUID();
+						await tx.insert(subscriptions).values({
+							id: subId,
+							userId: user.id,
+							plan: "free",
+							status: "active",
+							credits: PLAN_CREDITS.free,
+							creditsUsed: 0,
+							creditsReserved: 0,
+							currentPeriodStart: now,
+							currentPeriodEnd: addDays(now, BILLING_PERIOD_DAYS),
+							reminderCount: 0,
+						});
+						await tx.insert(creditLedgerEntries).values({
+							id: crypto.randomUUID(),
+							userId: user.id,
+							operationId: null,
+							amount: PLAN_CREDITS.free,
+							entryType: "grant",
+							sourceCategory: "system_grant",
+							pricingVersion: ADAPTIVE_CREDIT_PRICING.version,
+							metadata: {
+								reason: "initial_signup_grant",
+							},
+						});
 					});
 				},
 			},
@@ -81,14 +92,20 @@ export const auth = betterAuth({
 							.select({
 								id: users.id,
 								email: users.email,
+								emailVerified: users.emailVerified,
 								isAdmin: users.isAdmin,
 							})
 							.from(users)
 							.where(eq(users.id, userId))
 							.limit(1);
 
+						// Bootstrap-only promotion: verified email knocks out
+						// typo/mismanaged-env escalation via unverified
+						// provider emails. Promotion is one-way here;
+						// demotion/revocation stays an explicit admin action.
 						if (
 							userRecord?.email &&
+							userRecord.emailVerified &&
 							adminEmails.includes(userRecord.email.toLowerCase()) &&
 							!userRecord.isAdmin
 						) {

@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { rateLimits } from "@/db/schema";
 import { RATE_LIMIT_WINDOW_MS, RATE_LIMITS } from "@/lib/constants";
 
-export type RateLimitAction = "ai_generate" | "api_call";
+export type RateLimitAction = "ai_generate" | "api_call" | "api_key_auth";
 
 export function getRateLimitWindowStart(
 	date: Date,
@@ -20,7 +20,9 @@ export async function checkRateLimit(
 	const limit =
 		action === "api_call"
 			? RATE_LIMITS.general
-			: RATE_LIMITS[plan as keyof typeof RATE_LIMITS] || RATE_LIMITS.free;
+			: action === "api_key_auth"
+				? RATE_LIMITS.apiKeyAuth
+				: RATE_LIMITS[plan as keyof typeof RATE_LIMITS] || RATE_LIMITS.free;
 
 	const windowStart = getRateLimitWindowStart(new Date());
 

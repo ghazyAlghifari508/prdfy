@@ -18,9 +18,16 @@ export const RATE_LIMITS = {
 	pro: 15,
 	hengker: 30,
 	general: 60,
+	// Unauthenticated API-key guesses per key-fingerprint per minute.
+	apiKeyAuth: 30,
 } as const;
 
 export const RATE_LIMIT_WINDOW_MS = 60_000;
+
+// Absolute magnitude cap for a single credit quote, grant, or ledger entry.
+// Plans top out in the low hundreds; this bound only rejects corrupt or
+// hostile values (including floats rounded past MAX_SAFE_INTEGER).
+export const MAX_CREDIT_AMOUNT = 10_000_000;
 
 // Pre-byte-retry for AI generation: if the upstream router drops/errors before
 // any text-delta leaves the server, retry once before failing the whole request.

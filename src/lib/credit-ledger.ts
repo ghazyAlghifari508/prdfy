@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { MAX_CREDIT_AMOUNT } from "@/lib/constants";
 import type { db } from "@/db";
 import type {
 	CreditLedgerMetadata,
@@ -114,12 +115,14 @@ export function parseCreditLedgerSource(
 }
 
 function validateCreditQuote(quote: CreditQuote): void {
+	// Safe integers only: values past MAX_SAFE_INTEGER are already rounded
+	// by the time isInteger sees them, so the check must be isSafeInteger.
+	// MAX_CREDIT_AMOUNT caps the absolute magnitude a single quote may carry.
 	if (
-		!Number.isInteger(quote.estimatedCredits) ||
-		!Number.isInteger(quote.maximumCredits) ||
-		!Number.isFinite(quote.estimatedCredits) ||
-		!Number.isFinite(quote.maximumCredits) ||
+		!Number.isSafeInteger(quote.estimatedCredits) ||
+		!Number.isSafeInteger(quote.maximumCredits) ||
 		quote.maximumCredits < 0 ||
+		quote.maximumCredits > MAX_CREDIT_AMOUNT ||
 		quote.estimatedCredits < 0 ||
 		quote.estimatedCredits > quote.maximumCredits
 	) {
@@ -132,12 +135,32 @@ export function createCreditLedgerPersistence(
 ): CreditLedgerPersistence {
 	return {
 		async createOperation(operation) {
-			const [row] = await database
+			// Atomic idempotent create: concurrent retries with the same
+			// (userId, idempotencyKey) collapse onto one row via the unique
+			// constraint instead of erroring or duplicating.
+			const [inserted] = await database
 				.insert(creditOperations)
 				.values(operation)
+				.onConflictDoNothing({
+					target: [
+						creditOperations.userId,
+						creditOperations.idempotencyKey,
+					],
+				})
 				.returning();
-			if (!row) throw new Error("Credit operation was not created");
-			return row;
+			if (inserted) return inserted;
+			const [existing] = await database
+				.select()
+				.from(creditOperations)
+				.where(
+					and(
+						eq(creditOperations.userId, operation.userId),
+						eq(creditOperations.idempotencyKey, operation.idempotencyKey),
+					),
+				)
+				.limit(1);
+			if (!existing) throw new Error("Credit operation was not created");
+			return existing;
 		},
 		async findOperationByIdempotencyKey(input) {
 			const [row] = await database
@@ -153,6 +176,23 @@ export function createCreditLedgerPersistence(
 			return row;
 		},
 		async appendLedgerEntry(entry) {
+			// Ownership gate: an entry may only attach to an operation owned
+			// by the same user. Null operationId (system grants) skips the
+			// check — there is no operation row to bind to.
+			if (entry.operationId) {
+				const [owned] = await database
+					.select({ id: creditOperations.id })
+					.from(creditOperations)
+					.where(
+						and(
+							eq(creditOperations.id, entry.operationId),
+							eq(creditOperations.userId, entry.userId),
+						),
+					)
+					.limit(1);
+				if (!owned)
+					throw new Error("Credit ledger operation ownership mismatch");
+			}
 			const [row] = await database
 				.insert(creditLedgerEntries)
 				.values(entry)
@@ -244,7 +284,11 @@ export async function appendCreditLedgerEntry(
 	persistence: Pick<CreditLedgerPersistence, "appendLedgerEntry">,
 	input: CreditLedgerAppendInput,
 ): Promise<CreditLedgerEntryRow> {
-	if (!Number.isInteger(input.amount) || input.amount === 0) {
+	if (
+		!Number.isSafeInteger(input.amount) ||
+		input.amount === 0 ||
+		Math.abs(input.amount) > MAX_CREDIT_AMOUNT
+	) {
 		throw new Error("Credit ledger amount must be a non-zero integer");
 	}
 

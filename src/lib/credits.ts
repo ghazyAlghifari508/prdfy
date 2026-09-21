@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions } from "@/db/schema";
 import {
@@ -139,47 +139,10 @@ export async function getCreditBalance(userId: string): Promise<CreditBalance> {
 	};
 }
 
-export async function checkCredits(userId: string): Promise<{
-	allowed: boolean;
-	remaining: number;
-	plan: Plan;
-	subscriptionState: SubscriptionStateKind;
-}> {
-	const { plan, remaining, subscriptionState } = await getCreditBalance(userId);
-	return { allowed: remaining > 0, remaining, plan, subscriptionState };
-}
-
-/**
- * Atomically burns one credit. Two predicates live in the WHERE clause so two
- * concurrent project creations cannot overdraw, AND an expired (paused)
- * subscription can never burn its forfeited leftovers mid-expiry:
- * `current_period_end IS NULL` keeps legacy one-time rows burning forever.
- *
- * Returns false when there was nothing left to burn.
- */
-export async function consumeCredit(userId: string): Promise<boolean> {
-	const [latest] = await db
-		.select({ id: subscriptions.id })
-		.from(subscriptions)
-		.where(eq(subscriptions.userId, userId))
-		.orderBy(desc(subscriptions.createdAt))
-		.limit(1);
-	if (!latest) return false;
-
-	const rows = await db
-		.update(subscriptions)
-		.set({
-			creditsUsed: sql`${subscriptions.creditsUsed} + 1`,
-			updatedAt: new Date(),
-		})
-		.where(
-			and(
-				eq(subscriptions.id, latest.id),
-				sql`${subscriptions.creditsUsed} < ${subscriptions.credits}`,
-				sql`(${subscriptions.currentPeriodEnd} IS NULL OR ${subscriptions.currentPeriodEnd} >= now())`,
-			),
-		)
-		.returning({ id: subscriptions.id });
-
-	return rows.length > 0;
-}
+// NOTE: the legacy `checkCredits` / `consumeCredit` burn path was removed.
+// It had no callers (all generation flows settle through credit-service
+// operations) and its burn never refreshed an expired free allowance first,
+// so a free user past period-end was wrongly rejected instead of rolled
+// over. Deleting the dead path removes the flawed behavior entirely;
+// `getCreditBalance` above remains the single read path and always rolls
+// over before reporting.

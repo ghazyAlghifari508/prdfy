@@ -223,6 +223,82 @@ describe("credit ledger persistence contracts", () => {
 		expect(append).not.toHaveBeenCalled();
 	});
 
+	it("rejects unsafe-integer and over-maximum quote fields", async () => {
+		const create = vi.fn();
+		const base: Parameters<typeof createCreditOperation>[1] = {
+			userId: "user-1",
+			projectId: "project-1",
+			subscriptionId: "subscription-1",
+			operation: "prd_generation" as const,
+			stage: "prd" as const,
+			idempotencyKey: "request-unsafe",
+			quote: {
+				operation: "prd_generation" as const,
+				pricingVersion: "adaptive-v1",
+				estimatedCredits: 2,
+				maximumCredits: 4,
+				metrics: {},
+			},
+		};
+		await expect(
+			createCreditOperation(
+				{ createOperation: create },
+				{
+					...base,
+					quote: { ...base.quote, maximumCredits: Number.MAX_SAFE_INTEGER + 1 },
+				},
+			),
+		).rejects.toThrow("maximum");
+		await expect(
+			createCreditOperation(
+				{ createOperation: create },
+				{
+					...base,
+					quote: { ...base.quote, maximumCredits: 10_000_001 },
+				},
+			),
+		).rejects.toThrow("maximum");
+		expect(create).not.toHaveBeenCalled();
+	});
+
+	it("rejects unsafe-integer and over-maximum ledger amounts", async () => {
+		const append = vi.fn();
+		const base: Parameters<typeof appendCreditLedgerEntry>[1] = {
+			userId: "user-1",
+			amount: -1,
+			entryType: "reservation" as const,
+			source: "adaptive_credit" as const,
+			pricingVersion: "adaptive-v1",
+			metadata: {},
+		};
+		await expect(
+			appendCreditLedgerEntry(
+				{ appendLedgerEntry: append },
+				{ ...base, amount: Number.MAX_SAFE_INTEGER + 1 },
+			),
+		).rejects.toThrow("non-zero integer");
+		await expect(
+			appendCreditLedgerEntry(
+				{ appendLedgerEntry: append },
+				{ ...base, amount: 10_000_001 },
+			),
+		).rejects.toThrow("non-zero integer");
+		expect(append).not.toHaveBeenCalled();
+	});
+
+	it("creates operations idempotently via unique-conflict re-read", async () => {
+		const source = readFileSync("src/lib/credit-ledger.ts", "utf8");
+		expect(source).toContain("onConflictDoNothing");
+		expect(source).toContain("creditOperations.userId,");
+		expect(source).toContain("creditOperations.idempotencyKey,");
+	});
+
+	it("gates ledger entries on operation ownership", async () => {
+		const source = readFileSync("src/lib/credit-ledger.ts", "utf8");
+		expect(source).toContain("Credit ledger operation ownership mismatch");
+		expect(source).toContain("eq(creditOperations.userId, entry.userId)");
+	});
+
 	it("ships a database trigger for ledger immutability", () => {
 		const migration = readFileSync(
 			"drizzle/0015_moaning_ozymandias.sql",

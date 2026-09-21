@@ -32,6 +32,19 @@ export async function apiKeyAuth(
 	if (!rawKey) return { error: "API key required", status: 401 };
 
 	const keyHash = createHash("sha256").update(rawKey).digest("hex");
+	// Brute-force throttle before the DB lookup, bucketed by key
+	// fingerprint (the full hash never leaves this function). Fail-closed
+	// like the shared limiter: a limiter outage denies auth, exactly as the
+	// key lookup itself would when the database is unreachable.
+	const { checkRateLimit } = await import("@/lib/rate-limit");
+	const throttled = await checkRateLimit(
+		`apikey:${keyHash.slice(0, 16)}`,
+		"free",
+		"api_key_auth",
+	);
+	if (!throttled.allowed) {
+		return { error: "Too many authentication attempts", status: 429 };
+	}
 	const [keyRecord] = await db
 		.select({
 			id: apiKeys.id,
