@@ -94,6 +94,17 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 					.for("update");
 				if (!project) return [];
 
+				// Re-bind the task inside the transaction: the project lock
+				// above cannot stop a concurrent move of the task row itself
+				// to another project between the check and this write.
+				const [bound] = await tx
+					.select({ id: tasks.id, projectId: tasks.projectId })
+					.from(tasks)
+					.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
+					.limit(1)
+					.for("update");
+				if (!bound) return [];
+
 				const updateData: Record<string, unknown> = {
 					status,
 					updatedAt: new Date(),

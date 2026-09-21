@@ -189,10 +189,7 @@ export const Route = createFileRoute("/api/chat")({
 						)
 						.limit(1);
 
-					if (
-						(mode === "revise" || mode === "chat" || mode === "generate") &&
-						!projCheck
-					) {
+					if (!projCheck) {
 						return Response.json(
 							{ error: "Project not found or unauthorized" },
 							{ status: 403 },
@@ -552,16 +549,27 @@ export const Route = createFileRoute("/api/chat")({
 								);
 
 							if (!conversationIdToUse) {
-								const result = await ensureConversation(
-									user.id,
-									projectIdToUse,
-									deriveProjectNameSync(message),
-									preferences || null,
-								);
-								conversationIdToUse = result.conversationId;
-								projectIdToUse = result.projectId;
-								createdConversationId = result.createdConversationId;
-								createdProjectId = result.createdProjectId;
+								try {
+									const result = await ensureConversation(
+										user.id,
+										projectIdToUse,
+										deriveProjectNameSync(message),
+										preferences || null,
+									);
+									conversationIdToUse = result.conversationId;
+									projectIdToUse = result.projectId;
+									createdConversationId = result.createdConversationId;
+									createdProjectId = result.createdProjectId;
+								} catch (error) {
+									if (
+										error instanceof ConversationProjectOwnershipError
+									) {
+										await safeRelease("conversation ownership mismatch");
+										await safeError("Project not found or unauthorized");
+										return;
+									}
+									throw error;
+								}
 							}
 
 							fullResponse += firstChunk;

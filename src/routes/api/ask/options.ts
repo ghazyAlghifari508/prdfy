@@ -115,11 +115,30 @@ export const Route = createFileRoute("/api/ask/options")({
 					try {
 						// Snapshot write-through: stamp the handoff with the snapshot
 						// that is active at submit time for existing-codebase traceability.
-						const activeSnapshotId =
-							project.projectMode === "existing_codebase"
-								? (parsed.data.snapshotId ??
-									(await resolveActiveSnapshotId(projectId)))
-								: null;
+						// A client-supplied snapshotId is never trusted blindly: it
+						// must belong to this project or it is dropped in favor of
+						// the server-resolved active snapshot.
+						let activeSnapshotId: string | null = null;
+						if (project.projectMode === "existing_codebase") {
+							const candidate = parsed.data.snapshotId;
+							if (candidate) {
+								const { db: verifyDb } = await import("@/db");
+								const { codebaseSnapshots } = await import("@/db/schema");
+								const [owned] = await verifyDb
+									.select({ id: codebaseSnapshots.id })
+									.from(codebaseSnapshots)
+									.where(
+										and(
+											eq(codebaseSnapshots.id, candidate),
+											eq(codebaseSnapshots.projectId, projectId),
+										),
+									)
+									.limit(1);
+								if (owned) activeSnapshotId = owned.id;
+							}
+							activeSnapshotId ??=
+								await resolveActiveSnapshotId(projectId);
+						}
 						await saveAskHandoff(user.id, {
 							...parsed.data,
 							...(activeSnapshotId ? { snapshotId: activeSnapshotId } : {}),

@@ -75,7 +75,17 @@ export const Route = createFileRoute("/api/settings/api-keys/")({
 						{ error: "Gagal membuat API key" },
 						{ status: 500 },
 					);
-				return Response.json({ id: inserted.id, rawKey });
+				// One-time bearer credential: must never be cached by
+				// browsers, proxies, or history.
+				return Response.json(
+					{ id: inserted.id, rawKey },
+					{
+						headers: {
+							"Cache-Control": "no-store",
+							Pragma: "no-cache",
+						},
+					},
+				);
 			},
 		},
 	},
