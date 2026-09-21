@@ -25,6 +25,7 @@ export async function generatePdfBuffer({
 	try {
 		const bodySize = PDF_STYLES.bodySize;
 		doc.setFontSize(PDF_STYLES.headerSize);
+		doc.text(projectName, 10, 10);
 		doc.setFontSize(bodySize);
 		const lines = doc.splitTextToSize(content, 180);
 		const pageHeight = doc.internal.pageSize.getHeight();
