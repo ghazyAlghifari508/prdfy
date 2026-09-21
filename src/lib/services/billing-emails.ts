@@ -34,6 +34,13 @@ function asPaidPlan(plan: string): PaidPlan | null {
 	return plan === "pro" || plan === "hengker" ? plan : null;
 }
 
+/**
+ * Counter contract (single writer: /api/cron/billing, atomic claim per
+ * send): `reminderCount` counts consumed reminder stages. 0 = none sent.
+ * The pre-expiry notice consumes stage 0, so post-expiry indexing subtracts
+ * one: count 1 → first post-expiry stage, count 0 post-expiry (pre-expiry
+ * never due/sent) → also the first post-expiry stage, never a later one.
+ */
 export function selectBillingEmailTargets(
 	rows: BillingCandidateRow[],
 	now: Date,

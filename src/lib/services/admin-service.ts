@@ -248,12 +248,26 @@ export const getAdminDashboardMetrics = createServerFn({
 
 export const listUsers = createServerFn({ method: "GET" })
 	.validator(
-		(data: { limit?: number; offset?: number; search?: string } = {}) =>
-			data ?? {},
+		(data: { limit?: number; offset?: number; search?: string } = {}) => {
+			const raw = data ?? {};
+			// Normalize pagination at the boundary: unbounded or invalid
+			// values must never reach the query.
+			const limit = Number.isSafeInteger(raw.limit)
+				? Math.min(Math.max(raw.limit as number, 1), 100)
+				: 50;
+			const offset = Number.isSafeInteger(raw.offset)
+				? Math.max(raw.offset as number, 0)
+				: 0;
+			const search =
+				typeof raw.search === "string" ? raw.search.trim().slice(0, 128) : "";
+			return { limit, offset, search };
+		},
 	)
 	.handler(async ({ data }) => {
 		await requireAdmin(await getRequestHeaders());
 		const { db, users, subscriptions } = await adminDb();
+		// Escape LIKE wildcards so the search is a literal substring match.
+		const pattern = `%${data.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 		const rows = await db
 			.select({
 				user: users,
@@ -261,9 +275,17 @@ export const listUsers = createServerFn({ method: "GET" })
 			})
 			.from(users)
 			.leftJoin(subscriptions, eq(subscriptions.userId, users.id))
+			.where(
+				data.search
+					? or(
+							ilike(users.email, pattern),
+							ilike(users.name, pattern),
+						)
+					: undefined,
+			)
 			.orderBy(desc(users.createdAt))
-			.limit(data.limit ?? 50)
-			.offset(data.offset ?? 0);
+			.limit(data.limit)
+			.offset(data.offset);
 		return rows;
 	});
 
