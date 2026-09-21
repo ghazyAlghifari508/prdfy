@@ -74,16 +74,26 @@ export function TrendLineChart({
 
 	const handleRangeChange = (days: number) => {
 		setSelectedRange(days);
+		setHoverIndex(null);
 		onRangeChange?.(days);
 	};
 
 	const totalRevenue = useMemo(
-		() => currentData.reduce((acc, curr) => acc + (curr.revenue || 0), 0),
+		() =>
+			currentData.reduce(
+				(acc, curr) => acc + (Number.isFinite(curr.revenue) ? curr.revenue : 0),
+				0,
+			),
 		[currentData],
 	);
 
 	const totalNewUsers = useMemo(
-		() => currentData.reduce((acc, curr) => acc + (curr.newUsers || 0), 0),
+		() =>
+			currentData.reduce(
+				(acc, curr) =>
+					acc + (Number.isFinite(curr.newUsers) ? curr.newUsers : 0),
+				0,
+			),
 		[currentData],
 	);
 
@@ -359,7 +369,7 @@ export function TrendLineChart({
 
 									return (
 										<text
-											key={`date-lbl-${item.date}`}
+											key={`date-lbl-${item.date}-${item.label}-${getX(i)}`}
 											x={x}
 											y={baselineY + 22}
 											textAnchor="middle"
@@ -379,7 +389,7 @@ export function TrendLineChart({
 									className="pointer-events-none transition-all duration-300"
 								/>
 							)}
-							{revArea && (
+							{!streamerActive && revArea && (
 								<path
 									d={revArea}
 									fill={`url(#${revGradId})`}
@@ -399,7 +409,7 @@ export function TrendLineChart({
 									className="pointer-events-none transition-all duration-300"
 								/>
 							)}
-							{revSpline && (
+							{!streamerActive && revSpline && (
 								<path
 									d={revSpline}
 									fill="none"
@@ -429,21 +439,25 @@ export function TrendLineChart({
 										/>
 
 										{/* Revenue Indicator Dots */}
-										<circle
-											cx={hoveredX}
-											cy={hoveredRevY}
-											r="8"
-											fill="#10b981"
-											fillOpacity="0.25"
-										/>
-										<circle
-											cx={hoveredX}
-											cy={hoveredRevY}
-											r="4.5"
-											fill="#10b981"
-											stroke="#0f1011"
-											strokeWidth="2"
-										/>
+										{!streamerActive && (
+											<>
+												<circle
+													cx={hoveredX}
+													cy={hoveredRevY}
+													r="8"
+													fill="#10b981"
+													fillOpacity="0.25"
+												/>
+												<circle
+													cx={hoveredX}
+													cy={hoveredRevY}
+													r="4.5"
+													fill="#10b981"
+													stroke="#0f1011"
+													strokeWidth="2"
+												/>
+											</>
+										)}
 
 										{/* Users Indicator Dots */}
 										<circle

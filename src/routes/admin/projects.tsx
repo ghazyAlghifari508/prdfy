@@ -24,6 +24,14 @@ export const Route = createFileRoute("/admin/projects")({
 	component: AdminProjectsPage,
 });
 
+function getProjectTargetRoute(
+	step: string | null | undefined,
+): "/prd/$id" | "/ac/$id" | "/task/$id" {
+	if (step === "task") return "/task/$id";
+	if (step === "ac") return "/ac/$id";
+	return "/prd/$id";
+}
+
 function AdminProjectsPage() {
 	const { projects } = Route.useLoaderData();
 	const { isStreamerMode, maskName, maskEmail } = useStreamerMode();
@@ -31,23 +39,30 @@ function AdminProjectsPage() {
 	const [search, setSearch] = useState("");
 	const [stepFilter, setStepFilter] = useState<string>("all");
 
-	const filteredProjects = projects.filter((proj: AdminProjectItem) => {
-		const q = search.toLowerCase();
-		const matchesSearch =
-			!search ||
-			proj.name.toLowerCase().includes(q) ||
-			proj.description?.toLowerCase().includes(q) ||
-			proj.userName?.toLowerCase().includes(q) ||
-			proj.userEmail?.toLowerCase().includes(q);
+	const normalizedProjects = projects.map((p) => ({
+		...p,
+		step: p.step ?? "prd",
+	}));
 
-		const matchesStep = stepFilter === "all" || proj.step === stepFilter;
+	const filteredProjects = normalizedProjects.filter(
+		(proj: AdminProjectItem) => {
+			const q = search.toLowerCase();
+			const matchesSearch =
+				!search ||
+				proj.name.toLowerCase().includes(q) ||
+				proj.description?.toLowerCase().includes(q) ||
+				proj.userName?.toLowerCase().includes(q) ||
+				proj.userEmail?.toLowerCase().includes(q);
 
-		return matchesSearch && matchesStep;
-	});
+			const matchesStep = stepFilter === "all" || proj.step === stepFilter;
 
-	const prdCount = projects.filter((p) => p.step === "prd").length;
-	const acCount = projects.filter((p) => p.step === "ac").length;
-	const taskCount = projects.filter((p) => p.step === "task").length;
+			return matchesSearch && matchesStep;
+		},
+	);
+
+	const prdCount = normalizedProjects.filter((p) => p.step === "prd").length;
+	const acCount = normalizedProjects.filter((p) => p.step === "ac").length;
+	const taskCount = normalizedProjects.filter((p) => p.step === "task").length;
 
 	return (
 		<div className="mx-auto max-w-7xl space-y-8 font-inter">
@@ -223,7 +238,7 @@ function AdminProjectsPage() {
 											</td>
 											<td className="px-5 py-3.5 text-right">
 												<Link
-													to="/ac/$id"
+													to={getProjectTargetRoute(proj.step)}
 													params={{ id: proj.id }}
 													className="inline-flex items-center gap-1.5 rounded-md border border-graphite bg-white/5 px-2.5 py-1 text-[11px] font-medium text-snow transition-colors hover:bg-white/10 hover:border-fog/40"
 												>

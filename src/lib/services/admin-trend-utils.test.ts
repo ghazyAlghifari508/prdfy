@@ -71,4 +71,27 @@ describe("Admin Trend Utils", () => {
 			},
 		]);
 	});
+
+	it("throws RangeError on non-positive or excessive days in buildDateRangeSeries", () => {
+		expect(() => buildDateRangeSeries(0)).toThrow(RangeError);
+		expect(() => buildDateRangeSeries(-5)).toThrow(RangeError);
+		expect(() => buildDateRangeSeries(400)).toThrow(RangeError);
+		expect(() => buildDateRangeSeries(Number.NaN)).toThrow(RangeError);
+	});
+
+	it("aggregates duplicate date rows and safely skips non-finite values", () => {
+		const series = [{ date: "2026-08-20", label: "20 Agu" }];
+		const revenueRows = [
+			{ day: "2026-08-20", total: 100000 },
+			{ day: "2026-08-20", total: 50000 },
+			{ day: "2026-08-20", total: Number.NaN },
+		];
+		const userRows = [
+			{ day: "2026-08-20", count: 2 },
+			{ day: "2026-08-20", count: 3 },
+		];
+		const merged = mergeTrendData(series, revenueRows, userRows);
+		expect(merged[0].revenue).toBe(150000);
+		expect(merged[0].newUsers).toBe(5);
+	});
 });

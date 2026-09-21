@@ -3,16 +3,21 @@ function fmt(n: number): number {
 }
 
 export function generateSplinePath(points: { x: number; y: number }[]): string {
-	if (points.length === 0) return "";
-	if (points.length === 1) return `M ${fmt(points[0].x)} ${fmt(points[0].y)}`;
+	const validPoints = points.filter(
+		(p) => Number.isFinite(p.x) && Number.isFinite(p.y),
+	);
+	if (validPoints.length === 0) return "";
+	if (validPoints.length === 1)
+		return `M ${fmt(validPoints[0].x)} ${fmt(validPoints[0].y)}`;
 
-	let d = `M ${fmt(points[0].x)} ${fmt(points[0].y)}`;
+	let d = `M ${fmt(validPoints[0].x)} ${fmt(validPoints[0].y)}`;
 
-	for (let i = 0; i < points.length - 1; i++) {
-		const p0 = points[i === 0 ? 0 : i - 1];
-		const p1 = points[i];
-		const p2 = points[i + 1];
-		const p3 = points[i + 2 >= points.length ? points.length - 1 : i + 2];
+	for (let i = 0; i < validPoints.length - 1; i++) {
+		const p0 = validPoints[i === 0 ? 0 : i - 1];
+		const p1 = validPoints[i];
+		const p2 = validPoints[i + 1];
+		const p3 =
+			validPoints[i + 2 >= validPoints.length ? validPoints.length - 1 : i + 2];
 
 		const cp1x = p1.x + (p2.x - p0.x) / 6;
 		const cp1y = p1.y + (p2.y - p0.y) / 6;
@@ -43,7 +48,12 @@ export function calculateYScale(
 	paddingBottom: number,
 	minCeil = 4,
 ): { scale: (v: number) => number; ticks: number[] } {
-	const rawMax = Math.max(...values, 0);
+	let rawMax = 0;
+	for (const v of values) {
+		if (Number.isFinite(v) && v > rawMax) {
+			rawMax = v;
+		}
+	}
 	const max = Math.max(rawMax, minCeil);
 
 	// Calculate nice step

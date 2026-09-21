@@ -8,7 +8,7 @@ import {
 	MessageSquare,
 	Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AdminMetricCard } from "@/components/admin/admin-metric-card";
 import { useStreamerMode } from "@/components/admin/streamer-mode-context";
 import { TrendLineChart } from "@/components/admin/trend-line-chart";
@@ -109,16 +109,22 @@ function AdminDashboardPage() {
 		metrics.trendData || [],
 	);
 	const [isLoadingTrend, setIsLoadingTrend] = useState<boolean>(false);
+	const trendRequestRef = useRef(0);
 
 	const handleRangeChange = async (days: number) => {
+		const requestId = ++trendRequestRef.current;
 		setIsLoadingTrend(true);
 		try {
 			const res = await getAdminTrendMetrics({ data: { days } });
-			setTrendData(res);
+			if (requestId === trendRequestRef.current) {
+				setTrendData(res);
+			}
 		} catch (err) {
 			console.error("Failed to fetch trend data:", err);
 		} finally {
-			setIsLoadingTrend(false);
+			if (requestId === trendRequestRef.current) {
+				setIsLoadingTrend(false);
+			}
 		}
 	};
 
@@ -227,7 +233,7 @@ function AdminDashboardPage() {
 								</p>
 							</div>
 							<Link
-								to="/admin"
+								to="/admin/transactions"
 								className="text-xs font-medium text-fog hover:text-snow transition-colors"
 							>
 								Lihat Semua
@@ -285,7 +291,7 @@ function AdminDashboardPage() {
 								</p>
 							</div>
 							<Link
-								to="/admin"
+								to="/admin/projects"
 								className="text-xs font-medium text-fog hover:text-snow transition-colors"
 							>
 								Kelola Proyek

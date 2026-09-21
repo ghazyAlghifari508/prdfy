@@ -49,4 +49,24 @@ describe("Chart Geometry Math", () => {
 		expect(scaleInfo.scale(0)).toBe(170);
 		expect(scaleInfo.scale(4)).toBe(20);
 	});
+
+	it("filters non-finite points in spline path", () => {
+		const points = [
+			{ x: 0, y: 100 },
+			{ x: Number.NaN, y: 50 },
+			{ x: 100, y: Number.POSITIVE_INFINITY },
+			{ x: 50, y: 50 },
+		];
+		const path = generateSplinePath(points);
+		expect(path).not.toContain("NaN");
+		expect(path).not.toContain("Infinity");
+	});
+
+	it("safely handles large datasets and non-finite values in calculateYScale", () => {
+		const large = Array.from({ length: 20_000 }, (_, i) =>
+			i % 2 === 0 ? i : Number.NaN,
+		);
+		const scaleInfo = calculateYScale(large, 200, 20, 30);
+		expect(scaleInfo.ticks[4]).toBeGreaterThan(10000);
+	});
 });

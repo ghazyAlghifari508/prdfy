@@ -274,27 +274,40 @@ export const updateUserPlan = createServerFn({ method: "POST" })
 	.handler(async ({ data }) => {
 		await requireAdmin(await getRequestHeaders());
 		const { db, subscriptions } = await adminDb();
-		await db
+		const [updated] = await db
 			.update(subscriptions)
 			.set({ plan: data.plan, status: "active", updatedAt: new Date() })
-			.where(eq(subscriptions.userId, data.userId));
+			.where(eq(subscriptions.userId, data.userId))
+			.returning({ id: subscriptions.id });
+		if (!updated) {
+			throw new Error("Subscription not found for user");
+		}
 	});
 
 export const setUserBanned = createServerFn({ method: "POST" })
 	.validator((data: { userId: string; banned: boolean }) => data)
 	.handler(async ({ data }) => {
-		await requireAdmin(await getRequestHeaders());
-		const { db, users, sessions } = await adminDb();
-		await db
-			.update(users)
-			.set({
-				bannedAt: data.banned ? new Date() : null,
-				updatedAt: new Date(),
-			})
-			.where(eq(users.id, data.userId));
-		if (data.banned) {
-			await db.delete(sessions).where(eq(sessions.userId, data.userId));
+		const adminUser = await requireAdmin(await getRequestHeaders());
+		if (adminUser.id === data.userId && data.banned) {
+			throw new Error("Cannot ban your own account");
 		}
+		const { db, users, sessions } = await adminDb();
+		await db.transaction(async (tx) => {
+			const [updated] = await tx
+				.update(users)
+				.set({
+					bannedAt: data.banned ? new Date() : null,
+					updatedAt: new Date(),
+				})
+				.where(eq(users.id, data.userId))
+				.returning({ id: users.id });
+			if (!updated) {
+				throw new Error("User not found");
+			}
+			if (data.banned) {
+				await tx.delete(sessions).where(eq(sessions.userId, data.userId));
+			}
+		});
 	});
 
 export const resetUserCredit = createServerFn({ method: "POST" })
@@ -302,21 +315,37 @@ export const resetUserCredit = createServerFn({ method: "POST" })
 	.handler(async ({ data }) => {
 		await requireAdmin(await getRequestHeaders());
 		const { db, subscriptions } = await adminDb();
-		await db
+		const [updated] = await db
 			.update(subscriptions)
 			.set({ creditsUsed: 0, updatedAt: new Date() })
-			.where(eq(subscriptions.userId, data.userId));
+			.where(eq(subscriptions.userId, data.userId))
+			.returning({ id: subscriptions.id });
+		if (!updated) {
+			throw new Error("Subscription not found for user");
+		}
 	});
 
 export const setUserAdmin = createServerFn({ method: "POST" })
 	.validator((data: { userId: string; isAdmin: boolean }) => data)
 	.handler(async ({ data }) => {
-		await requireAdmin(await getRequestHeaders());
-		const { db, users } = await adminDb();
-		await db
-			.update(users)
-			.set({ isAdmin: data.isAdmin, updatedAt: new Date() })
-			.where(eq(users.id, data.userId));
+		const adminUser = await requireAdmin(await getRequestHeaders());
+		if (adminUser.id === data.userId && !data.isAdmin) {
+			throw new Error("Cannot revoke admin privileges from your own account");
+		}
+		const { db, users, sessions } = await adminDb();
+		await db.transaction(async (tx) => {
+			const [updated] = await tx
+				.update(users)
+				.set({ isAdmin: data.isAdmin, updatedAt: new Date() })
+				.where(eq(users.id, data.userId))
+				.returning({ id: users.id });
+			if (!updated) {
+				throw new Error("User not found");
+			}
+			if (!data.isAdmin) {
+				await tx.delete(sessions).where(eq(sessions.userId, data.userId));
+			}
+		});
 	});
 
 export const listFeedback = createServerFn({ method: "GET" })

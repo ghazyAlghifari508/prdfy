@@ -37,6 +37,9 @@ export function buildDateRangeSeries(days: number): {
 	date: string;
 	label: string;
 }[] {
+	if (!Number.isSafeInteger(days) || days <= 0 || days > 366) {
+		throw new RangeError("days must be a positive integer <= 366");
+	}
 	const series: { date: string; label: string }[] = [];
 	const now = new Date();
 
@@ -59,12 +62,16 @@ export function mergeTrendData(
 ): DailyTrendPoint[] {
 	const revMap = new Map<string, number>();
 	for (const r of revenueRows) {
-		revMap.set(r.day, Number(r.total) || 0);
+		const val = Number(r.total);
+		const safeVal = Number.isFinite(val) ? val : 0;
+		revMap.set(r.day, (revMap.get(r.day) ?? 0) + safeVal);
 	}
 
 	const userMap = new Map<string, number>();
 	for (const u of userRows) {
-		userMap.set(u.day, Number(u.count) || 0);
+		const val = Number(u.count);
+		const safeVal = Number.isFinite(val) ? val : 0;
+		userMap.set(u.day, (userMap.get(u.day) ?? 0) + safeVal);
 	}
 
 	return dateSeries.map((s) => ({

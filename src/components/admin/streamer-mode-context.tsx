@@ -6,7 +6,8 @@ const STORAGE_KEY = "prdfy_admin_streamer_mode";
 
 export function maskCurrency(val: number | string, isMasked: boolean): string {
 	if (isMasked) return "••••••••";
-	const num = typeof val === "string" ? Number.parseFloat(val) || 0 : val;
+	const num = typeof val === "string" ? Number.parseFloat(val) : val;
+	if (!Number.isFinite(num)) return "—";
 	return formatCurrency(num);
 }
 
@@ -39,12 +40,16 @@ export function maskEmail(
 ): string {
 	if (!email) return "—";
 	if (!isMasked) return email;
-	const [local, domain] = email.split("@");
-	if (!domain) return "••••";
-	const domainParts = domain.split(".");
+	const at = email.indexOf("@");
+	if (at <= 0 || at !== email.lastIndexOf("@") || at === email.length - 1) {
+		return "••••";
+	}
+	const local = email.slice(0, at);
+	const domain = email.slice(at + 1);
+	const dot = domain.lastIndexOf(".");
 	const ext =
-		domainParts.length > 1 ? domainParts[domainParts.length - 1] : "com";
-	const firstChar = local?.[0] ?? "u";
+		dot > 0 && dot < domain.length - 1 ? domain.slice(dot + 1) : "com";
+	const firstChar = local[0] ?? "u";
 	return `${firstChar}••••@••••.${ext}`;
 }
 
@@ -71,7 +76,15 @@ export function StreamerModeProvider({
 }: {
 	children: React.ReactNode;
 }) {
-	const [isStreamerMode, setIsStreamerMode] = useState<boolean>(false);
+	const [isStreamerMode, setIsStreamerMode] = useState<boolean>(() => {
+		if (typeof window === "undefined") return false;
+		try {
+			const saved = window.localStorage.getItem(STORAGE_KEY);
+			return saved === "true";
+		} catch {
+			return false;
+		}
+	});
 
 	useEffect(() => {
 		try {

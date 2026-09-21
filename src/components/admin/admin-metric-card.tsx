@@ -22,13 +22,14 @@ export const AdminMetricCard = memo(function AdminMetricCard({
 }: AdminMetricCardProps) {
 	const { isStreamerMode, maskCurrency } = useStreamerMode();
 
-	const displayValue = isCurrency
-		? isStreamerMode
-			? "••••••••"
-			: typeof value === "number"
-				? maskCurrency(value)
-				: value
-		: value;
+	let displayValue = value;
+	if (isCurrency) {
+		if (isStreamerMode) {
+			displayValue = "••••••••";
+		} else if (typeof value === "number") {
+			displayValue = maskCurrency(value);
+		}
+	}
 
 	return (
 		<div

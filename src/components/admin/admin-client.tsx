@@ -39,25 +39,29 @@ const NAV_ITEMS: NavItem[] = [
 		href: "/admin/users",
 		label: "Pengguna",
 		icon: Users,
-		isActive: (p: string) => p.startsWith("/admin/users"),
+		isActive: (p: string) =>
+			p === "/admin/users" || p.startsWith("/admin/users/"),
 	},
 	{
 		href: "/admin/feedback",
 		label: "Tiket",
 		icon: MessageSquare,
-		isActive: (p: string) => p.startsWith("/admin/feedback"),
+		isActive: (p: string) =>
+			p === "/admin/feedback" || p.startsWith("/admin/feedback/"),
 	},
 	{
 		href: "/admin/projects",
 		label: "Proyek",
 		icon: FolderGit2,
-		isActive: (p: string) => p.startsWith("/admin/projects"),
+		isActive: (p: string) =>
+			p === "/admin/projects" || p.startsWith("/admin/projects/"),
 	},
 	{
 		href: "/admin/transactions",
 		label: "Transaksi",
 		icon: CreditCard,
-		isActive: (p: string) => p.startsWith("/admin/transactions"),
+		isActive: (p: string) =>
+			p === "/admin/transactions" || p.startsWith("/admin/transactions/"),
 	},
 	{
 		href: "/settings/profile",
@@ -133,6 +137,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
 									key={item.label}
 									to={item.href}
 									preload="intent"
+									aria-current={isActive ? "page" : undefined}
 									className={cn(
 										"flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-[510] transition-colors",
 										isActive

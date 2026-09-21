@@ -41,7 +41,16 @@ function AdminTransactionsPage() {
 				tx.userEmail?.toLowerCase().includes(q);
 
 			const matchesStatus =
-				statusFilter === "all" || tx.status === statusFilter;
+				statusFilter === "all" ||
+				(statusFilter === "success" &&
+					(tx.status === "success" ||
+						tx.status === "settlement" ||
+						tx.status === "capture")) ||
+				(statusFilter === "expire" &&
+					(tx.status === "expire" ||
+						tx.status === "failed" ||
+						tx.status === "cancel")) ||
+				tx.status === statusFilter;
 			const matchesPlan = planFilter === "all" || tx.plan === planFilter;
 
 			return matchesSearch && matchesStatus && matchesPlan;

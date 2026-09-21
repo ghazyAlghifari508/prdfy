@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { AdminMetricCard } from "@/components/admin/admin-metric-card";
+import { useStreamerMode } from "@/components/admin/streamer-mode-context";
 import { listErrorReports, listFeedback } from "@/lib/services/admin-service";
 
 export const Route = createFileRoute("/admin/feedback")({
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/admin/feedback")({
 
 function AdminFeedbackPage() {
 	const { feedback, errors } = Route.useLoaderData();
+	const { isStreamerMode, maskName, maskEmail } = useStreamerMode();
 	const [activeTab, setActiveTab] = useState<"feedback" | "errors">("feedback");
 	const [typeFilter, setTypeFilter] = useState<string>("all");
 	const [search, setSearch] = useState("");
@@ -236,10 +238,14 @@ function AdminFeedbackPage() {
 
 											<td className="px-4 py-3 whitespace-nowrap">
 												<p className="font-[510] text-snow">
-													{f.userName || "Tanpa Nama"}
+													{isStreamerMode
+														? maskName(f.userName)
+														: f.userName || "Tanpa Nama"}
 												</p>
 												<p className="text-[11px] text-fog">
-													{f.userEmail || "Anonymous"}
+													{isStreamerMode
+														? maskEmail(f.userEmail)
+														: f.userEmail || "Anonymous"}
 												</p>
 											</td>
 
@@ -299,7 +305,9 @@ function AdminFeedbackPage() {
 												{e.context || "-"}
 											</td>
 											<td className="px-4 py-3 text-fog whitespace-nowrap">
-												{e.userEmail || "-"}
+												{isStreamerMode
+													? maskEmail(e.userEmail)
+													: e.userEmail || "-"}
 											</td>
 											<td className="px-4 py-3 text-right text-fog whitespace-nowrap">
 												{e.createdAt

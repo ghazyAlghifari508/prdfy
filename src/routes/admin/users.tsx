@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { AdminMetricCard } from "@/components/admin/admin-metric-card";
+import { useStreamerMode } from "@/components/admin/streamer-mode-context";
 import {
 	listUsers,
 	resetUserCredit,
@@ -17,23 +18,30 @@ import {
 	setUserBanned,
 	updateUserPlan,
 } from "@/lib/services/admin-service";
+import { requireAdminServer } from "@/lib/session";
 import { useUIStore } from "@/store";
 
 export const Route = createFileRoute("/admin/users")({
 	staleTime: 30_000,
 	loader: async () => {
-		const rows = await listUsers({ data: { limit: 100 } });
-		return { rows };
+		const [rows, adminUser] = await Promise.all([
+			listUsers({ data: { limit: 100 } }),
+			requireAdminServer(),
+		]);
+		return { rows, currentUserId: adminUser.id };
 	},
 	component: AdminUsersPage,
 });
 
 function AdminUsersPage() {
-	const { rows } = Route.useLoaderData();
+	const { rows, currentUserId } = Route.useLoaderData();
+	const { isStreamerMode, maskName, maskEmail } = useStreamerMode();
 	const [search, setSearch] = useState("");
 	const [planFilter, setPlanFilter] = useState<string>("all");
 	const [loadingAction, setLoadingAction] = useState<string | null>(null);
 	const showToast = useUIStore((s) => s.showToast);
+
+	const isMutating = loadingAction !== null;
 
 	const handleAction = async (actionName: string, fn: () => Promise<void>) => {
 		setLoadingAction(actionName);
@@ -183,6 +191,7 @@ function AdminUsersPage() {
 								const plan = sub?.plan ?? "free";
 								const isBanned = Boolean(user.bannedAt);
 								const isAdmin = Boolean(user.isAdmin);
+								const isSelf = user.id === currentUserId;
 								const initial = (user.name ||
 									user.email ||
 									"?")[0].toUpperCase();
@@ -200,10 +209,14 @@ function AdminUsersPage() {
 												</div>
 												<div className="min-w-0">
 													<p className="truncate font-[510] text-snow">
-														{user.name || "Tanpa Nama"}
+														{isStreamerMode
+															? maskName(user.name)
+															: user.name || "Tanpa Nama"}
 													</p>
 													<p className="truncate text-fog text-[11px]">
-														{user.email}
+														{isStreamerMode
+															? maskEmail(user.email)
+															: user.email}
 													</p>
 												</div>
 											</div>
@@ -268,7 +281,7 @@ function AdminUsersPage() {
 												{plan !== "pro" && (
 													<button
 														type="button"
-														disabled={loadingAction === `plan-pro-${user.id}`}
+														disabled={isMutating}
 														onClick={() =>
 															handleAction(`plan-pro-${user.id}`, () =>
 																updateUserPlan({
@@ -286,9 +299,7 @@ function AdminUsersPage() {
 												{plan !== "hengker" && (
 													<button
 														type="button"
-														disabled={
-															loadingAction === `plan-hengker-${user.id}`
-														}
+														disabled={isMutating}
 														onClick={() =>
 															handleAction(`plan-hengker-${user.id}`, () =>
 																updateUserPlan({
@@ -306,7 +317,7 @@ function AdminUsersPage() {
 												{/* Reset credit */}
 												<button
 													type="button"
-													disabled={loadingAction === `credit-${user.id}`}
+													disabled={isMutating}
 													onClick={() =>
 														handleAction(`credit-${user.id}`, () =>
 															resetUserCredit({ data: { userId: user.id } }),
@@ -321,7 +332,7 @@ function AdminUsersPage() {
 												{/* Toggle Admin */}
 												<button
 													type="button"
-													disabled={loadingAction === `admin-${user.id}`}
+													disabled={isMutating || (isSelf && isAdmin)}
 													onClick={() =>
 														handleAction(`admin-${user.id}`, () =>
 															setUserAdmin({
@@ -330,7 +341,13 @@ function AdminUsersPage() {
 														)
 													}
 													className="rounded border border-graphite bg-obsidian px-2 py-1 text-[11px] text-fog hover:border-fog/40 hover:text-snow disabled:opacity-50"
-													title={isAdmin ? "Cabut Admin" : "Jadikan Admin"}
+													title={
+														isSelf && isAdmin
+															? "Tidak dapat mencabut hak admin akun sendiri"
+															: isAdmin
+																? "Cabut Admin"
+																: "Jadikan Admin"
+													}
 												>
 													{isAdmin ? "Cabut Admin" : "Jadikan Admin"}
 												</button>
@@ -338,7 +355,7 @@ function AdminUsersPage() {
 												{/* Ban / Unban */}
 												<button
 													type="button"
-													disabled={loadingAction === `ban-${user.id}`}
+													disabled={isMutating || isSelf}
 													onClick={() =>
 														handleAction(`ban-${user.id}`, () =>
 															setUserBanned({
@@ -351,6 +368,13 @@ function AdminUsersPage() {
 															? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
 															: "border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
 													}`}
+													title={
+														isSelf
+															? "Tidak dapat mem-ban akun sendiri"
+															: isBanned
+																? "Buka Ban"
+																: "Ban"
+													}
 												>
 													{isBanned ? "Buka Ban" : "Ban"}
 												</button>
