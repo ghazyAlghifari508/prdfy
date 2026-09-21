@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
+import { ThemeAttributeSync } from "@/components/ui/theme-sync";
 
 export function Providers({
 	children,
@@ -32,7 +33,10 @@ export function Providers({
 			enableSystem
 			disableTransitionOnChange
 		>
-			<QueryClientProvider client={client}>{children}</QueryClientProvider>
+			<QueryClientProvider client={client}>
+			<ThemeAttributeSync />
+			{children}
+		</QueryClientProvider>
 		</ThemeProvider>
 	);
 }

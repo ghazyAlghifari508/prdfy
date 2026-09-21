@@ -1,5 +1,3 @@
-import type { FlowStep } from "@/lib/flow-step";
-
 export type Plan = "free" | "pro" | "hengker";
 
 export type ProjectStatus = "draft" | "completed" | "archived";
@@ -22,23 +20,12 @@ export type TaskStatus = "pending" | "in_progress" | "completed" | "failed";
 
 export type OutputLanguage = "id" | "en";
 
-export interface Project {
-	id: string;
-	user_id: string;
-	name: string;
-	description: string | null;
-	status: ProjectStatus;
-	mode: ProjectMode | null;
-	language?: OutputLanguage | null;
-	preferences: Record<string, unknown> | null;
-	share_token: string | null;
-	is_shared: boolean;
-	step: FlowStep;
-	ac_status: StepStatus;
-	task_status: StepStatus;
-	created_at: string;
-	updated_at: string;
-}
+// NOTE: the legacy snake_case `Project` interface was removed. It was
+// unreferenced anywhere in the codebase, and its `task_status: StepStatus`
+// typing was wrong in both directions: `projects.task_status` legitimately
+// includes "generating" (claim lock), while per-task `tasks.status` rows use
+// the TaskStatus domain below. Drizzle `$inferSelect` types are the single
+// source of truth for row shapes; the two status unions document each domain.
 
 export interface PrdVersion {
 	id: string;

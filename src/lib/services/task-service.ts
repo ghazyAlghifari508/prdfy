@@ -96,10 +96,13 @@ export async function saveTaskTree(
 				}
 			}
 
+			// Row lock serializes concurrent savers so a stale step read
+			// can never rewind a newer value (mirrors saveAcVersion).
 			const [proj] = await tx
 				.select({ step: projects.step })
 				.from(projects)
 				.where(eq(projects.id, projectId))
+				.for("update")
 				.limit(1);
 			const updateData: Record<string, unknown> = {
 				taskStatus: "completed",

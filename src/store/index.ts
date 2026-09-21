@@ -53,7 +53,6 @@ interface ChatState {
 	setSelectedMode: (mode: "ai_auto" | "manual" | null) => void;
 	setActiveProject: (projectId: string | null) => void;
 	setStreamingPRDContent: (content: string) => void;
-	updateLastMessage: (content: string) => void;
 	setMessages: (messages: ChatMessage[]) => void;
 	setCompletedSections: (sections: string[]) => void;
 	setCreditsExhausted: (v: ChatState["creditsExhausted"]) => void;
@@ -88,17 +87,10 @@ export const useChatStore = create<ChatState>((set) => ({
 	setSelectedMode: (selectedMode) => set({ selectedMode }),
 	setActiveProject: (activeProjectId) => set({ activeProjectId }),
 	setStreamingPRDContent: (streamingPRDContent) => set({ streamingPRDContent }),
-	updateLastMessage: (content) =>
-		set((state) => {
-			const messages = [...state.messages];
-			if (messages.length > 0) {
-				messages[messages.length - 1] = {
-					...messages[messages.length - 1],
-					content,
-				};
-			}
-			return { messages };
-		}),
+	// NOTE: `updateLastMessage` was removed. It edited the array tail with no
+	// message/stream identity, so a delayed chunk from an interrupted or
+	// overlapping stream could overwrite the newest message. It had no
+	// callers; live updates go through setStreamingPRDContent/setMessages.
 	setMessages: (messages) => set({ messages }),
 	resetChat: () => set(chatInitialState),
 }));
