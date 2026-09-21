@@ -13,14 +13,6 @@ export const Route = createFileRoute("/admin")({
 				throw redirect({ to: "/login" });
 			}
 			if (msg === "Forbidden") {
-				if (typeof window === "undefined") {
-					try {
-						const { setResponseStatus } = await import(
-							"@tanstack/react-start/server"
-						);
-						setResponseStatus(403);
-					} catch {}
-				}
 				throw new Error("FORBIDDEN");
 			}
 			throw err;
