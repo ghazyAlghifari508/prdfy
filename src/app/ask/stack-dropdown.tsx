@@ -100,7 +100,21 @@ export function StackDropdown({
 		return () => document.removeEventListener("pointerdown", handler);
 	}, [open]);
 
+	// Escape must cancel the edit, not commit it: closing the editor
+	// unmounts the input, whose blur would otherwise fire commitCustom and
+	// submit partially entered text.
+	const cancelBlurRef = useRef(false);
+	const cancelCustom = useCallback(() => {
+		cancelBlurRef.current = true;
+		setCustomMode(false);
+		setCustomDraft("");
+	}, []);
+
 	const commitCustom = useCallback(() => {
+		if (cancelBlurRef.current) {
+			cancelBlurRef.current = false;
+			return;
+		}
 		const trimmed = customDraft.trim();
 		onChange(trimmed || undefined);
 		setCustomMode(false);
@@ -255,6 +269,14 @@ export function StackDropdown({
 					ref={triggerRef}
 					type="button"
 					id={selectId}
+					aria-haspopup="listbox"
+					aria-expanded={open}
+					aria-controls={`${selectId}-listbox`}
+					aria-activedescendant={
+						open && highlightIdx >= 0
+							? `${selectId}-opt-${highlightIdx}`
+							: undefined
+					}
 					disabled={disabled || Boolean(skipped)}
 					onClick={() => {
 						if (disabled || skipped) return;
@@ -308,6 +330,8 @@ export function StackDropdown({
 					<div
 						ref={listRef}
 						role="listbox"
+						id={`${selectId}-listbox`}
+						aria-labelledby={selectId}
 						className={cn(
 							"absolute z-50 max-h-60 w-full overflow-y-auto rounded-lg border border-(--border-subtle) py-1 shadow-(--shadow-overlay)",
 							dropUp ? "bottom-full mb-1" : "mt-1",
@@ -349,7 +373,11 @@ export function StackDropdown({
 							const iconUrl = stackIconUrl(opt);
 							return (
 							<div
-								key={opt}
+								// Index-qualified key: labels are caller data and
+								// may repeat; a bare label key would confuse
+								// reconciliation for duplicates.
+								key={`${i}:${opt}`}
+								id={`${selectId}-opt-${i}`}
 								role="option"
 								tabIndex={0}
 								aria-selected={selected}
@@ -394,17 +422,17 @@ export function StackDropdown({
 									type="text"
 									value={customDraft}
 									onChange={(e) => setCustomDraft(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter") {
-											e.preventDefault();
-											commitCustom();
-										}
-										if (e.key === "Escape") {
-											e.preventDefault();
-											setCustomMode(false);
-										}
-									}}
-									onBlur={commitCustom}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										commitCustom();
+									}
+									if (e.key === "Escape") {
+										e.preventDefault();
+										cancelCustom();
+									}
+								}}
+								onBlur={commitCustom}
 									placeholder="Tulis pilihanmu..."
 									className="w-full rounded-md border border-(--border-subtle) px-3 py-2 font-inter text-sm outline-none"
 									style={{
@@ -417,6 +445,7 @@ export function StackDropdown({
 							</div>
 						) : (
 							<div
+								id={`${selectId}-opt-${filtered.length}`}
 								role="option"
 								tabIndex={0}
 								onPointerDown={(e) => {

@@ -86,6 +86,9 @@ export function QuestionCard({
 	const submitCustom = () => {
 		if (!customText.trim()) return;
 		onAnswer({ value: customText.trim(), isCustom: true, skipped: false });
+		// Clear the draft: reopening the editor must start empty, never
+		// resubmit a previous answer.
+		setCustomText("");
 		setShowCustomInput(false);
 	};
 

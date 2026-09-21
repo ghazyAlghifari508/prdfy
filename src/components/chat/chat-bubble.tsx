@@ -32,6 +32,21 @@ export const ChatBubble = memo(function ChatBubble({
 	className,
 }: ChatBubbleProps) {
 	const isUser = role === "user";
+	const isSystem = role === "system";
+
+	// System notices get their own centered muted rendering — never the
+	// assistant bubble, colors, or update-marker filtering.
+	if (isSystem) {
+		return (
+			<div className={cn("flex justify-center", className)}>
+				<p className="max-w-[80%] text-center text-xs text-fog">{content}</p>
+			</div>
+		);
+	}
+
+	// Defer marker cleanup until streaming completes: filtering mid-stream
+	// hides incomplete responses and flickers as later tokens arrive.
+	const displayContent = !isUser && !isStreaming ? cleanMessage(content) : content;
 
 	return (
 		<div
@@ -55,7 +70,7 @@ export const ChatBubble = memo(function ChatBubble({
 				}
 			>
 				<p className="whitespace-pre-wrap">
-					{!isUser ? cleanMessage(content) : content}
+					{displayContent}
 					{isStreaming && (
 						<span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current" />
 					)}

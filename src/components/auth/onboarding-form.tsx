@@ -71,6 +71,9 @@ export function OnboardingForm() {
 	};
 
 	const handleSubmit = async () => {
+		// Re-entry guard: the Button disables itself while loading, but the
+		// handler must also refuse overlaps from rapid events/future callers.
+		if (loading) return;
 		if (tujuan.length === 0) {
 			setError("Pilih minimal satu tujuan");
 			return;
@@ -87,7 +90,7 @@ export function OnboardingForm() {
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
-					fullName,
+					fullName: fullName.trim(),
 					role,
 					goals: tujuan,
 				}),
