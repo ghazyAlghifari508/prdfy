@@ -32,14 +32,14 @@ export function SyncStatus({
 	onRetrySync,
 	onRetryAnalysis,
 	onViewReview,
-	onBackToInstructions: _onBackToInstructions,
+	onBackToInstructions,
 }: SyncStatusProps) {
 	const [polledStatus, setPolledStatus] = useState<SyncStatusResponse | null>(
 		propStatus ?? null,
 	);
 	const status = propStatus !== undefined ? propStatus : polledStatus;
 	const [error, setError] = useState<string | null>(null);
-	const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const inFlightRef = useRef(false);
 	const onStatusRef = useRef(onStatus);
 	onStatusRef.current = onStatus;
@@ -54,8 +54,9 @@ export function SyncStatus({
 		const fetchStatus = async () => {
 			// One request at a time: a slow response must never be
 			// overwritten by (or overwrite) a newer tick out of order.
-			if (inFlightRef.current) return;
+			if (inFlightRef.current || cancelled) return;
 			inFlightRef.current = true;
+			let isTerminal = false;
 			try {
 				const query = sessionId
 					? `?sessionId=${encodeURIComponent(sessionId)}`
@@ -83,9 +84,8 @@ export function SyncStatus({
 				setPolledStatus(parsed.data);
 				setError(null);
 				onStatusRef.current?.(parsed.data);
-				if (isTerminalSyncStatus(parsed.data.status) && timerRef.current) {
-					clearInterval(timerRef.current);
-					timerRef.current = null;
+				if (isTerminalSyncStatus(parsed.data.status)) {
+					isTerminal = true;
 				}
 			} catch {
 				if (cancelled) return;
@@ -93,18 +93,20 @@ export function SyncStatus({
 				onStatusRef.current?.(null);
 			} finally {
 				inFlightRef.current = false;
+				if (!cancelled && !isTerminal) {
+					timeoutRef.current = setTimeout(() => {
+						void fetchStatus();
+					}, pollIntervalMs);
+				}
 			}
 		};
 
 		void fetchStatus();
-		timerRef.current = setInterval(() => {
-			void fetchStatus();
-		}, pollIntervalMs);
 		return () => {
 			cancelled = true;
-			if (timerRef.current) {
-				clearInterval(timerRef.current);
-				timerRef.current = null;
+			if (timeoutRef.current) {
+				clearTimeout(timeoutRef.current);
+				timeoutRef.current = null;
 			}
 		};
 	}, [projectId, sessionId, pollIntervalMs, pollInternally]);
@@ -116,10 +118,10 @@ export function SyncStatus({
 	// analysis: a ready analysis attached to a failed/expired session is
 	// stale, not a success.
 	const isReady =
-		s === "ready" &&
-		(status?.analysisStatus === undefined ||
-			status.analysisStatus === "ready" ||
-			status.analysisStatus === "pending");
+		!isFailed &&
+		!isExpired &&
+		(s === "ready" ||
+			(status?.analysisStatus === "ready" && s !== "waiting_for_cli"));
 	const isAnalyzing =
 		s === "analyzing" ||
 		status?.analysisStatus === "pending" ||
@@ -388,6 +390,16 @@ export function SyncStatus({
 
 					{/* Footer Bar */}
 					<div className="flex flex-wrap items-center justify-end gap-2 border-t border-graphite pt-4 text-xs text-fog">
+						{onBackToInstructions && (
+							<button
+								type="button"
+								onClick={onBackToInstructions}
+								className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
+							>
+								Kembali ke instruksi
+							</button>
+						)}
+
 						{showRetry && onRetrySync && (
 							<button
 								type="button"

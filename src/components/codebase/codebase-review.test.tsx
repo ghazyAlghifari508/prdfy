@@ -84,6 +84,11 @@ describe("CodebaseReview", () => {
 		expect(c.textContent).toContain("src/routes/api");
 	});
 
+	it("shows dash for undefined metadata counts instead of false 0", () => {
+		const c = renderReview({ fileCount: undefined, excludedCount: undefined });
+		expect(c.textContent).toContain("— files indexed (— excluded)");
+	});
+
 	it("summarizes exclusions by count without file contents", () => {
 		const c = renderReview();
 		expect(c.textContent).toContain("7");

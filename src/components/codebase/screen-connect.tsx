@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { buildAgentPrompt } from "@/components/codebase/sync-agent-modal";
 import type { SyncPromptPayload } from "@/lib/codebase-sync";
 
@@ -19,17 +19,36 @@ export function ScreenConnect({
 	onAgentStarted,
 }: ScreenConnectProps) {
 	const [copied, setCopied] = useState(false);
+	const [copyError, setCopyError] = useState<string | null>(null);
+	const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (copyTimeoutRef.current) {
+				clearTimeout(copyTimeoutRef.current);
+				copyTimeoutRef.current = null;
+			}
+		};
+	}, []);
 
 	const promptText = payload ? buildAgentPrompt(payload, { projectName }) : "";
 
 	const handleCopy = async () => {
 		if (!promptText) return;
 		try {
+			if (!navigator.clipboard?.writeText) {
+				throw new Error("Clipboard API tidak tersedia");
+			}
 			await navigator.clipboard.writeText(promptText);
 			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			setCopyError(null);
+			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+			copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
 		} catch {
 			setCopied(false);
+			setCopyError("Gagal menyalin otomatis. Silakan salin teks secara manual.");
+			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+			copyTimeoutRef.current = setTimeout(() => setCopyError(null), 4000);
 		}
 	};
 
@@ -98,6 +117,11 @@ export function ScreenConnect({
 										<div className="pr-16 max-h-48 overflow-y-auto hide-scrollbar whitespace-pre-wrap select-all text-snow">
 											{promptText}
 										</div>
+										{copyError && (
+											<p className="mt-2 text-[11px] text-crimson font-sans">
+												{copyError}
+											</p>
+										)}
 									</>
 								) : isStarting ? (
 									<div className="flex items-center justify-center gap-2 py-6 text-xs text-fog font-sans">

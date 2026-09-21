@@ -132,15 +132,16 @@ export function CodebaseReview({
 							Repository map
 						</h3>
 						<span className="font-mono text-[11px] text-fog">
-							{fileCount ?? 0} files indexed ({excludedCount ?? 0} excluded)
+							{fileCount === undefined ? "—" : fileCount} files indexed (
+							{excludedCount === undefined ? "—" : excludedCount} excluded)
 						</span>
 					</div>
 					<div className="p-4 sm:p-5 flex-1 flex flex-col gap-3 text-xs">
 						{analysis.moduleMap && analysis.moduleMap.length > 0 ? (
 							<div className="flex flex-col gap-1.5 font-mono text-[11px] text-mist rounded-lg border border-graphite/60 bg-onyx p-3 max-h-56 overflow-y-auto hide-scrollbar">
-								{analysis.moduleMap.map((entry) => (
+								{analysis.moduleMap.map((entry, index) => (
 									<div
-										key={entry.path}
+										key={`${entry.path}-${index}`}
 										className="flex items-center gap-2 py-0.5"
 									>
 										<span className="text-fog">▾</span>
@@ -183,7 +184,7 @@ export function CodebaseReview({
 						<div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
 							{analysis.impactAreas.map((area, idx) => (
 								<div
-									key={area}
+									key={`${area}-${idx}`}
 									className="rounded-lg border border-graphite/80 bg-obsidian/60 p-3.5 flex flex-col gap-1"
 								>
 									<h4 className="font-inter text-xs font-semibold text-snow">
@@ -210,8 +211,11 @@ export function CodebaseReview({
 								TEMUAN DAN KETIDAKPASTIAN
 							</span>
 							<div className="flex flex-col gap-2">
-								{analysis.findings.map((f) => (
-									<div key={f.title} className="text-xs flex flex-col gap-0.5">
+								{analysis.findings.map((f, idx) => (
+									<div
+										key={`${f.title}-${idx}`}
+										className="text-xs flex flex-col gap-0.5"
+									>
 										<div className="flex items-center gap-2">
 											<span className="font-medium text-snow">{f.title}</span>
 											{f.uncertainty && (
@@ -223,8 +227,7 @@ export function CodebaseReview({
 										<span className="text-fog text-[11px]">{f.detail}</span>
 										{f.uncertainty && (
 											<span className="text-slate text-[10px] italic">
-												Jalur refresh token tidak terlihat di snapshot:{" "}
-												{f.uncertainty}
+												Perlu verifikasi: {f.uncertainty}
 											</span>
 										)}
 									</div>
@@ -246,8 +249,8 @@ export function CodebaseReview({
 							<span className="text-slate font-mono text-[10px] uppercase">
 								Keterbatasan:
 							</span>
-							{analysis.limitations.map((lim) => (
-								<span key={lim}>• {lim}</span>
+							{analysis.limitations.map((lim, idx) => (
+								<span key={`${lim}-${idx}`}>• {lim}</span>
 							))}
 						</div>
 					)}
