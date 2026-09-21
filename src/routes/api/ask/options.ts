@@ -13,6 +13,7 @@ import {
 import { isTruncatedGeneration, shouldMarkQuestionStep } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { ASK_OPTIONS_GENERATION_PROMPT } from "@/lib/prompts-ask";
+import { MAX_PROMPT_LENGTH } from "@/lib/constants";
 import { checkRateLimit } from "@/lib/rate-limit";
 import {
 	selectModels,
@@ -67,6 +68,16 @@ export const Route = createFileRoute("/api/ask/options")({
 					) {
 						return Response.json({ error: "Prompt required" }, { status: 400 });
 					}
+					// Documented upper bound (same contract as the home input):
+					// unbounded prompts exhaust model context and inflate cost.
+					if (prompt.length > MAX_PROMPT_LENGTH) {
+						return Response.json(
+							{
+								error: `Prompt terlalu panjang (maksimal ${MAX_PROMPT_LENGTH} karakter).`,
+							},
+							{ status: 400 },
+						);
+					}
 				}
 
 				const [sub] = await db
@@ -80,12 +91,6 @@ export const Route = createFileRoute("/api/ask/options")({
 					? (rawPlan as Plan)
 					: "free";
 
-				const rateCheck = await checkRateLimit(user.id, plan, "api_call");
-				if (!rateCheck.allowed)
-					return Response.json(
-						{ error: "Too many requests", retryAfter: 60 },
-						{ status: 429 },
-					);
 				const [project] = await db
 					.select({
 						id: projects.id,
@@ -98,6 +103,15 @@ export const Route = createFileRoute("/api/ask/options")({
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });
+
+				// Rate-limit AFTER the ownership check so failed guesses and
+				// 404s never consume the caller's quota.
+				const rateCheck = await checkRateLimit(user.id, plan, "api_call");
+				if (!rateCheck.allowed)
+					return Response.json(
+						{ error: "Too many requests", retryAfter: 60 },
+						{ status: 429 },
+					);
 
 				// Ask handoff: authoritative server-side copy of answers, prompt,
 				// and questions so refresh, History navigation, and multi-device
@@ -153,7 +167,16 @@ export const Route = createFileRoute("/api/ask/options")({
 					return Response.json({ saved: true });
 				}
 				if (action === "get-handoff") {
-					let saved = await getAskHandoff(projectId, user.id);
+					let saved: Awaited<ReturnType<typeof getAskHandoff>> | null;
+					try {
+						saved = await getAskHandoff(projectId, user.id);
+					} catch (e) {
+						console.error("ask handoff read failed:", e);
+						return Response.json(
+							{ error: "Gagal memuat handoff" },
+							{ status: 500 },
+						);
+					}
 					if (!saved) {
 						// Fallback for projects pre-dating handoff persistence:
 						// synthesize minimal state using project name so Ask flow does not bounce.
@@ -207,15 +230,40 @@ export const Route = createFileRoute("/api/ask/options")({
 					// and reasoning tokens spend from the same maxOutputTokens budget before
 					// any JSON content is emitted — 4000 left too little headroom and the
 					// JSON got cut off mid-object on verbose reasoning runs.
-					const { generator, firstChunk, outcome } =
+					const { generator, firstChunk, abortController, outcome } =
 						await tryStreamWithFallback(
 							modelsToTry,
 							messages,
 							request.signal,
 							12000,
 						);
+					// Bounded accumulation: abort the upstream generation if it
+					// exceeds what the parser could ever need.
+					const MAX_ASK_RESPONSE_CHARS = 200_000;
 					let fullResponse = firstChunk;
-					for await (const chunk of generator) fullResponse += chunk;
+					try {
+						for await (const chunk of generator) {
+							fullResponse += chunk;
+							if (fullResponse.length > MAX_ASK_RESPONSE_CHARS) {
+								abortController.abort();
+								break;
+							}
+						}
+					} catch (e) {
+						if (e instanceof Error && e.name === "AbortError") {
+							return Response.json(
+								{ error: "Generasi pertanyaan dibatalkan." },
+								{ status: 500 },
+							);
+						}
+						throw e;
+					}
+					if (fullResponse.length > MAX_ASK_RESPONSE_CHARS) {
+						return Response.json(
+							{ error: "Respons AI melebihi batas. Coba lagi." },
+							{ status: 500 },
+						);
+					}
 
 					if (isTruncatedGeneration(fullResponse, outcome.finishReason)) {
 						return Response.json(

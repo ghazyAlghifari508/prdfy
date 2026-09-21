@@ -11,6 +11,11 @@ import {
 	getProjectGenerationContext,
 	linkGenerationContext,
 } from "@/lib/codebase-generation-context";
+import {
+	MAX_PREFERENCES_CHARS,
+	MAX_PROMPT_LENGTH,
+	MAX_RESUME_CONTENT_CHARS,
+} from "@/lib/constants";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
@@ -105,6 +110,39 @@ export const Route = createFileRoute("/api/chat")({
 						{ error: "Message is required" },
 						{ status: 400 },
 					);
+				// Bounded inputs: unbounded strings flow straight into the
+				// model prompt (cost/latency) and partialContent is persisted
+				// into PRD versions on resume. Caps mirror the documented
+				// home-prompt contract; resume content allows a full PRD.
+				if (message.length > MAX_PROMPT_LENGTH) {
+					return Response.json(
+						{
+							error: `Message terlalu panjang (maksimal ${MAX_PROMPT_LENGTH} karakter).`,
+						},
+						{ status: 400 },
+					);
+				}
+				if (
+					partialContent !== undefined &&
+					(typeof partialContent !== "string" ||
+						partialContent.length > MAX_RESUME_CONTENT_CHARS)
+				) {
+					return Response.json(
+						{ error: "Konten resume tidak valid." },
+						{ status: 400 },
+					);
+				}
+				if (
+					preferences !== undefined &&
+					(typeof preferences !== "object" ||
+						preferences === null ||
+						JSON.stringify(preferences).length > MAX_PREFERENCES_CHARS)
+				) {
+					return Response.json(
+						{ error: "Preferences tidak valid." },
+						{ status: 400 },
+					);
+				}
 
 				const rateCheck = await checkRateLimit(user.id, plan, "ai_generate");
 				if (!rateCheck.allowed)

@@ -65,11 +65,19 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 				}
 
 				const body = await request.json().catch(() => null);
-				if (!body)
+				if (!body || typeof body !== "object" || Array.isArray(body))
 					return Response.json({ error: "Invalid JSON body" }, { status: 400 });
 
-				const { projectId, taskId, status } = body;
-				if (!projectId || !taskId || !status)
+				const { projectId, taskId, status } = body as {
+					projectId?: unknown;
+					taskId?: unknown;
+					status?: unknown;
+				};
+				// Shape + bounds before any DB predicate: arrays, primitives,
+				// and oversized strings must never reach the query layer.
+				const isIdLike = (v: unknown): v is string =>
+					typeof v === "string" && v.length > 0 && v.length <= 128;
+				if (!isIdLike(projectId) || !isIdLike(taskId) || typeof status !== "string")
 					return Response.json(
 						{ error: "Missing required fields (projectId, taskId, status)" },
 						{ status: 400 },
@@ -105,13 +113,19 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 					.for("update");
 				if (!bound) return [];
 
+				// Lifecycle timestamps are rebuilt per target state so a
+				// backwards transition never leaves contradictory values
+				// (e.g. completedAt set while status is in_progress).
 				const updateData: Record<string, unknown> = {
 					status,
 					updatedAt: new Date(),
+					startedAt: status === "pending" ? null : undefined,
+					completedAt:
+						status === "completed" || status === "failed"
+							? new Date()
+							: null,
 				};
 				if (status === "in_progress") updateData.startedAt = new Date();
-				if (status === "completed" || status === "failed")
-					updateData.completedAt = new Date();
 				return tx
 					.update(tasks)
 					.set(updateData)

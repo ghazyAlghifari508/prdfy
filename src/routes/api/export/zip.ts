@@ -19,8 +19,12 @@ export const Route = createFileRoute("/api/export/zip")({
 		handlers: {
 			POST: async ({ request }: { request: Request }) => {
 				const user = await requireUser(getRequestHeaders());
-				const { projectId } = await request.json();
-				if (!projectId)
+				const body = await request.json().catch(() => null);
+				const projectId =
+					body && typeof body === "object" && !Array.isArray(body)
+						? (body as { projectId?: unknown }).projectId
+						: undefined;
+				if (typeof projectId !== "string" || projectId.length === 0)
 					return Response.json(
 						{ error: "Project ID required" },
 						{ status: 400 },
