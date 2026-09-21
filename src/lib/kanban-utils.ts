@@ -23,6 +23,11 @@ export interface TaskCard {
 
 /**
  * Group a flat array of TaskCards into columns by status.
+ *
+ * The pending fallback is a last-resort guard only: every producer
+ * (getKanbanData, v1 kanban/tasks) normalizes statuses before this runs,
+ * so an unknown runtime status indicates corrupt data. It lands in pending
+ * (visible, actionable) rather than vanishing.
  */
 export function groupCardsByStatus(
 	cards: TaskCard[],
@@ -79,13 +84,21 @@ export function computeStatusCounts(
 
 /**
  * Check if AC was updated after task tree generation.
+ *
+ * Unparseable timestamps are treated as "no signal" (false): corrupt
+ * metadata must never raise a stale-tree warning, nor suppress a real one
+ * silently — callers pass DB timestamptz values, so invalid input indicates
+ * a data-integrity problem upstream, not a state to infer from.
  */
 export function detectAcChanged(
 	latestAcAt: string | null | undefined,
 	tasksCreatedAt: string | null | undefined,
 ): boolean {
 	if (!latestAcAt || !tasksCreatedAt) return false;
-	return new Date(latestAcAt) > new Date(tasksCreatedAt);
+	const acTime = new Date(latestAcAt).getTime();
+	const taskTime = new Date(tasksCreatedAt).getTime();
+	if (!Number.isFinite(acTime) || !Number.isFinite(taskTime)) return false;
+	return acTime > taskTime;
 }
 
 export interface KanbanPhase {
@@ -161,6 +174,10 @@ export function filterColumnsByPhase(
 
 /**
  * Compute progress metrics (total, done, percentage) from columns.
+ *
+ * `done` counts terminal cards (completed + failed): the bar measures
+ * settled vs outstanding work, not success rate. Failed work is therefore
+ * visible as settled, never hidden; success rate is a separate metric.
  */
 export function computeKanbanProgress(
 	columns: Record<TaskCardStatus, TaskCard[]>,

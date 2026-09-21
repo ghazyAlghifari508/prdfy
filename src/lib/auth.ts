@@ -132,12 +132,17 @@ export const auth = betterAuth({
 			clientId: process.env.GOOGLE_CLIENT_ID || "",
 			clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
 		},
-		// ponytail: placeholder: gh CLI token lacks OAuth-App scope to auto-provision.
-		// Create at github.com/settings/developers, then fill real values in .env.
-		github: {
-			clientId: process.env.GITHUB_CLIENT_ID || "placeholder",
-			clientSecret: process.env.GITHUB_CLIENT_SECRET || "placeholder",
-		},
+		// GitHub is registered only when real credentials exist: placeholder
+		// values would expose a login provider that can never complete
+		// OAuth. Create at github.com/settings/developers, then fill .env.
+		...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
+			? {
+					github: {
+						clientId: process.env.GITHUB_CLIENT_ID,
+						clientSecret: process.env.GITHUB_CLIENT_SECRET,
+					},
+				}
+			: {}),
 	},
 	user: {
 		additionalFields: {
@@ -164,11 +169,36 @@ export const auth = betterAuth({
 		window: 60,
 		max: 100,
 	},
+	// Loopback origins are development-only: trusting them in production
+	// would let a locally-served page make trusted auth requests. Extra
+	// origins must be exact absolute URLs (validated below).
 	trustedOrigins: [
-		"http://localhost:3000",
-		"http://127.0.0.1:3000",
-		...(process.env.APP_URL ? [process.env.APP_URL] : []),
-		...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
+		...(process.env.NODE_ENV === "production"
+			? []
+			: ["http://localhost:3000", "http://127.0.0.1:3000"]),
+		...[process.env.APP_URL, process.env.BETTER_AUTH_URL].flatMap((raw) => {
+			if (!raw) return [];
+			try {
+				const parsed = new URL(raw.trim());
+				if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+					console.warn(`[auth] ignoring non-HTTP(S) trusted origin: ${raw}`);
+					return [];
+				}
+				if (
+					process.env.NODE_ENV === "production" &&
+					parsed.protocol !== "https:"
+				) {
+					console.warn(
+						`[auth] ignoring non-HTTPS trusted origin in production: ${raw}`,
+					);
+					return [];
+				}
+				return [parsed.origin];
+			} catch {
+				console.warn(`[auth] ignoring invalid trusted origin: ${raw}`);
+				return [];
+			}
+		}),
 	],
 	// tanstackStartCookies MUST be last plugin
 	plugins: [tanstackStartCookies()],

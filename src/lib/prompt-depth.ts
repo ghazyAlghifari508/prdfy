@@ -34,6 +34,14 @@ Struktur JSON tetap sama, tapi jumlah item di setiap level proporsional. JANGAN 
 
 const TABLES: Record<DocKind, string> = { prd: PRD, ac: AC, task: TASK };
 
+const VALID_KINDS: ReadonlySet<string> = new Set(Object.keys(TABLES));
+
 export function depthDirective(kind: DocKind): string {
+	// DocKind only constrains TypeScript callers: JSON, user input, or an
+	// unsafe cast can still arrive here, and an undefined lookup would
+	// silently poison prompt construction downstream.
+	if (!VALID_KINDS.has(kind as string)) {
+		throw new Error(`Unknown document kind for depth directive: ${String(kind)}`);
+	}
 	return TABLES[kind];
 }

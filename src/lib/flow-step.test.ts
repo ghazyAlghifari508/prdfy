@@ -29,6 +29,11 @@ describe("stepToRoute", () => {
 		expect(stepToRoute(null, "p1")).toBe("/prd/p1");
 		expect(stepToRoute("unknown" as never, "p1")).toBe("/prd/p1");
 	});
+
+	it("encodes reserved characters in the project id segment", () => {
+		expect(stepToRoute("task", "a/b?c#d%e")).toBe("/task/a%2Fb%3Fc%23d%25e");
+		expect(stepToRoute("prd", "p1")).toBe("/prd/p1");
+	});
 });
 
 describe("routeToStep", () => {

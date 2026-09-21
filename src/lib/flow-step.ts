@@ -104,18 +104,21 @@ export function getFlowStepCta(
 // Map a project's persisted DB step to the route that resumes its furthest
 // progress. Used by History cards. /prd is the safe landing for null/legacy
 // steps - the PRD chat regenerates or restores from prdVersions.
+// The id is encoded as an opaque path segment: a value containing / ? # %
+// (e.g. from imported history data) must never escape its segment.
 export function stepToRoute(
 	step: string | null | undefined,
 	projectId: string,
 ): string {
+	const id = encodeURIComponent(projectId);
 	switch (step) {
 		case "question":
-			return `/ask/${projectId}`;
+			return `/ask/${id}`;
 		case "ac":
-			return `/ac/${projectId}`;
+			return `/ac/${id}`;
 		case "task":
-			return `/task/${projectId}`;
+			return `/task/${id}`;
 		default:
-			return `/prd/${projectId}`;
+			return `/prd/${id}`;
 	}
 }

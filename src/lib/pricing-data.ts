@@ -24,7 +24,9 @@ export interface PriceTier {
  * (src/lib/model-config.ts) with no user-facing picker.
  */
 const FEATURE_ROWS = [
-	{ key: "monthly-reset", name: "Kredit reset tiap bulan" },
+	// "setiap 30 hari", not "tiap bulan": billing periods are 30-day windows
+	// from purchase (addDays), not calendar months.
+	{ key: "monthly-reset", name: "Kredit reset setiap 30 hari" },
 	{ key: "prd", name: "Generate PRD" },
 	{ key: "revisi", name: "Revisi tanpa batas" },
 	{ key: "export-md", name: "Export ke Markdown" },
@@ -75,7 +77,10 @@ export const prdFyPlans: [PriceTier, PriceTier, PriceTier] = [
 	{
 		id: "hengker",
 		name: "Hengker",
-		description: "105 kredit/bulan, model premium, dan antrean prioritas.",
+		// No "model premium" claim: all tiers share the single 9Router
+		// combo with no user-facing picker, so Hengker must not promise a
+		// different model.
+		description: "105 kredit/bulan dan antrean prioritas.",
 		price: 149000,
 		credits: 105,
 		isPopular: false,

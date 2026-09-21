@@ -1,4 +1,23 @@
-export const TEMPLATE_GALLERY = [
+// Readonly catalogs: shared definitions must not be mutable at runtime —
+// any module could otherwise push/splice entries and corrupt every
+// subsequent render in the process. Deep-frozen below.
+interface CatalogEntry {
+	readonly id: string;
+	readonly title: string;
+	readonly prompt: string;
+}
+
+interface TemplateEntry extends CatalogEntry {
+	readonly icon: string;
+	readonly platform: "web" | "mobile";
+}
+
+function freezeCatalog<T extends CatalogEntry>(entries: T[]): readonly T[] {
+	for (const entry of entries) Object.freeze(entry);
+	return Object.freeze(entries);
+}
+
+export const TEMPLATE_GALLERY: readonly TemplateEntry[] = freezeCatalog([
 	{
 		id: "saas-analytics",
 		title: "SaaS Analytics Dashboard",
@@ -47,9 +66,17 @@ export const TEMPLATE_GALLERY = [
 		prompt:
 			"Aplikasi POS kasir untuk warung dengan scan barcode, cetak struk Bluetooth, laporan harian, dan manajemen stok. Platform mobile Android, offline-first.",
 	},
-];
+]);
 
-export const CODEBASE_FEATURE_TEMPLATES = [
+interface CodebaseFeatureTemplate {
+	readonly id: string;
+	readonly title: string;
+	readonly category: string;
+	readonly prompt: string;
+}
+
+export const CODEBASE_FEATURE_TEMPLATES: readonly CodebaseFeatureTemplate[] =
+	freezeCatalog([
 	{
 		id: "feature-wishlist",
 		title: "Wishlist Produk & Favorit",
@@ -92,4 +119,4 @@ export const CODEBASE_FEATURE_TEMPLATES = [
 		prompt:
 			"Tambahkan dukungan mode gelap dan terang pada antarmuka aplikasi dengan pendeteksian preferensi sistem operasi otomatis serta penyimpanan preferensi tema di level user session.",
 	},
-];
+]);

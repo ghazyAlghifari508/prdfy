@@ -1,7 +1,28 @@
 import { COMBO_MODEL_ID } from "@/lib/model-config";
 
-const NINE_ROUTER_URL = process.env.NINE_ROUTER_URL || "http://localhost:20128";
-export const ROUTER_BASE_URL = `${NINE_ROUTER_URL}/v1`;
+function resolveRouterBaseUrl(): string {
+	const raw = (
+		process.env.NINE_ROUTER_URL || "http://localhost:20128"
+	).trim();
+	let parsed: URL;
+	try {
+		parsed = new URL(raw);
+	} catch {
+		throw new Error(
+			`NINE_ROUTER_URL is not a valid absolute URL: "${raw}"`,
+		);
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		throw new Error(
+			`NINE_ROUTER_URL must use http(s): "${parsed.protocol}"`,
+		);
+	}
+	// Normalize the trailing slash so every environment builds the same
+	// provider path (a trailing slash would otherwise produce `//v1`).
+	return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}/v1`;
+}
+
+export const ROUTER_BASE_URL = resolveRouterBaseUrl();
 
 // Single combo model — 9Router handles selection + fallback internally.
 export const AI_MODELS = {

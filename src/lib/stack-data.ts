@@ -189,7 +189,9 @@ export const STACK_ICONS: Record<string, string> = {
 	"Laravel + Vue (Inertia)": "laravel",
 	RedwoodJS: "redwoodjs",
 	SolidStart: "soliddotjs",
-	"Wasp (Fullstack)": "wasp",
+	// NOTE: no "Wasp (Fullstack)" mapping — public/icons/wasp.svg does not
+	// exist and stackIconUrl must never emit a URL with no asset behind it
+	// (consumers render null as "no icon"). Add the SVG before re-adding.
 	// database
 	PostgreSQL: "postgresql",
 	"Supabase Postgres": "supabase",

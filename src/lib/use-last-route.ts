@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isValidHistoryUrl } from "@/lib/flow-progress";
 
 /**
  * Debounced reporter for a project's last-visited URL.
@@ -28,10 +29,13 @@ export function useLastRoute(projectId: string): (url: string) => void {
 	);
 
 	const fire = (url: string, seq: number) => {
+		// The id travels as an opaque path segment, and only validated
+		// same-project routes are ever persisted server-side.
+		if (!isValidHistoryUrl(url, projectId)) return;
 		abortRef.current?.abort();
 		const controller = new AbortController();
 		abortRef.current = controller;
-		fetch(`/api/projects/${projectId}/last-route`, {
+		fetch(`/api/projects/${encodeURIComponent(projectId)}/last-route`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ url }),

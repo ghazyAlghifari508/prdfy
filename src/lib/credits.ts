@@ -89,7 +89,26 @@ export async function rollOverFreeIfNeeded(
 			}
 			return updated;
 		}
-		return row;
+		// Lost the conditional-update race: another request already rolled
+		// over. Re-read instead of returning the stale pre-race row, or the
+		// caller decides from an outdated period/balance.
+		const [fresh] = await db
+			.select({
+				id: subscriptions.id,
+				userId: subscriptions.userId,
+				plan: subscriptions.plan,
+				status: subscriptions.status,
+				credits: subscriptions.credits,
+				creditsUsed: subscriptions.creditsUsed,
+				creditsReserved: subscriptions.creditsReserved,
+				currentPeriodStart: subscriptions.currentPeriodStart,
+				currentPeriodEnd: subscriptions.currentPeriodEnd,
+				cancelledAt: subscriptions.cancelledAt,
+			})
+			.from(subscriptions)
+			.where(eq(subscriptions.id, row.id))
+			.limit(1);
+		return { ...row, ...(fresh ?? {}) };
 	});
 }
 

@@ -5,7 +5,10 @@ export function cn(
 }
 
 export function formatDate(date: string | Date): string {
-	return new Date(date).toLocaleDateString("id-ID", {
+	const d = date instanceof Date ? date : new Date(date);
+	// Invalid inputs must not render a user-visible "Invalid Date" string.
+	if (!Number.isFinite(d.getTime())) return "—";
+	return d.toLocaleDateString("id-ID", {
 		year: "numeric",
 		month: "long",
 		day: "numeric",
@@ -13,6 +16,8 @@ export function formatDate(date: string | Date): string {
 }
 
 export function formatCurrency(amount: number): string {
+	// Non-finite amounts must never leak NaN/Infinity into money UI.
+	if (!Number.isFinite(amount)) return "Rp0";
 	return new Intl.NumberFormat("id-ID", {
 		style: "currency",
 		currency: "IDR",
