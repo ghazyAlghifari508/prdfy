@@ -38,6 +38,10 @@ export function decodeBase64ByteLength(base64Data: string): number | null {
 	const clean = base64Data.replace(/\s+/g, "");
 	if (clean.length === 0 || clean.length % 4 !== 0) return null;
 	if (!STRICT_BASE64.test(clean)) return null;
+	// Canonical form only: re-encode the decoded bytes and require an exact
+	// match, so non-canonical encodings (e.g. "Zh==" for byte 0x66) fail
+	// closed instead of silently decoding to different layers' values.
+	if (Buffer.from(clean, "base64").toString("base64") !== clean) return null;
 	try {
 		return Buffer.from(clean, "base64").length;
 	} catch {
@@ -55,6 +59,7 @@ export function verifyFileContentHash(
 		if (clean.length === 0 || clean.length % 4 !== 0) return false;
 		if (!STRICT_BASE64.test(clean)) return false;
 		const bytes = Buffer.from(clean, "base64");
+		if (bytes.toString("base64") !== clean) return false;
 		const actual = createHash("sha256").update(bytes).digest();
 		const expected = Buffer.from(expectedHashHex, "hex");
 		return (

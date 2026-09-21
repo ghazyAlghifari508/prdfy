@@ -81,6 +81,20 @@ describe("buildManifest", () => {
 		expect(manifest.entries[0].exclusionReason).toMatch(/binary/i);
 	});
 
+	it("excludes zero-byte files from content upload with an empty:file reason", async () => {
+		const root = await makeTempRoot();
+		await writeRepoFile(root, "src/empty.ts", "");
+		await writeRepoFile(root, "src/real.ts", "export const x = 1;\n");
+		const rules = await readPrdfyIgnore(root);
+		const scan = await scanRepository(root, rules);
+		const manifest = await buildManifest(scan);
+		const emptyEntry = manifest.entries.find((e) => e.path === "src/empty.ts");
+		expect(emptyEntry?.contentEligible).toBe(false);
+		expect(emptyEntry?.exclusionReason).toBe("empty:file");
+		expect(manifest.excluded.some((x) => x.reason === "empty:file")).toBe(true);
+		expect(manifest.fileCount).toBe(1);
+	});
+
 	it("marks oversized files ineligible when exceeding the file limit", async () => {
 		const root = await makeTempRoot();
 		await writeRepoFile(root, "big.txt", "x".repeat(64));

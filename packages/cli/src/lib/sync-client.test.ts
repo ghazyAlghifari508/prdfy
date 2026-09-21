@@ -265,6 +265,39 @@ describe("planFileChunks", () => {
 		expect(chunks[0].chunkIndex).toBe(0);
 		expect(chunks[0].chunkTotal).toBe(1);
 	});
+
+	it("skips empty files instead of emitting a chunk the server rejects", () => {
+		const chunks = planFileChunks([
+			{ path: "empty.ts", base64: "", hash: "f".repeat(64) },
+		]);
+		expect(chunks).toEqual([]);
+	});
+
+	it("cuts every chunk on a 4-char base64 boundary so each is standalone-valid", () => {
+		// 196227 source bytes base64 to 261636 chars (not divisible by the
+		// old even char-split): a naive half-split yields 130818-char chunks,
+		// which is NOT valid standalone base64. Aligned slicing must fix it.
+		const raw = Buffer.alloc(196227);
+		for (let i = 0; i < raw.length; i += 1) raw[i] = 97 + (i % 26);
+		const base64 = raw.toString("base64");
+		const chunks = planFileChunks([
+			{ path: "src/big.bin.ts", base64, hash: "a".repeat(64) },
+		]);
+
+		expect(chunks.length).toBeGreaterThan(1);
+		for (const chunk of chunks) {
+			expect(chunk.data.length % 4).toBe(0);
+			expect(() => Buffer.from(chunk.data, "base64")).not.toThrow();
+			expect(Buffer.from(chunk.data, "base64").toString("base64")).toBe(
+				chunk.data,
+			);
+		}
+		const joined = [...chunks]
+			.sort((a, b) => a.chunkIndex - b.chunkIndex)
+			.map((c) => c.data)
+			.join("");
+		expect(joined).toBe(base64);
+	});
 });
 
 describe("file chunk upload and completion", () => {

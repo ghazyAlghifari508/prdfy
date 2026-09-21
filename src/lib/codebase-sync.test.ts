@@ -49,6 +49,7 @@ import {
 	uploadTransitionSteps,
 } from "./codebase-sync";
 import {
+	decodeBase64ByteLength,
 	generateSyncToken,
 	hashSyncToken,
 	verifyFileContentHash,
@@ -1258,5 +1259,21 @@ describe("verifyFileContentHash (Task 5)", () => {
 	it("rejects malformed base64 without throwing", () => {
 		expect(verifyFileContentHash("!!!not-base64!!!", hash)).toBe(false);
 		expect(verifyFileContentHash("", hash)).toBe(false);
+	});
+
+	it("rejects non-canonical base64 with non-zero unused bits", () => {
+		// "Zh==" decodes to the same byte as canonical "Zg==" but is not a
+		// valid canonical encoding; accepting both would let different layers
+		// disagree about the accepted upload.
+		expect(verifyFileContentHash("Zh==", hash)).toBe(false);
+	});
+});
+
+describe("decodeBase64ByteLength canonical form (Task 5)", () => {
+	it("decodes canonical base64 and rejects non-canonical encodings", () => {
+		expect(decodeBase64ByteLength("Zg==")).toBe(1);
+		expect(decodeBase64ByteLength("Zh==")).toBeNull();
+		expect(decodeBase64ByteLength("")).toBeNull();
+		expect(decodeBase64ByteLength("a")).toBeNull();
 	});
 });

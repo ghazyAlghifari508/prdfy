@@ -242,6 +242,21 @@ export async function buildManifest(
 		}
 
 		const size = bytes.length;
+		// Zero-byte files carry no content to analyze and can never satisfy the
+		// strict non-empty chunk upload contract, so they are a local exclusion
+		// (counted in excludedCount) and never reach the server manifest.
+		if (size === 0) {
+			entries.push({
+				path: file.path,
+				size,
+				hash: hashBytes(bytes),
+				language: detectLanguage(file.path),
+				contentEligible: false,
+				exclusionReason: "empty:file",
+			});
+			excluded.push({ path: file.path, reason: "empty:file" });
+			continue;
+		}
 		if (hasBinaryExtension(file.path) || containsNullByte(bytes)) {
 			entries.push({
 				path: file.path,

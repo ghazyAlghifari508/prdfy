@@ -144,20 +144,34 @@ export function planFileChunks(
 	const dataBudget = Math.max(1, maxChunkBytes - SYNC_ENVELOPE_RESERVE_BYTES);
 	const chunks: FileChunkPayload[] = [];
 	for (const file of files) {
+		// Zero-byte files carry no content; the strict per-chunk transport
+		// contract rejects empty payloads, and the manifest builder marks them
+		// ineligible so this skip matches what the server expects.
+		if (file.base64.length === 0) continue;
 		const total = Math.max(
 			1,
 			Math.ceil(new TextEncoder().encode(file.base64).length / dataBudget),
 		);
-		const charsPerChunk = Math.max(1, Math.floor(file.base64.length / total));
-		for (let index = 0; index < total; index += 1) {
+		// Slices must fall on 4-char base64 boundaries: a chunk cut anywhere
+		// else is not standalone-valid base64 and fails the server's strict
+		// per-chunk validation. floor-to-multiple-of-4 keeps each interior
+		// slice within the byte budget and the remainder is a multiple of 4
+		// because canonical base64 text length always is.
+		const chunkChars = Math.max(
+			4,
+			Math.floor(file.base64.length / total / 4) * 4,
+		);
+		const chunkTotal = Math.ceil(file.base64.length / chunkChars);
+		for (let index = 0; index < chunkTotal; index += 1) {
+			const start = index * chunkChars;
 			chunks.push({
 				path: file.path,
 				chunkIndex: index,
-				chunkTotal: total,
+				chunkTotal,
 				encoding: "base64",
 				data: file.base64.slice(
-					index * charsPerChunk,
-					index === total - 1 ? undefined : (index + 1) * charsPerChunk,
+					start,
+					index === chunkTotal - 1 ? undefined : start + chunkChars,
 				),
 				contentHash: file.hash,
 			});
