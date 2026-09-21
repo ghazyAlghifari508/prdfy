@@ -138,3 +138,26 @@ describe("readBoundedJson transport bound", () => {
 		if (!result.ok) expect(result.failure.status).toBe(400);
 	});
 });
+
+describe("handshake snapshot serialization contract", () => {
+	it("serializes handshake state transition and snapshot creation via advisory lock in transaction", async () => {
+		const source = await readFile(
+			new URL(
+				"../routes/api/v1/projects/$id/codebase/sync.ts",
+				import.meta.url,
+			),
+			"utf8",
+		);
+		const lockIndex = source.indexOf("pg_advisory_xact_lock(hashtext(");
+		const txUpdateSessionIndex = source.search(
+			/tx\s*\n?\s*\.\s*update\(codebaseSyncSessions\)/,
+		);
+		const txInsertSnapshotIndex = source.search(
+			/tx\s*\n?\s*\.\s*insert\(codebaseSnapshots\)/,
+		);
+
+		expect(lockIndex).toBeGreaterThan(-1);
+		expect(txUpdateSessionIndex).toBeGreaterThan(lockIndex);
+		expect(txInsertSnapshotIndex).toBeGreaterThan(txUpdateSessionIndex);
+	});
+});

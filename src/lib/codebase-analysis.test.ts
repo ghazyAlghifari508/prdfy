@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 // Server-module import is safe in vitest: .env.local provides DATABASE_URL
 // (see vitest.config.ts) and no connection opens until a query runs.
@@ -599,5 +600,25 @@ describe("codebase analysis credit lifecycle", () => {
 		expect(err.code).toBe("ANALYSIS_FAILED");
 		expect(err.message).toBe("Model timeout");
 		expect(err.analysisId).toBe("an_123");
+	});
+});
+
+describe("requestCodebaseAnalysis atomic claim contract", () => {
+	it("claims session atomically using conditional uploaded status in a transaction", async () => {
+		const source = await readFile(
+			new URL("./codebase-analysis.server.ts", import.meta.url),
+			"utf8",
+		);
+		const claimIndex = source.indexOf("db.transaction(async (tx) => {");
+		const conditionalUpdateIndex = source.indexOf(
+			'eq(codebaseSyncSessions.status, "uploaded")',
+		);
+		const insertAnalysisIndex = source.indexOf("tx.insert(codebaseAnalyses)");
+		const generateIndex = source.indexOf("await generate(messages)");
+
+		expect(claimIndex).toBeGreaterThan(-1);
+		expect(conditionalUpdateIndex).toBeGreaterThan(claimIndex);
+		expect(insertAnalysisIndex).toBeGreaterThan(conditionalUpdateIndex);
+		expect(generateIndex).toBeGreaterThan(insertAnalysisIndex);
 	});
 });

@@ -146,18 +146,41 @@ export async function requestCodebaseAnalysis(
 
 	// Fresh record per attempt: terminal rows are never mutated.
 	const analysisId = crypto.randomUUID();
-	await db.insert(codebaseAnalyses).values({
-		id: analysisId,
-		projectId,
-		snapshotId,
-		status: "pending",
+	assertSyncTransition("uploaded", "analyzing");
+
+	// Atomic claim: exactly one concurrent trigger flips uploaded -> analyzing
+	// and creates the pending record. A racing duplicate fails closed instead
+	// of starting redundant generation and creating orphan pending records.
+	const claimed = await db.transaction(async (tx) => {
+		const [updated] = await tx
+			.update(codebaseSyncSessions)
+			.set({ status: "analyzing", updatedAt: new Date() })
+			.where(
+				and(
+					eq(codebaseSyncSessions.id, session.id),
+					eq(codebaseSyncSessions.status, "uploaded"),
+				),
+			)
+			.returning({ id: codebaseSyncSessions.id });
+
+		if (!updated) return false;
+
+		await tx.insert(codebaseAnalyses).values({
+			id: analysisId,
+			projectId,
+			snapshotId,
+			status: "pending",
+		});
+
+		return true;
 	});
 
-	assertSyncTransition(session.status as "uploaded", "analyzing");
-	await db
-		.update(codebaseSyncSessions)
-		.set({ status: "analyzing", updatedAt: new Date() })
-		.where(eq(codebaseSyncSessions.id, session.id));
+	if (!claimed) {
+		throw new AnalysisServiceError(
+			"SNAPSHOT_NOT_UPLOADED",
+			"Analisis sedang berjalan untuk snapshot ini. Tunggu hingga selesai.",
+		);
+	}
 
 	try {
 		const storedManifest = manifestEntrySchema

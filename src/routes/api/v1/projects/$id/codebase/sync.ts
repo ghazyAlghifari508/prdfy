@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	codebaseSnapshots,
@@ -184,58 +184,82 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/sync")({
 						{ status: 429 },
 					);
 
-				// waiting_for_cli -> connected exactly once; later handshakes
-				// (CLI retries) keep the state and only refresh metadata.
-				// Usability was verified above, so any remaining state is an
-				// active non-terminal state safe to report as-is.
-				let status = session.status as CodebaseSyncStatus;
-				if (status === "waiting_for_cli") {
-					assertSyncTransition(status, "connected");
-					status = "connected";
-				}
-				const metadata =
-					(session.metadata as Record<string, unknown> | null) ?? {};
-				await db
-					.update(codebaseSyncSessions)
-					.set({
-						status,
-						metadata: { ...metadata, cliVersion: parsedBody.data.cliVersion },
-						updatedAt: new Date(),
-					})
-					.where(eq(codebaseSyncSessions.id, session.id));
+				// Serialize handshake per session using advisory xact lock:
+				// concurrent handshake retries cannot race to create duplicate
+				// snapshots or double-advance session state.
+				const handshakeResult = await db.transaction(async (tx) => {
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(hashtext(${session.id}))`,
+					);
 
-				// One snapshot per session: the handshake binds (not creates
-				// duplicates on retry) the uploading snapshot for Task 5.
-				const [existingSnapshot] = await db
-					.select({ id: codebaseSnapshots.id })
-					.from(codebaseSnapshots)
-					.where(eq(codebaseSnapshots.syncSessionId, session.id))
-					.orderBy(desc(codebaseSnapshots.createdAt))
-					.limit(1);
-				let snapshotId = existingSnapshot?.id;
-				if (!snapshotId) {
-					const [inserted] = await db
-						.insert(codebaseSnapshots)
-						.values({
-							id: crypto.randomUUID(),
-							projectId,
-							syncSessionId: session.id,
-							status: "uploading",
-							fileCount: 0,
-							excludedCount: 0,
-							contentSize: 0,
+					const [currentSession] = await tx
+						.select({
+							status: codebaseSyncSessions.status,
+							metadata: codebaseSyncSessions.metadata,
 						})
-						.returning({ id: codebaseSnapshots.id });
-					if (!inserted)
-						return Response.json(
-							{
-								error: "Failed to initialize sync snapshot",
-								code: "SYNC_FAILED",
-							},
-							{ status: 500 },
-						);
-					snapshotId = inserted.id;
+						.from(codebaseSyncSessions)
+						.where(eq(codebaseSyncSessions.id, session.id))
+						.limit(1);
+
+					let status = (currentSession?.status ??
+						session.status) as CodebaseSyncStatus;
+					if (status === "waiting_for_cli") {
+						assertSyncTransition(status, "connected");
+						status = "connected";
+					}
+					const metadata =
+						(currentSession?.metadata as Record<string, unknown> | null) ??
+						(session.metadata as Record<string, unknown> | null) ??
+						{};
+					await tx
+						.update(codebaseSyncSessions)
+						.set({
+							status,
+							metadata: { ...metadata, cliVersion: parsedBody.data.cliVersion },
+							updatedAt: new Date(),
+						})
+						.where(eq(codebaseSyncSessions.id, session.id));
+
+					// One snapshot per session: the handshake binds (not creates
+					// duplicates on retry) the uploading snapshot for Task 5.
+					const [existingSnapshot] = await tx
+						.select({ id: codebaseSnapshots.id })
+						.from(codebaseSnapshots)
+						.where(eq(codebaseSnapshots.syncSessionId, session.id))
+						.orderBy(desc(codebaseSnapshots.createdAt))
+						.limit(1);
+
+					let snapshotId = existingSnapshot?.id;
+					if (!snapshotId) {
+						const [inserted] = await tx
+							.insert(codebaseSnapshots)
+							.values({
+								id: crypto.randomUUID(),
+								projectId,
+								syncSessionId: session.id,
+								status: "uploading",
+								fileCount: 0,
+								excludedCount: 0,
+								contentSize: 0,
+							})
+							.returning({ id: codebaseSnapshots.id });
+						snapshotId = inserted?.id;
+					}
+
+					return { status, snapshotId };
+				});
+
+				if (!handshakeResult.snapshotId) {
+					return Response.json(
+						{
+							error: "Failed to initialize sync snapshot",
+							code: "SYNC_FAILED",
+						},
+						{ status: 500 },
+					);
 				}
+
+				const { status, snapshotId } = handshakeResult;
 
 				// One session is one attempt: a retry mints a new session, so
 				// the attempt identity is the session identity.
