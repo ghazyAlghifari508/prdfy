@@ -47,6 +47,23 @@ describe("isAdmin helper", () => {
 		expect(isAdmin({ id: "u1", isAdmin: true })).toBe(true);
 		expect(isAdmin({ id: "u1", is_admin: true })).toBe(true);
 	});
+
+	it("returns true when user email matches ADMIN_EMAILS environment variable", () => {
+		const original = process.env.ADMIN_EMAILS;
+		process.env.ADMIN_EMAILS = "alghifarighazy508@gmail.com, admin@prdfy.com";
+		try {
+			expect(isAdmin({ id: "u1", email: "alghifarighazy508@gmail.com" })).toBe(
+				true,
+			);
+			expect(isAdmin({ id: "u1", email: "AlGhifariGhazy508@gmail.com" })).toBe(
+				true,
+			);
+			expect(isAdmin({ id: "u1", email: "ADMIN@PRDFY.COM" })).toBe(true);
+			expect(isAdmin({ id: "u1", email: "other@example.com" })).toBe(false);
+		} finally {
+			process.env.ADMIN_EMAILS = original;
+		}
+	});
 });
 
 describe("requireUser guard", () => {
@@ -94,5 +111,80 @@ describe("requireAdmin guard", () => {
 	it("returns user when user is admin", () => {
 		const adminUser = { id: "u1", email: "admin@example.com", isAdmin: true };
 		expect(requireAdminGuard({ user: adminUser })).toEqual(adminUser);
+	});
+
+	it("allows user whose email is in ADMIN_EMAILS even if isAdmin is missing or false", () => {
+		const original = process.env.ADMIN_EMAILS;
+		process.env.ADMIN_EMAILS = "alghifarighazy508@gmail.com";
+		try {
+			const admin = {
+				id: "u1",
+				email: "alghifarighazy508@gmail.com",
+				isAdmin: false,
+			};
+			expect(requireAdminGuard({ user: admin })).toEqual(admin);
+		} finally {
+			process.env.ADMIN_EMAILS = original;
+		}
+	});
+});
+
+describe("admin route authorization matrix", () => {
+	function simulateAdminRouteGuard(
+		session: { user: Record<string, unknown> } | null,
+	) {
+		try {
+			requireAdminGuard(session);
+			return { status: 200, action: "allow" };
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (msg === "Unauthorized") {
+				return { status: 302, action: "redirect", to: "/login" };
+			}
+			if (msg === "Forbidden") {
+				return { status: 403, action: "forbidden" };
+			}
+			throw err;
+		}
+	}
+
+	it("redirects unauthenticated user (none) to /login", () => {
+		const res = simulateAdminRouteGuard(null);
+		expect(res).toEqual({ status: 302, action: "redirect", to: "/login" });
+	});
+
+	it("returns 403 for authenticated normal user (non-admin) without redirecting to /login", () => {
+		const normalUser = {
+			id: "u-normal",
+			email: "normal@example.com",
+			isAdmin: false,
+		};
+		const res = simulateAdminRouteGuard({ user: normalUser });
+		expect(res).toEqual({ status: 403, action: "forbidden" });
+	});
+
+	it("allows authenticated admin user (isAdmin: true)", () => {
+		const adminUser = {
+			id: "u-admin",
+			email: "admin@example.com",
+			isAdmin: true,
+		};
+		const res = simulateAdminRouteGuard({ user: adminUser });
+		expect(res).toEqual({ status: 200, action: "allow" });
+	});
+
+	it("allows authenticated admin user via ADMIN_EMAILS (alghifarighazy508@gmail.com)", () => {
+		const original = process.env.ADMIN_EMAILS;
+		process.env.ADMIN_EMAILS = "alghifarighazy508@gmail.com";
+		try {
+			const ownerUser = {
+				id: "u-owner",
+				email: "alghifarighazy508@gmail.com",
+			};
+			const res = simulateAdminRouteGuard({ user: ownerUser });
+			expect(res).toEqual({ status: 200, action: "allow" });
+		} finally {
+			process.env.ADMIN_EMAILS = original;
+		}
 	});
 });

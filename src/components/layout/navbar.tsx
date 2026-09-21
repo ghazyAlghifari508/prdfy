@@ -22,6 +22,7 @@ import { Logo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useUserPlan } from "@/hooks/use-user-plan";
 import { authClient } from "@/lib/auth-client";
+import { isAdmin } from "@/lib/session";
 import { useChatStore, useUIStore } from "@/store";
 import { FlowStepNav, getFlowStepCta, routeToStep } from "./flow-step-nav";
 
@@ -426,30 +427,16 @@ export function Navbar() {
 														<Settings size={16} className="text-fog" />
 														Setting
 													</Link>
-													{session?.user &&
-														Boolean(
-															(
-																session.user as {
-																	isAdmin?: boolean;
-																	is_admin?: boolean;
-																}
-															).isAdmin ||
-																(
-																	session.user as {
-																		isAdmin?: boolean;
-																		is_admin?: boolean;
-																	}
-																).is_admin,
-														) && (
-															<Link
-																to="/admin"
-																onClick={() => setIsDropdownOpen(false)}
-																className="flex items-center gap-3 px-4 py-2.5 text-sm font-[510] text-mist transition-colors hover:bg-white/5 hover:text-snow"
-															>
-																<Shield size={16} className="text-fog" />
-																Admin
-															</Link>
-														)}
+													{session?.user && isAdmin(session.user) && (
+														<Link
+															to="/admin"
+															onClick={() => setIsDropdownOpen(false)}
+															className="flex items-center gap-3 px-4 py-2.5 text-sm font-[510] text-mist transition-colors hover:bg-white/5 hover:text-snow"
+														>
+															<Shield size={16} className="text-fog" />
+															Admin
+														</Link>
+													)}
 													<Link
 														to="/settings/feedback"
 														onClick={() => setIsDropdownOpen(false)}

@@ -38,10 +38,20 @@ export function isBanned(user: unknown): boolean {
 
 export function isAdmin(user: unknown): boolean {
 	const u = user as
-		| { isAdmin?: boolean; is_admin?: boolean }
+		| { isAdmin?: boolean; is_admin?: boolean; email?: string | null }
 		| null
 		| undefined;
-	return Boolean(u?.isAdmin || u?.is_admin);
+	if (u?.isAdmin || u?.is_admin) return true;
+	if (typeof u?.email === "string" && u.email.trim().length > 0) {
+		const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+			.split(",")
+			.map((e) => e.trim().toLowerCase())
+			.filter(Boolean);
+		if (adminEmails.includes(u.email.trim().toLowerCase())) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // Throws Unauthorized when no session - for guarded server fns.
