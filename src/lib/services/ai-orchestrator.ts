@@ -23,6 +23,11 @@ export async function tryStreamWithFallback(
 	abortController: AbortController;
 	outcome: StreamOutcome;
 }> {
+	if (!Array.isArray(models) || models.length === 0) {
+		throw new Error(
+			"Konfigurasi model AI kosong — tidak ada model untuk dicoba.",
+		);
+	}
 	let lastError = "";
 
 	for (let i = 0; i < models.length; i++) {
@@ -35,23 +40,32 @@ export async function tryStreamWithFallback(
 		const attemptCeiling = 1 + AI_STREAM_RETRY_ATTEMPTS;
 		for (let attempt = 0; attempt < attemptCeiling; attempt++) {
 			const abortController = new AbortController();
+			// Named listener removed in finally: without this, every attempt
+			// leaks a closure (and its AbortController) onto externalSignal.
+			const propagateAbort = () => abortController.abort();
 			if (externalSignal) {
 				if (externalSignal.aborted) abortController.abort();
-				else
-					externalSignal.addEventListener(
-						"abort",
-						() => abortController.abort(),
-						{ once: true },
-					);
+				else externalSignal.addEventListener("abort", propagateAbort);
 			}
 			const outcome: StreamOutcome = {};
+			// Buffer attempt-local thinking callbacks: a failed gen.next()
+			// may already have invoked onThinking, and retrying would replay
+			// the same reasoning into the UI a second time. The gate flips
+			// only for the winning attempt, so later chunks stream live.
+			const bufferedThinking: string[] = [];
+			let publishThinking = false;
 			const gen = streamChat(
 				messages,
 				modelToTry,
 				abortController.signal,
 				maxTokens,
 				outcome,
-				onThinking,
+				onThinking
+					? (text) => {
+							if (publishThinking) onThinking(text);
+							else bufferedThinking.push(text);
+						}
+					: undefined,
 			);
 
 			try {
@@ -61,6 +75,12 @@ export async function tryStreamWithFallback(
 					throw new Error("Respons kosong dari chunk model.");
 				}
 
+				// Attempt won: publish buffered thinking exactly once, then
+				// stream the remainder live.
+				if (onThinking) {
+					for (const text of bufferedThinking) onThinking(text);
+				}
+				publishThinking = true;
 				return {
 					generator: gen,
 					firstChunk: first.value,
@@ -78,6 +98,8 @@ export async function tryStreamWithFallback(
 				// Only loop if a retry is still available; otherwise fall through
 				// to the next model (or the final throw below).
 				if (attempt < attemptCeiling - 1) continue;
+			} finally {
+				externalSignal?.removeEventListener("abort", propagateAbort);
 			}
 		}
 	}

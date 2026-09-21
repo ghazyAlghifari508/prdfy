@@ -97,7 +97,13 @@ export async function* streamChat(
 			const now = Date.now();
 			if (now >= totalDeadline) throw mkTotalError();
 			const remainingTotal = totalDeadline - now;
-			const stallMs = Math.min(AI_STALL_TIMEOUT_MS, remainingTotal);
+			// Stall budget counts from the last PROGRESS (reasoning/text),
+			// not from the last part of any kind: a provider emitting
+			// metadata forever must not keep the generator alive.
+			const stallMs = Math.min(
+				Math.max(lastProgress + AI_STALL_TIMEOUT_MS - now, 0),
+				remainingTotal,
+			);
 			let stallId: ReturnType<typeof setTimeout> | undefined;
 			let totalId: ReturnType<typeof setTimeout> | undefined;
 			const stallPromise = new Promise<never>((_, reject) => {
@@ -146,8 +152,18 @@ export async function* streamChat(
 				throw (chunk as { error: unknown }).error;
 			}
 			if (chunk.type === "abort") {
-				if (outcome) outcome.finishReason = "error";
+				if (outcome) outcome.finishReason = "aborted";
 				throw new Error("AI stream aborted");
+			}
+			if (chunk.type === "finish") {
+				// Capture the provider's terminal reason while consuming so
+				// an early consumer exit still leaves an observable outcome.
+				// Never clobber an explicit error recorded above.
+				const reason = (chunk as { finishReason?: unknown }).finishReason;
+				if (outcome && outcome.finishReason === undefined) {
+					outcome.finishReason =
+						typeof reason === "string" && reason ? reason : "unknown";
+				}
 			}
 			// Other part types (start, finish, etc.) don't count as progress — stall
 			// timer is NOT reset, so a stream that only emits non-progress stays bounded.
@@ -159,8 +175,24 @@ export async function* streamChat(
 			throw new Error("Respons kosong dari chunk model.");
 		}
 	} catch (err) {
-		if (outcome) outcome.finishReason = "error";
+		if (outcome) {
+			// Preserve a caller's intentional abort as "aborted" instead of
+			// lumping it with provider failures: downstream credit/error
+			// handling must be able to tell the two apart.
+			const aborted =
+				(signal?.aborted ?? false) ||
+				(err instanceof Error && err.name === "AbortError") ||
+				(err instanceof Error && err.message === "AI stream aborted");
+			outcome.finishReason = aborted ? "aborted" : "error";
+		}
 		throw err;
+	} finally {
+		// A consumer that stops iterating early (return/break) never reaches
+		// the finish-reason await below; leave whatever terminal signal was
+		// actually observed instead of an empty outcome.
+		if (outcome && outcome.finishReason === undefined) {
+			outcome.finishReason = signal?.aborted ? "aborted" : "unknown";
+		}
 	}
 
 	if (outcome) {

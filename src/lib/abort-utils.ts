@@ -15,6 +15,9 @@ export async function raceWithAbort<T>(
 	signal: AbortSignal,
 ): Promise<T> {
 	if (signal.aborted) {
+		// The promise is already running: without an attached handler its
+		// later rejection would surface as an unhandled rejection.
+		promise.catch(() => {});
 		throw Object.assign(new Error("Request aborted"), { name: "AbortError" });
 	}
 	let onAbort: () => void = () => {};

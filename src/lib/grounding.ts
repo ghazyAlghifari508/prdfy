@@ -144,10 +144,16 @@ async function buildGroundedContext(
 		},
 		isCancelled,
 	);
-
 	if (sections.length === 0) return "";
 
-	const body = sections.join("\n\n").slice(0, MAX_GROUNDED_CHARS);
+	// Truncate at a line boundary so a section/code sample is never sliced
+	// mid-line, and mark the omission explicitly.
+	const joined = sections.join("\n\n");
+	let body = joined;
+	if (joined.length > MAX_GROUNDED_CHARS) {
+		const cut = joined.lastIndexOf("\n", MAX_GROUNDED_CHARS);
+		body = `${joined.slice(0, cut === -1 ? MAX_GROUNDED_CHARS : cut)}\n[…dipotong: ${sections.length} bagian diringkas]`;
+	}
 	return (
 		`\n\n${BLOCK_START}\n` +
 		"Gunakan fakta berikut untuk menjawab, JANGAN menebak detail teknis yang tidak tercakup di sini.\n" +
@@ -167,11 +173,17 @@ async function buildGroundedContext(
 export async function groundStack(text: string): Promise<string> {
 	// Shared cancellation flag for one call: the 6s budget flips it true (and
 	// resolves "") before any further resolve/docs work may be dequeued.
+	// In-flight RPCs are NOT cancelled here — but each carries its own
+	// per-RPC timeout inside the Context7 client (rpcWithTimeout), so an
+	// abandoned call lingers at most ~3s rather than indefinitely. Wiring an
+	// outer AbortSignal through would break the pinned 2-arg client contract
+	// (see grounding.test.ts "exactly 2 args"); the bounded linger is the
+	// documented tradeoff.
 	const cancel = { cancelled: false };
 	let timeoutId: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<string>((resolve) => {
 		timeoutId = setTimeout(() => {
-			cancel.cancelled = true; // ponytail: halt new work, no AbortSignal
+			cancel.cancelled = true;
 			resolve("");
 		}, GROUNDING_TOTAL_TIMEOUT_MS);
 	});

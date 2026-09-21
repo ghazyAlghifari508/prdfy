@@ -16,7 +16,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 const PROTOCOL_VERSION = "2025-11-25";
-const DEFAULT_TIMEOUT_MS = 3000;
+export const DEFAULT_TIMEOUT_MS = 3000;
 // ponytail: static safety ceiling — bound the response we buffer in memory so a
 // hostile/oversized Context7 body can't exhaust process memory. 1,000,000 bytes.
 const MAX_RESPONSE_BYTES = 1_000_000;
@@ -171,15 +171,29 @@ async function rpcWithTimeout(
 	method: string,
 	params: Record<string, unknown>,
 	ms: number,
+	externalSignal?: AbortSignal,
 ): Promise<McpMessage | null> {
 	const ctrl = new AbortController();
 	const timer = setTimeout(() => ctrl.abort(), ms);
+	// Link an outer cancellation (grounding budget, request abort) so an
+	// in-flight RPC is actually cancelled, not merely abandoned.
+	const onExternalAbort = () => ctrl.abort();
+	if (externalSignal) {
+		if (externalSignal.aborted) {
+			clearTimeout(timer);
+			return null;
+		}
+		externalSignal.addEventListener("abort", onExternalAbort, {
+			once: true,
+		});
+	}
 	try {
 		return await rpc(method, params, ctrl.signal);
 	} catch {
 		return null;
 	} finally {
 		clearTimeout(timer);
+		externalSignal?.removeEventListener("abort", onExternalAbort);
 	}
 }
 
@@ -190,6 +204,7 @@ async function rpcWithTimeout(
 export async function resolveLibraryId(
 	query: string,
 	ms = DEFAULT_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<string | null> {
 	if (!getMcpUrl()) return null;
 
@@ -201,6 +216,7 @@ export async function resolveLibraryId(
 			clientInfo: { name: "prdfy-grounding", version: "0.0.1" },
 		},
 		ms,
+		signal,
 	);
 	if (!init?.result) return null;
 
@@ -208,6 +224,7 @@ export async function resolveLibraryId(
 		"tools/call",
 		{ name: "resolve-library-id", arguments: { query, libraryName: query } },
 		ms,
+		signal,
 	);
 	const content = call?.result?.content;
 	if (!content) return null;
@@ -228,8 +245,12 @@ export async function queryDocs(
 	libraryId: string,
 	query: string,
 	ms = DEFAULT_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<string> {
 	if (!getMcpUrl()) return "";
+	// Enforce bounded input lengths before serialization/transfer.
+	const boundedLibraryId = libraryId.slice(0, 256);
+	const boundedQuery = query.slice(0, 512);
 
 	const init = await rpcWithTimeout(
 		"initialize",
@@ -239,13 +260,18 @@ export async function queryDocs(
 			clientInfo: { name: "prdfy-grounding", version: "0.0.1" },
 		},
 		ms,
+		signal,
 	);
 	if (!init?.result) return "";
 
 	const call = await rpcWithTimeout(
 		"tools/call",
-		{ name: "query-docs", arguments: { libraryId, query } },
+		{
+			name: "query-docs",
+			arguments: { libraryId: boundedLibraryId, query: boundedQuery },
+		},
 		ms,
+		signal,
 	);
 	const content = call?.result?.content;
 	if (!content) return "";
