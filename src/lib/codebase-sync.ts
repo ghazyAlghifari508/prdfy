@@ -332,6 +332,13 @@ export function getSessionUsability(
 			httpStatus: 410,
 		};
 	}
+	if (!codebaseSyncStatusSchema.safeParse(session.status).success) {
+		return {
+			usable: false,
+			code: "SYNC_SESSION_TERMINAL",
+			httpStatus: 401,
+		};
+	}
 	if (
 		(CODEBASE_SYNC_TERMINAL_STATUSES as readonly string[]).includes(
 			session.status,
@@ -369,9 +376,12 @@ export function getPendingSyncPayloadKey(projectId: string): string {
 	return `prdfy:sync-payload:${projectId}`;
 }
 
-// One usable credential per project: a create/retry request is honored only
-// when no usable session remains. Terminal or expired rows never block a
-// retry — the retry mints a new session instead of mutating them.
+// One usable credential per project: this predicate is advisory only; session
+// creation must re-check under a per-project transaction/advisory lock
+// (`pg_advisory_xact_lock(hashtext(projectId))` in `/api/codebase/$projectId/session`)
+// so concurrent mints cannot race to issue multiple usable credentials.
+// Terminal or expired rows never block a retry — the retry mints a new
+// session instead of mutating them.
 export function shouldCreateSyncSession(
 	existing: readonly SyncSessionLike[],
 	now: Date = new Date(),
@@ -504,10 +514,18 @@ export function isSupportedCliVersion(
 	return true;
 }
 
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Locked CLI invocation. The raw credential travels in `SyncPromptPayload`
 // (`syncToken` field, exposed once); the command embeds only a placeholder so
-// the credential never appears in a copyable string by accident.
+// the credential never appears in a copyable string by accident. The project id
+// must be a valid UUID to prevent shell metacharacter injection when copied into
+// a terminal.
 export function buildSyncCommand(projectId: string): string {
+	if (!UUID_PATTERN.test(projectId)) {
+		throw new Error(`Invalid project ID format: "${projectId}"`);
+	}
 	return `prdfy codebase sync --project-id ${projectId} --sync-token <token>`;
 }
 
@@ -836,7 +854,16 @@ export function checkSnapshotCompletion(input: {
 		);
 	}
 
-	const manifestByPath = new Map(manifest.map((entry) => [entry.path, entry]));
+	const manifestByPath = new Map<string, CompletionManifestEntry>();
+	for (const entry of manifest) {
+		if (manifestByPath.has(entry.path)) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_CONFLICT",
+				"Manifest contains duplicate paths",
+			);
+		}
+		manifestByPath.set(entry.path, entry);
+	}
 	const chunksByPath = new Map<string, CompletionChunkInfo[]>();
 	for (const chunk of chunks) {
 		const group = chunksByPath.get(chunk.path) ?? [];
@@ -896,6 +923,12 @@ export function checkSnapshotCompletion(input: {
 			throw new SnapshotCompletionError(
 				"SNAPSHOT_TOO_LARGE",
 				"Uploaded file exceeds the per-file limit",
+			);
+		}
+		if (totalBytes !== entry.size) {
+			throw new SnapshotCompletionError(
+				"SNAPSHOT_CONFLICT",
+				`Uploaded content size (${totalBytes}) does not match manifest entry size (${entry.size})`,
 			);
 		}
 		files.push({ path: entry.path, chunkTotal: total, totalBytes });

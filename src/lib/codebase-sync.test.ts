@@ -426,6 +426,18 @@ describe("sync session usability (Task 4)", () => {
 			expect(result.usable).toBe(false);
 		}
 	});
+
+	it("rejects unknown or corrupted status values fail-closed", () => {
+		const result = getSessionUsability(
+			{ ...base, status: "corrupted_status" },
+			new Date(),
+		);
+		expect(result.usable).toBe(false);
+		if (!result.usable) {
+			expect(result.code).toBe("SYNC_SESSION_TERMINAL");
+			expect(result.httpStatus).toBe(401);
+		}
+	});
 });
 
 describe("sync session ownership and project binding (Task 4)", () => {
@@ -561,11 +573,22 @@ describe("safe sync errors and CLI version gate (Task 4)", () => {
 
 	it("builds the locked sync command with a placeholder, never a raw token", () => {
 		const raw = generateSyncToken();
-		const command = buildSyncCommand("proj_123");
+		const validUuid = "12345678-1234-4234-8234-123456789abc";
+		const command = buildSyncCommand(validUuid);
 		expect(command).toBe(
-			"prdfy codebase sync --project-id proj_123 --sync-token <token>",
+			`prdfy codebase sync --project-id ${validUuid} --sync-token <token>`,
 		);
 		expect(command).not.toContain(raw);
+	});
+
+	it("rejects non-UUID project IDs to prevent shell command injection", () => {
+		expect(() => buildSyncCommand("proj_123")).toThrow(
+			/Invalid project ID format/,
+		);
+		expect(() => buildSyncCommand("proj; rm -rf /")).toThrow(
+			/Invalid project ID format/,
+		);
+		expect(() => buildSyncCommand("")).toThrow(/Invalid project ID format/);
 	});
 });
 
@@ -1080,6 +1103,48 @@ describe("snapshot completion verification (Task 5)", () => {
 			expect.unreachable("expected SnapshotCompletionError");
 		} catch (error) {
 			expect((error as SnapshotCompletionError).code).toBe("SNAPSHOT_CONFLICT");
+		}
+	});
+
+	it("rejects duplicate manifest paths", () => {
+		const dupManifest = [manifest[0], { ...manifest[0], hash: "f".repeat(64) }];
+		try {
+			checkSnapshotCompletion({
+				manifest: dupManifest,
+				chunks: [chunks[0]],
+				fileCount: 2,
+				excludedCount: 0,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect((error as SnapshotCompletionError).code).toBe("SNAPSHOT_CONFLICT");
+			expect((error as SnapshotCompletionError).message).toMatch(
+				/duplicate paths/i,
+			);
+		}
+	});
+
+	it("rejects chunk sets whose total decoded bytes disagree with entry size", () => {
+		const mismatchedChunks = [
+			{
+				...chunks[0],
+				decodedBytes: chunks[0].decodedBytes - 1,
+			},
+			chunks[1],
+		];
+		try {
+			checkSnapshotCompletion({
+				manifest,
+				chunks: mismatchedChunks,
+				fileCount: 2,
+				excludedCount: 0,
+			});
+			expect.unreachable("expected SnapshotCompletionError");
+		} catch (error) {
+			expect((error as SnapshotCompletionError).code).toBe("SNAPSHOT_CONFLICT");
+			expect((error as SnapshotCompletionError).message).toMatch(
+				/does not match manifest entry size/i,
+			);
 		}
 	});
 
