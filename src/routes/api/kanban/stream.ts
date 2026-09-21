@@ -13,7 +13,9 @@ export const Route = createFileRoute("/api/kanban/stream")({
 						"@tanstack/react-start/server"
 					);
 					headers = getRequestHeaders();
-				} catch {}
+				} catch (e) {
+					console.warn("Failed to get request headers from start server:", e);
+				}
 				const user = await requireUser(headers ?? request.headers);
 
 				const url = new URL(request.url);
@@ -38,10 +40,10 @@ export const Route = createFileRoute("/api/kanban/stream")({
 				}
 
 			let stopped = false;
-			let iv: ReturnType<typeof setInterval> | undefined;
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			const stop = (controller: ReadableStreamDefaultController) => {
 				stopped = true;
-				if (iv !== undefined) clearInterval(iv);
+				if (timer !== undefined) clearTimeout(timer);
 				try {
 					controller.close();
 				} catch {}
@@ -49,6 +51,8 @@ export const Route = createFileRoute("/api/kanban/stream")({
 			const stream = new ReadableStream<Uint8Array>({
 				async start(controller) {
 					const enc = new TextEncoder();
+					let consecutiveErrors = 0;
+					const MAX_CONSECUTIVE_ERRORS = 5;
 
 					const send = async () => {
 						if (stopped) return;
@@ -72,26 +76,42 @@ export const Route = createFileRoute("/api/kanban/stream")({
 							);
 							const data = await getKanbanData(projectId);
 							if (stopped) return;
+							consecutiveErrors = 0;
 							controller.enqueue(
 								enc.encode(`data: ${JSON.stringify(data)}\n\n`),
 							);
 						} catch (e) {
+							consecutiveErrors++;
 							// Controller may be closed after abort; swallow.
 							// Log only when still open so we see real DB errors.
 							try {
 								console.error("kanban SSE send error:", e);
 							} catch {}
+							if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+								try {
+									controller.enqueue(
+										enc.encode(
+											`data: ${JSON.stringify({ error: "Gagal memuat pembaruan Kanban." })}\n\n`,
+										),
+									);
+								} catch {}
+								stop(controller);
+								return;
+							}
+						}
+
+						// Self-scheduling timeout avoids overlapping sends if getKanbanData
+						// takes longer than the interval under database load.
+						if (!stopped) {
+							timer = setTimeout(send, KANBAN_SSE_INTERVAL_MS);
 						}
 					};
 
-					await send();
-					if (stopped) return;
-					iv = setInterval(() => {
-						void send();
-					}, KANBAN_SSE_INTERVAL_MS);
 					request.signal.addEventListener("abort", () => {
 						stop(controller);
 					});
+
+					await send();
 				},
 				cancel(controller) {
 					stop(controller);
