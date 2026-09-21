@@ -32,6 +32,16 @@ export const Route = createFileRoute("/api/payments/webhook")({
 					return Response.json({ error: "Invalid signature" }, { status: 401 });
 
 				if (["settlement", "capture"].includes(transaction_status)) {
+					// A capture still under fraud review must not grant until
+					// Midtrans confirms it (mirrors syncPaymentStatus): challenge
+					// stays pending so a later accept notification can grant.
+					if (
+						transaction_status === "capture" &&
+						body.fraud_status &&
+						body.fraud_status !== "accept"
+					) {
+						return Response.json({ status: "ok" });
+					}
 					// Verify the notified amount against what we charged. Midtrans sends
 					// gross_amount as a decimal string ("49000.00"), hence Number().
 					const [stored] = await db

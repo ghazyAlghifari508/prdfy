@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { payments, subscriptions } from "@/db/schema";
 import {
@@ -28,6 +28,17 @@ export const Route = createFileRoute("/api/payments/create")({
 	server: {
 		handlers: {
 			POST: async ({ request }: { request: Request }) => {
+				// Cookie-authenticated state-changing endpoint: a cross-site
+				// page could otherwise submit it with ambient credentials.
+				// Browsers always send Origin on fetch POST; non-browser
+				// callers send none and remain allowed.
+				const reqOrigin = request.headers.get("origin") || "";
+				if (reqOrigin && !ALLOWED_ORIGINS.includes(reqOrigin)) {
+					return Response.json(
+						{ error: "Origin tidak diizinkan." },
+						{ status: 403 },
+					);
+				}
 				const user = await requireUser(getRequestHeaders());
 				let gateway: ReturnType<typeof getMidtransConfig>;
 				try {
@@ -137,9 +148,11 @@ export const Route = createFileRoute("/api/payments/create")({
 			};
 			if (isTopUp) {
 				// Re-check quota atomically under a lock on the latest
-				// subscription row so two concurrent checkouts serialize:
-				// the second one counts the first one's order before
-				// inserting instead of both observing the same usage.
+				// subscription row so two concurrent checkouts serialize.
+				// Usage is counted INSIDE this transaction (pending + success
+				// rows): the second checkout blocks on the row lock until the
+				// first commits, then observes the first one's order instead
+				// of both reading the same pre-insert usage snapshot.
 				let quotaCapCredits = 0;
 				try {
 					await db.transaction(async (tx) => {
@@ -163,11 +176,27 @@ export const Route = createFileRoute("/api/payments/create")({
 						if (!locked || eff.state !== "active_paid")
 							throw new Error("TOPUP_NOT_ELIGIBLE");
 						quotaCapCredits = PLAN_CREDITS[eff.effectivePlan];
-						const used = await getTopUpCreditsUsedThisPeriod(user.id);
+						let usedThisPeriod = 0;
+						if (locked.currentPeriodStart && locked.currentPeriodEnd) {
+							const [usageRow] = await tx
+								.select({ n: sql<number>`count(*)::int` })
+								.from(payments)
+								.where(
+									and(
+										eq(payments.userId, user.id),
+										eq(payments.plan, TOPUP_SKU.id),
+										inArray(payments.status, ["pending", "success"]),
+										gte(payments.createdAt, locked.currentPeriodStart),
+										lte(payments.createdAt, locked.currentPeriodEnd),
+									),
+								);
+							usedThisPeriod =
+								(usageRow?.n ?? 0) * TOPUP_SKU.credits;
+						}
 						if (
 							remainingTopUpQuota({
 								plan: eff.effectivePlan,
-								usedThisPeriod: used,
+								usedThisPeriod,
 							}) < TOPUP_SKU.credits
 						)
 							throw new Error("TOPUP_QUOTA_EXCEEDED");

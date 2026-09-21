@@ -279,6 +279,10 @@ export async function applyPaymentSuccess(orderId: string) {
 			.limit(1);
 		if (!payment) return null;
 		if (payment.status === "success") return { plan: payment.plan as Plan };
+		// Defense in depth: both callers verify settlement before invoking,
+		// but the grant itself must never fire for a terminally failed
+		// (expired/cancelled/denied) row if called directly.
+		if (payment.status === "failed") return null;
 
 		const derivedPlan = planFromAmount(payment.amount ?? 0);
 		if (payment.plan && payment.plan !== derivedPlan) {

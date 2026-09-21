@@ -67,10 +67,40 @@ export const Route = createFileRoute("/api/cron/billing")({
 
 				const targets = selectBillingEmailTargets(rows, new Date());
 				let sent = 0;
+				let failed = 0;
+				let skipped = 0;
 
 				for (const t of targets) {
 					try {
 						const candidate = candidates.find((c) => c.userId === t.userId);
+						if (!candidate?.subscriptionId) {
+							skipped += 1;
+							continue;
+						}
+						// Atomic claim BEFORE sending: the conditional update only
+						// succeeds for the first overlapping cron run, so two
+						// concurrent invocations can never send the same stage
+						// twice. At-most-once delivery: a failed send still
+						// consumes the stage (documented tradeoff for
+						// best-effort reminders).
+						const [claimed] = await db
+							.update(subscriptions)
+							.set({
+								reminderCount: sql`${subscriptions.reminderCount} + 1`,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(subscriptions.id, candidate.subscriptionId),
+									eq(subscriptions.reminderCount, candidate.reminderCount),
+								),
+							)
+							.returning({ id: subscriptions.id });
+						if (!claimed) {
+							skipped += 1;
+							continue;
+						}
+
 						const endDate = candidate?.currentPeriodEnd ?? null;
 						const mail =
 							t.kind === "pre_expiry"
@@ -82,19 +112,14 @@ export const Route = createFileRoute("/api/cron/billing")({
 							subject: mail.subject,
 							html: mail.html,
 						});
-						if (!ok) continue; // best-effort: skip, never abort the batch
+						if (!ok) {
+							failed += 1;
+							continue; // best-effort: skip, never abort the batch
+						}
 
 						sent += 1;
-						if (candidate?.subscriptionId) {
-							await db
-								.update(subscriptions)
-								.set({
-									reminderCount: sql`${subscriptions.reminderCount} + 1`,
-									updatedAt: new Date(),
-								})
-								.where(eq(subscriptions.id, candidate.subscriptionId));
-						}
 					} catch (targetErr) {
+						failed += 1;
 						console.error(
 							`[cron/billing] failed sending reminder to ${t.email}:`,
 							targetErr,
@@ -102,7 +127,7 @@ export const Route = createFileRoute("/api/cron/billing")({
 					}
 				}
 
-				return Response.json({ ok: true, sent });
+				return Response.json({ ok: true, sent, failed, skipped });
 			},
 		},
 	},
