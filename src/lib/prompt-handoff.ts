@@ -23,9 +23,60 @@ interface PendingPrdPrompt {
 	displayMessage?: string;
 }
 
-function getStorage() {
-	if (typeof window === "undefined") return null;
-	return window.sessionStorage;
+interface SafeStorage {
+	getItem: (key: string) => string | null;
+	setItem: (key: string, value: string) => void;
+	removeItem: (key: string) => void;
+}
+
+// sessionStorage access throws in blocked-storage/privacy mode, on quota
+// exhaustion, or when the getter itself is revoked. Every touchpoint goes
+// through this wrapper so persistence degrades to a no-op instead of
+// crashing navigation and submit flows.
+function getStorage(): SafeStorage | null {
+	try {
+		if (typeof window === "undefined") return null;
+		const raw = window.sessionStorage;
+		if (!raw) return null;
+		return {
+			getItem: (key) => {
+				try {
+					return raw.getItem(key);
+				} catch {
+					return null;
+				}
+			},
+			setItem: (key, value) => {
+				try {
+					raw.setItem(key, value);
+				} catch {
+					/* best-effort persistence */
+				}
+			},
+			removeItem: (key) => {
+				try {
+					raw.removeItem(key);
+				} catch {
+					/* already gone or unremovable */
+				}
+			},
+		};
+	} catch {
+		return null;
+	}
+}
+
+// Timestamps from storage are user-controlled: require finite values and
+// reject future times (past a small clock-skew allowance), otherwise a
+// tampered createdAt defeats stale-prompt expiry.
+const CLOCK_SKEW_ALLOWANCE_MS = 60_000;
+
+function isPlausibleTimestamp(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isFinite(value) &&
+		value <= Date.now() + CLOCK_SKEW_ALLOWANCE_MS
+	);
 }
 
 export function saveSetupPrompt(prompt: string) {
@@ -47,11 +98,13 @@ export function getSetupPrompt(): string {
 
 	try {
 		const parsed = JSON.parse(raw) as Partial<SetupPromptPayload>;
-		if (!parsed.prompt) return "";
+		if (!parsed.prompt || typeof parsed.prompt !== "string") return "";
 
-		// Reject expired prompts
+		// Reject expired prompts — and any prompt whose timestamp is not
+		// plausible (non-finite or future), which would otherwise bypass
+		// the expiry check entirely.
 		if (
-			parsed.createdAt &&
+			!isPlausibleTimestamp(parsed.createdAt) ||
 			Date.now() - parsed.createdAt > SETUP_PROMPT_MAX_AGE_MS
 		) {
 			storage?.removeItem(SETUP_PROMPT_KEY);
@@ -91,13 +144,20 @@ export function consumePendingPrdPrompt(): PendingPrdPrompt | null {
 
 	try {
 		const parsed = JSON.parse(raw) as Partial<PendingPrdPrompt>;
-		if (!parsed.prompt || !parsed.mode) return null;
+		if (!parsed.prompt || typeof parsed.prompt !== "string") return null;
+		// Tampered sessionStorage could carry any mode string and branch
+		// consumers into the wrong flow — accept only known modes.
+		if (parsed.mode !== "auto" && parsed.mode !== "chat") return null;
+		if (!isPlausibleTimestamp(parsed.createdAt)) return null;
 
 		return {
 			prompt: parsed.prompt,
 			mode: parsed.mode,
-			createdAt: parsed.createdAt || Date.now(),
-			displayMessage: parsed.displayMessage,
+			createdAt: parsed.createdAt,
+			displayMessage:
+				typeof parsed.displayMessage === "string"
+					? parsed.displayMessage
+					: undefined,
 		};
 	} catch {
 		return null;
@@ -161,15 +221,62 @@ export function saveAskState(state: AskState) {
 	getStorage()?.setItem(ASK_STATE_KEY, JSON.stringify(state));
 }
 
-/** Read-only restore. Returns null if missing or for a different project. */
+const ASK_QUESTION_TYPES = new Set(["select", "text", "multiselect"]);
+const ASK_PLATFORMS = new Set(["web", "mobile"]);
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((v) => typeof v === "string");
+}
+
+/** Read-only restore. Returns null if missing, corrupt, or for a different
+ *  project. The stored value is fully validated — a tampered payload must
+ *  not inject bad sessions, question shapes, or enum values into the flow. */
 export function getAskState(projectId: string): AskState | null {
 	const storage = getStorage();
 	const raw = storage?.getItem(ASK_STATE_KEY);
 	if (!raw) return null;
 	try {
-		const parsed = JSON.parse(raw) as AskState;
-		if (!parsed || parsed.projectId !== projectId) return null;
-		return parsed;
+		const parsed: unknown = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+			return null;
+		const p = parsed as Record<string, unknown>;
+		if (p.projectId !== projectId) return null;
+		if (typeof p.prompt !== "string") return null;
+		if (typeof p.platform !== "string" || !ASK_PLATFORMS.has(p.platform))
+			return null;
+		if (p.language !== undefined && p.language !== "id" && p.language !== "en")
+			return null;
+		if (p.session !== 1 && p.session !== 2) return null;
+		if (!Array.isArray(p.questions)) return null;
+		for (const q of p.questions) {
+			if (!q || typeof q !== "object" || Array.isArray(q)) return null;
+			const qq = q as Record<string, unknown>;
+			if (typeof qq.id !== "string" || typeof qq.question !== "string")
+				return null;
+			if (typeof qq.type !== "string" || !ASK_QUESTION_TYPES.has(qq.type))
+				return null;
+			if (qq.options !== undefined && !isStringArray(qq.options)) return null;
+		}
+		if (!p.nonTechAnswers || typeof p.nonTechAnswers !== "object") return null;
+		for (const a of Object.values(
+			p.nonTechAnswers as Record<string, unknown>,
+		)) {
+			if (!a || typeof a !== "object" || Array.isArray(a)) return null;
+			const aa = a as Record<string, unknown>;
+			if (
+				typeof aa.value !== "string" ||
+				typeof aa.isCustom !== "boolean" ||
+				typeof aa.skipped !== "boolean" ||
+				(aa.values !== undefined && !isStringArray(aa.values))
+			)
+				return null;
+		}
+		if (!isStringArray(p.skippedTech)) return null;
+		if (!p.techAnswers || typeof p.techAnswers !== "object") return null;
+		for (const v of Object.values(p.techAnswers as Record<string, unknown>)) {
+			if (v !== undefined && typeof v !== "string") return null;
+		}
+		return parsed as AskState;
 	} catch {
 		storage?.removeItem(ASK_STATE_KEY);
 		return null;
@@ -179,15 +286,39 @@ export function getAskState(projectId: string): AskState | null {
 /* ---------- PRD chat follow-up draft (survives refresh) ---------- */
 const PRD_DRAFT_MAP_KEY = "prdfy:prd-drafts";
 
+const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isSafeMapKey(key: string): boolean {
+	return (
+		typeof key === "string" &&
+		key.length > 0 &&
+		key.length <= 128 &&
+		!DANGEROUS_KEYS.has(key)
+	);
+}
+
+function emptyDraftMap(): Record<string, string> {
+	return Object.create(null);
+}
+
 function readPrdDraftMap(): Record<string, string> {
 	const storage = getStorage();
 	const raw = storage?.getItem(PRD_DRAFT_MAP_KEY);
-	if (!raw) return {};
+	if (!raw) return emptyDraftMap();
 	try {
-		const parsed = JSON.parse(raw);
-		return parsed && typeof parsed === "object" ? parsed : {};
+		const parsed: unknown = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+			return emptyDraftMap();
+		// Null-prototype map + own string values only: a tampered payload
+		// must not be able to set __proto__ or smuggle non-string drafts.
+		// (A plain {} literal would expose Object.prototype on __proto__ reads.)
+		const out: Record<string, string> = Object.create(null);
+		for (const [key, value] of Object.entries(parsed)) {
+			if (isSafeMapKey(key) && typeof value === "string") out[key] = value;
+		}
+		return out;
 	} catch {
-		return {};
+		return emptyDraftMap();
 	}
 }
 
@@ -195,7 +326,7 @@ function readPrdDraftMap(): Record<string, string> {
  *  between projects. Tab-scoped (sessionStorage): a draft is session work. */
 export function savePrdDraft(projectId: string, draft: string) {
 	const storage = getStorage();
-	if (!storage) return;
+	if (!storage || !isSafeMapKey(projectId)) return;
 	const all = readPrdDraftMap();
 	if (!draft) {
 		delete all[projectId];
@@ -207,6 +338,7 @@ export function savePrdDraft(projectId: string, draft: string) {
 
 /** Read-only restore. Returns "" if missing for this project. */
 export function getPrdDraft(projectId: string): string {
+	if (!isSafeMapKey(projectId)) return "";
 	return readPrdDraftMap()[projectId] ?? "";
 }
 
@@ -256,14 +388,27 @@ export function saveOnboardingState(state: OnboardingState) {
 	getStorage()?.setItem(ONBOARDING_STATE_KEY, JSON.stringify(state));
 }
 
+const ONBOARDING_TOTAL_STEPS = 3;
+
 export function getOnboardingState(): OnboardingState | null {
 	const storage = getStorage();
 	const raw = storage?.getItem(ONBOARDING_STATE_KEY);
 	if (!raw) return null;
 	try {
-		const parsed = JSON.parse(raw) as OnboardingState;
-		if (!parsed || typeof parsed.step !== "number") return null;
-		return parsed;
+		const parsed: unknown = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+			return null;
+		const p = parsed as Record<string, unknown>;
+		if (
+			!Number.isInteger(p.step) ||
+			(p.step as number) < 1 ||
+			(p.step as number) > ONBOARDING_TOTAL_STEPS
+		)
+			return null;
+		if (typeof p.fullName !== "string" || typeof p.role !== "string")
+			return null;
+		if (!isStringArray(p.goals)) return null;
+		return parsed as OnboardingState;
 	} catch {
 		storage?.removeItem(ONBOARDING_STATE_KEY);
 		return null;
@@ -309,7 +454,14 @@ export function consumeResumeIntent(
 	storage?.removeItem(RESUME_INTENT_KEY);
 	try {
 		const parsed = JSON.parse(raw) as Partial<ResumeIntentPayload>;
-		if (!parsed.projectId || !parsed.stage || !parsed.createdAt) return null;
+		if (!parsed.projectId || typeof parsed.projectId !== "string") return null;
+		if (
+			parsed.stage !== "prd" &&
+			parsed.stage !== "ac" &&
+			parsed.stage !== "task"
+		)
+			return null;
+		if (!isPlausibleTimestamp(parsed.createdAt)) return null;
 		if (parsed.projectId !== projectId) return null;
 		if (Date.now() - parsed.createdAt > RESUME_INTENT_MAX_AGE_MS) return null;
 		return parsed.stage;

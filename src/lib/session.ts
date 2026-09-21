@@ -54,6 +54,18 @@ export function isAdmin(user: unknown): boolean {
 	return false;
 }
 
+// Minimal identity shape safe to serialize into client-bundled routes.
+// Never return the full auth user record: it carries server-only fields
+// (isAdmin, bannedAt, timestamps) that must not become client-visible.
+export interface SessionIdentity {
+	id: string;
+	email: string;
+}
+
+function toIdentity(user: { id: string; email: string }): SessionIdentity {
+	return { id: user.id, email: user.email };
+}
+
 // Throws Unauthorized when no session - for guarded server fns.
 export const requireUser = createServerOnlyFn(async (headers?: Headers) => {
 	const h = headers ?? (await getRequestHeadersServer());
@@ -68,9 +80,9 @@ export const requireUser = createServerOnlyFn(async (headers?: Headers) => {
  * client-bundled so they can't import getRequestHeaders directly - call this.
  */
 export const requireUserServer = createServerFn({ method: "GET" }).handler(
-	async () => {
+	async (): Promise<SessionIdentity> => {
 		const h = await getRequestHeadersServer();
-		return requireUser(h);
+		return toIdentity(await requireUser(h));
 	},
 );
 
@@ -84,9 +96,9 @@ export const requireAdmin = createServerOnlyFn(async (headers?: Headers) => {
 });
 
 export const requireAdminServer = createServerFn({ method: "GET" }).handler(
-	async () => {
+	async (): Promise<SessionIdentity> => {
 		const h = await getRequestHeadersServer();
-		return requireAdmin(h);
+		return toIdentity(await requireAdmin(h));
 	},
 );
 
