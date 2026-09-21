@@ -31,21 +31,32 @@ export const Route = createFileRoute("/api/v1/projects/$id/ac")({
 				if (!(await verifyProjectOwnership(auth.userId, projectId)))
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
-				const [latest] = await db
-					.select({ content: acVersions.content, version: acVersions.version })
-					.from(acVersions)
-					.where(eq(acVersions.projectId, projectId))
-					.orderBy(desc(acVersions.version))
-					.limit(1);
+				try {
+					const [latest] = await db
+						.select({
+							content: acVersions.content,
+							version: acVersions.version,
+						})
+						.from(acVersions)
+						.where(eq(acVersions.projectId, projectId))
+						.orderBy(desc(acVersions.version))
+						.limit(1);
 
-				if (!latest)
-					return Response.json({ error: "AC not found" }, { status: 404 });
+					if (!latest)
+						return Response.json({ error: "AC not found" }, { status: 404 });
 
-				return Response.json({
-					projectId,
-					content: latest.content,
-					version: latest.version,
-				});
+					return Response.json({
+						projectId,
+						content: latest.content,
+						version: latest.version,
+					});
+				} catch (e) {
+					console.error("v1 AC detail failed:", e);
+					return Response.json(
+						{ error: "Failed to load AC" },
+						{ status: 500 },
+					);
+				}
 			},
 		},
 	},

@@ -46,19 +46,53 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 				if (!(await verifyProjectOwnership(auth.userId, projectId)))
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
-				const [taskRows, acRows] = await Promise.all([
-					db
-						.select()
-						.from(tasks)
-						.where(eq(tasks.projectId, projectId))
-						.orderBy(asc(tasks.order)),
-					db
-						.select({ createdAt: acVersions.createdAt })
-						.from(acVersions)
-						.where(eq(acVersions.projectId, projectId))
-						.orderBy(desc(acVersions.version))
-						.limit(1),
-				]);
+				let taskRows: Array<{
+					id: string;
+					title: string;
+					description: string | null;
+					status: string | null;
+					featureName: string | null;
+					subtasks: unknown;
+					dependencies: unknown;
+					startedAt: Date | null;
+					completedAt: Date | null;
+					createdAt: Date | null;
+				}>;
+				let acRows: Array<{ createdAt: Date | null }>;
+				try {
+					[taskRows, acRows] = await Promise.all([
+						// Explicit column contract: never serialize whole rows —
+						// future internal columns must not leak into the API.
+						db
+							.select({
+								id: tasks.id,
+								title: tasks.title,
+								description: tasks.description,
+								status: tasks.status,
+								featureName: tasks.featureName,
+								subtasks: tasks.subtasks,
+								dependencies: tasks.dependencies,
+								startedAt: tasks.startedAt,
+								completedAt: tasks.completedAt,
+								createdAt: tasks.createdAt,
+							})
+							.from(tasks)
+							.where(eq(tasks.projectId, projectId))
+							.orderBy(asc(tasks.order)),
+						db
+							.select({ createdAt: acVersions.createdAt })
+							.from(acVersions)
+							.where(eq(acVersions.projectId, projectId))
+							.orderBy(desc(acVersions.version))
+							.limit(1),
+					]);
+				} catch (e) {
+					console.error("v1 kanban failed:", e);
+					return Response.json(
+						{ error: "Failed to load kanban" },
+						{ status: 500 },
+					);
+				}
 
 				const columns: Record<string, TaskCard[]> = {
 					pending: [],

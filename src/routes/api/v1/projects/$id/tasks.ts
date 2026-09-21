@@ -60,19 +60,50 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 						: null;
 				};
 
-				const rows = await db
-					.select()
-					.from(tasks)
-					.where(
-						statusFilter
-							? and(
-									eq(tasks.projectId, projectId),
-									eq(tasks.status, statusFilter),
-								)
-							: eq(tasks.projectId, projectId),
-					)
-					.orderBy(asc(tasks.order));
-				const acMarkdown = await getLatestAcContent(projectId);
+				let rows: Array<{
+					id: string;
+					title: string;
+					description: string | null;
+					status: string | null;
+					featureName: string | null;
+					startedAt: Date | null;
+					completedAt: Date | null;
+					dependencies: unknown;
+					subtasks: unknown;
+				}>;
+				let acMarkdown: string | null;
+				try {
+					// Explicit column contract: never serialize whole rows.
+					rows = await db
+						.select({
+							id: tasks.id,
+							title: tasks.title,
+							description: tasks.description,
+							status: tasks.status,
+							featureName: tasks.featureName,
+							startedAt: tasks.startedAt,
+							completedAt: tasks.completedAt,
+							dependencies: tasks.dependencies,
+							subtasks: tasks.subtasks,
+						})
+						.from(tasks)
+						.where(
+							statusFilter
+								? and(
+										eq(tasks.projectId, projectId),
+										eq(tasks.status, statusFilter),
+									)
+								: eq(tasks.projectId, projectId),
+						)
+						.orderBy(asc(tasks.order));
+					acMarkdown = await getLatestAcContent(projectId);
+				} catch (e) {
+					console.error("v1 tasks failed:", e);
+					return Response.json(
+						{ error: "Failed to load tasks" },
+						{ status: 500 },
+					);
+				}
 
 				return Response.json({
 					tasks: rows.map((t) => ({

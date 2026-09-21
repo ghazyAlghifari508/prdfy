@@ -32,41 +32,73 @@ export const Route = createFileRoute("/api/v1/projects/$id")({
 				if (!(await verifyProjectOwnership(auth.userId, projectId)))
 					return Response.json({ error: "Project not found" }, { status: 404 });
 
-				const [project, prdContent, taskRows, prdVer] = await Promise.all([
-					db
-						.select({
-							id: projects.id,
-							name: projects.name,
-							step: projects.step,
-						})
-						.from(projects)
-						.where(eq(projects.id, projectId))
-						.limit(1),
-					getLatestPrdContent(projectId),
-					db
-						.select()
-						.from(tasks)
-						.where(eq(tasks.projectId, projectId))
-						.orderBy(asc(tasks.order)),
-					db
-						.select({ version: prdVersions.version })
-						.from(prdVersions)
-						.where(eq(prdVersions.projectId, projectId))
-						.orderBy(desc(prdVersions.version))
-						.limit(1),
-				]);
+				try {
+					const [project, prdContent, taskRows, prdVer] = await Promise.all([
+						db
+							.select({
+								id: projects.id,
+								name: projects.name,
+								step: projects.step,
+							})
+							.from(projects)
+							.where(eq(projects.id, projectId))
+							.limit(1),
+						getLatestPrdContent(projectId),
+						db
+							.select({
+								id: tasks.id,
+								title: tasks.title,
+								description: tasks.description,
+								status: tasks.status,
+								priority: tasks.priority,
+								assignee: tasks.assignee,
+								dependencies: tasks.dependencies,
+								subtasks: tasks.subtasks,
+								order: tasks.order,
+								featureName: tasks.featureName,
+								startedAt: tasks.startedAt,
+								completedAt: tasks.completedAt,
+								createdAt: tasks.createdAt,
+								updatedAt: tasks.updatedAt,
+							})
+							.from(tasks)
+							.where(eq(tasks.projectId, projectId))
+							.orderBy(asc(tasks.order)),
+						db
+							.select({ version: prdVersions.version })
+							.from(prdVersions)
+							.where(eq(prdVersions.projectId, projectId))
+							.orderBy(desc(prdVersions.version))
+							.limit(1),
+					]);
 
-				return Response.json({
-					id: project[0]?.id,
-					name: project[0]?.name,
-					step: project[0]?.step,
-					prd: prdContent
-						? { content: prdContent, version: prdVer[0]?.version ?? 1 }
-						: null,
-					ac: null,
-					tasks: taskRows,
-					subtasks: [],
-				});
+					// The project passed ownership but may have been deleted
+					// between the checks: never return a 200 with undefined id.
+					const row = project[0];
+					if (!row)
+						return Response.json(
+							{ error: "Project not found" },
+							{ status: 404 },
+						);
+
+					return Response.json({
+						id: row.id,
+						name: row.name,
+						step: row.step,
+						prd: prdContent
+							? { content: prdContent, version: prdVer[0]?.version ?? 1 }
+							: null,
+						ac: null,
+						tasks: taskRows,
+						subtasks: [],
+					});
+				} catch (e) {
+					console.error("v1 project detail failed:", e);
+					return Response.json(
+						{ error: "Failed to load project" },
+						{ status: 500 },
+					);
+				}
 			},
 		},
 	},
