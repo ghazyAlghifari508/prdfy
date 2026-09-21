@@ -11,7 +11,15 @@ import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
 export const syncPaymentStatus = createServerFn({ method: "POST" })
-	.validator((orderId: string) => orderId)
+	.validator((orderId: string) => {
+		if (
+			typeof orderId !== "string" ||
+			!/^[A-Za-z0-9_-]{1,128}$/.test(orderId)
+		) {
+			throw new Error("Invalid order ID format");
+		}
+		return orderId;
+	})
 	.handler(async ({ data: orderId }) => {
 		const user = await requireUser(getRequestHeaders());
 		const { db } = await import("@/db");
@@ -48,12 +56,28 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 		);
 		const gateway = getMidtransConfig();
 		const authString = midtransAuthHeader(gateway.serverKey);
-		const response = await fetch(`${gateway.apiBaseUrl}/${orderId}/status`, {
-			headers: {
-				Authorization: `Basic ${authString}`,
-				"Content-Type": "application/json",
-			},
-		});
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 10_000);
+		let response: Response;
+		try {
+			response = await fetch(
+				`${gateway.apiBaseUrl}/${encodeURIComponent(orderId)}/status`,
+				{
+					headers: {
+						Authorization: `Basic ${authString}`,
+						"Content-Type": "application/json",
+					},
+					signal: controller.signal,
+				},
+			);
+		} catch (err) {
+			if (err instanceof DOMException && err.name === "AbortError") {
+				throw new Error("Midtrans status request timed out");
+			}
+			throw err;
+		} finally {
+			clearTimeout(timeout);
+		}
 		if (!response.ok) throw new Error("Failed to fetch status from Midtrans");
 
 		const statusData = await response.json();
@@ -69,7 +93,10 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 				statusData.fraud_status &&
 				statusData.fraud_status !== "accept"
 			) {
-				return { success: false, status: statusData.transaction_status as string };
+				return {
+					success: false,
+					status: statusData.transaction_status as string,
+				};
 			}
 			const result = await applyOrderSuccess(orderId);
 			return { success: true, updated: true, plan: result?.plan };
@@ -93,31 +120,37 @@ export const cancelSubscription = createServerFn({ method: "POST" }).handler(
 		const now = new Date();
 		const period = computeFreeRolloverPeriod(now);
 
-		const [row] = await db
-			.select({ id: subscriptions.id })
-			.from(subscriptions)
-			.where(eq(subscriptions.userId, user.id))
-			.orderBy(desc(subscriptions.createdAt))
-			.limit(1);
-		if (!row) return { success: false, message: "Langganan tidak ditemukan." };
+		const result = await db.transaction(async (tx) => {
+			const [row] = await tx
+				.select({ id: subscriptions.id })
+				.from(subscriptions)
+				.where(eq(subscriptions.userId, user.id))
+				.orderBy(desc(subscriptions.createdAt))
+				.for("update")
+				.limit(1);
+			if (!row)
+				return { success: false, message: "Langganan tidak ditemukan." };
 
-		await db
-			.update(subscriptions)
-			.set({
-				plan: "free",
-				status: "active",
-				cancelledAt: now,
-				currentPeriodStart: period.start,
-				currentPeriodEnd: period.end,
-				credits: PLAN_CREDITS.free,
-				creditsUsed: 0,
-				updatedAt: now,
-			})
-			.where(eq(subscriptions.id, row.id));
+			await tx
+				.update(subscriptions)
+				.set({
+					plan: "free",
+					status: "active",
+					cancelledAt: now,
+					currentPeriodStart: period.start,
+					currentPeriodEnd: period.end,
+					credits: PLAN_CREDITS.free,
+					creditsUsed: 0,
+					updatedAt: now,
+				})
+				.where(eq(subscriptions.id, row.id));
 
-		return {
-			success: true,
-			message: "Langganan dibatalkan. Akunmu kembali ke paket Free.",
-		};
+			return {
+				success: true,
+				message: "Langganan dibatalkan. Akunmu kembali ke paket Free.",
+			};
+		});
+
+		return result;
 	},
 );

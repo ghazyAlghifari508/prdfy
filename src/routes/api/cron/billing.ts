@@ -27,9 +27,8 @@ export const Route = createFileRoute("/api/cron/billing")({
 				const secret =
 					process.env.CRON_BILLING_SECRET ?? process.env.CRON_SECRET;
 				const header = request.headers.get("authorization") ?? "";
-				const provided = header.startsWith("Bearer ")
-					? header.slice("Bearer ".length)
-					: "";
+				const match = /^Bearer\s+(.+)$/i.exec(header);
+				const provided = match?.[1]?.trim() ?? "";
 				if (!secret || !provided || !secretsMatch(provided, secret)) {
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
@@ -39,6 +38,7 @@ export const Route = createFileRoute("/api/cron/billing")({
 				// subscriptions row mutated in place since signup).
 				const candidates = await db
 					.select({
+						subscriptionId: subscriptions.id,
 						userId: subscriptions.userId,
 						email: users.email,
 						plan: subscriptions.plan,
@@ -69,33 +69,37 @@ export const Route = createFileRoute("/api/cron/billing")({
 				let sent = 0;
 
 				for (const t of targets) {
-					let endDate: Date | null = null;
-					for (const r of rows) {
-						if (r.userId === t.userId) {
-							endDate = r.currentPeriodEnd;
-							break;
+					try {
+						const candidate = candidates.find((c) => c.userId === t.userId);
+						const endDate = candidate?.currentPeriodEnd ?? null;
+						const mail =
+							t.kind === "pre_expiry"
+								? preExpiryNoticeEmail(t.plan, endDate ?? new Date())
+								: pausedReminderEmail(t.plan, t.daysLate);
+
+						const ok = await sendEmail({
+							to: t.email,
+							subject: mail.subject,
+							html: mail.html,
+						});
+						if (!ok) continue; // best-effort: skip, never abort the batch
+
+						sent += 1;
+						if (candidate?.subscriptionId) {
+							await db
+								.update(subscriptions)
+								.set({
+									reminderCount: sql`${subscriptions.reminderCount} + 1`,
+									updatedAt: new Date(),
+								})
+								.where(eq(subscriptions.id, candidate.subscriptionId));
 						}
+					} catch (targetErr) {
+						console.error(
+							`[cron/billing] failed sending reminder to ${t.email}:`,
+							targetErr,
+						);
 					}
-					const mail =
-						t.kind === "pre_expiry"
-							? preExpiryNoticeEmail(t.plan, endDate ?? new Date())
-							: pausedReminderEmail(t.plan, t.daysLate);
-
-					const ok = await sendEmail({
-						to: t.email,
-						subject: mail.subject,
-						html: mail.html,
-					});
-					if (!ok) continue; // best-effort: skip, never abort the batch
-
-					sent += 1;
-					await db
-						.update(subscriptions)
-						.set({
-							reminderCount: sql`${subscriptions.reminderCount} + 1`,
-							updatedAt: new Date(),
-						})
-						.where(eq(subscriptions.userId, t.userId));
 				}
 
 				return Response.json({ ok: true, sent });

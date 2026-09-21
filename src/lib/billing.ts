@@ -62,7 +62,12 @@ export function resolveSubscriptionState(
 	const periodEnd = sub?.currentPeriodEnd ?? null;
 	const leftover = Math.max(0, credits - creditsUsed - creditsReserved);
 
-	if (!sub || plan === "free" || sub.cancelledAt != null) {
+	if (
+		!sub ||
+		plan === "free" ||
+		sub.cancelledAt != null ||
+		(sub.status && sub.status !== "active")
+	) {
 		return {
 			state: "free_active",
 			effectivePlan: "free",
@@ -81,7 +86,7 @@ export function resolveSubscriptionState(
 		};
 	}
 
-	if (now.getTime() <= periodEnd.getTime()) {
+	if (now.getTime() < periodEnd.getTime()) {
 		return {
 			state: "active_paid",
 			effectivePlan: plan,

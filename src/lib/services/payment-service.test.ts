@@ -274,4 +274,13 @@ describe("payment service database contracts", () => {
 		expect(migration).toContain('\'{"reason":"opening_balance"}\'::jsonb');
 		expect(migration).toContain("NOT EXISTS");
 	});
+
+	it("enforces subscription row-level lock and plan validation in applyPaymentSuccess", async () => {
+		const serviceSource = await readFile(
+			new URL("./payment-service.ts", import.meta.url),
+			"utf8",
+		);
+		expect(serviceSource).toContain('.for("update")');
+		expect(serviceSource).toContain("payment.plan !== derivedPlan");
+	});
 });

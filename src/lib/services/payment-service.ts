@@ -280,11 +280,18 @@ export async function applyPaymentSuccess(orderId: string) {
 		if (!payment) return null;
 		if (payment.status === "success") return { plan: payment.plan as Plan };
 
-		const plan = planFromAmount(payment.amount ?? 0);
+		const derivedPlan = planFromAmount(payment.amount ?? 0);
+		if (payment.plan && payment.plan !== derivedPlan) {
+			throw new Error(
+				`Payment plan "${payment.plan}" does not match amount tier "${derivedPlan}"`,
+			);
+		}
+		const plan = derivedPlan;
 		const now = new Date();
 
-		// Re-read the CURRENT period end so an early renewal extends from the
-		// still-active period instead of overlapping it (spec §6.1).
+		// Re-read the CURRENT period end with row lock so an early renewal
+		// extends from the still-active period and concurrent orders cannot
+		// overwrite each other's period or credits (spec §6.1).
 		const [existingSub] = await tx
 			.select({
 				id: subscriptions.id,
@@ -293,6 +300,7 @@ export async function applyPaymentSuccess(orderId: string) {
 			.from(subscriptions)
 			.where(eq(subscriptions.userId, payment.userId))
 			.orderBy(desc(subscriptions.createdAt))
+			.for("update")
 			.limit(1);
 
 		const grant = computePurchaseGrant({
