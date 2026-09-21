@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 // Server-import exception: top-level `@/db` and schema imports are correct
 // here — server handlers only, no client component (neighboring
 // `/api/codebase` pattern). Never import this module from client code.
@@ -45,6 +45,11 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 				} catch {
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
+				// The whole operational path runs guarded: subscription,
+				// project, session, snapshot, and analysis reads (plus lazy
+				// expiry writes) must surface the documented JSON error
+				// contract, never an uncontrolled framework error.
+				try {
 				const { projectId } = params;
 
 				const [sub] = await db
@@ -121,27 +126,52 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					);
 
 				// Lazy expiry so polling converges on the terminal state.
+				// Conditional on the still-expirable state: a concurrent
+				// worker may have moved the session to ready/failed/consumed
+				// after our read, and this write must not clobber that.
 				let status = session.status as CodebaseSyncStatus;
+				let sessionUpdatedAt = session.updatedAt;
 				const usability = getSessionUsability(session);
 				if (!usability.usable && usability.code === "SYNC_SESSION_EXPIRED") {
-					status = "expired";
-					await db
+					const [expired] = await db
 						.update(codebaseSyncSessions)
 						.set({ status: "expired", updatedAt: new Date() })
-						.where(eq(codebaseSyncSessions.id, session.id));
+						.where(
+							and(
+								eq(codebaseSyncSessions.id, session.id),
+								isNull(codebaseSyncSessions.consumedAt),
+								notInArray(codebaseSyncSessions.status, [
+									"ready",
+									"failed",
+									"expired",
+								]),
+							),
+						)
+						.returning({ updatedAt: codebaseSyncSessions.updatedAt });
+					if (expired) {
+						status = "expired";
+						sessionUpdatedAt = expired.updatedAt;
+					}
 				}
 
-				const [snapshot] = await db
-					.select({
-						id: codebaseSnapshots.id,
-						fileCount: codebaseSnapshots.fileCount,
-						excludedCount: codebaseSnapshots.excludedCount,
-						createdAt: codebaseSnapshots.createdAt,
-					})
-					.from(codebaseSnapshots)
-					.where(eq(codebaseSnapshots.syncSessionId, session.id))
-					.orderBy(desc(codebaseSnapshots.createdAt))
-					.limit(1);
+				// Artifacts are only attached for usable or successfully-ready
+				// sessions. A failed/expired session must not serve a stale
+				// snapshot or a ready analysis that polling could mistake for
+				// the current sync's success.
+				const showArtifacts = status !== "failed" && status !== "expired";
+				const [snapshot] = showArtifacts
+					? await db
+							.select({
+								id: codebaseSnapshots.id,
+								fileCount: codebaseSnapshots.fileCount,
+								excludedCount: codebaseSnapshots.excludedCount,
+								createdAt: codebaseSnapshots.createdAt,
+							})
+							.from(codebaseSnapshots)
+							.where(eq(codebaseSnapshots.syncSessionId, session.id))
+							.orderBy(desc(codebaseSnapshots.createdAt))
+							.limit(1)
+					: [];
 
 				let analysisId: string | null = null;
 				let analysisStatus: "pending" | "ready" | "failed" | undefined;
@@ -198,16 +228,32 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					analysisId,
 					analysisStatus,
 					createdAt: toIso(session.createdAt),
-					updatedAt: toIso(session.updatedAt),
+					updatedAt: toIso(sessionUpdatedAt),
 					expiresAt: toIso(session.expiresAt),
 				};
-				const parsed = syncStatusResponseSchema.safeParse(response);
+				let parsed: ReturnType<typeof syncStatusResponseSchema.safeParse>;
+				try {
+					parsed = syncStatusResponseSchema.safeParse(response);
+				} catch (e) {
+					console.error("sync status serialization failed:", e);
+					return Response.json(
+						{ error: "Gagal membaca status sync", code: "SYNC_FAILED" },
+						{ status: 500 },
+					);
+				}
 				if (!parsed.success)
 					return Response.json(
 						{ error: "Gagal membaca status sync", code: "SYNC_FAILED" },
 						{ status: 500 },
 					);
 				return Response.json(parsed.data);
+				} catch (e) {
+					console.error("sync status handler failed:", e);
+					return Response.json(
+						{ error: "Gagal membaca status sync", code: "SYNC_FAILED" },
+						{ status: 500 },
+					);
+				}
 			},
 		},
 	},

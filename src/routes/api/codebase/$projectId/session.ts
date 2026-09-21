@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
 // Server-import exception: top-level `@/db`, schema, and `.server` imports
 // are correct here — server handlers only, no client component (neighboring
 // `/api/codebase` pattern). Never import this module from client code.
@@ -8,6 +8,7 @@ import { codebaseSyncSessions, projects, subscriptions } from "@/db/schema";
 import {
 	buildSyncCommand,
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
+	CODEBASE_SYNC_TERMINAL_STATUSES,
 	getSessionUsability,
 	isSyncCapableProject,
 	type SyncPromptPayload,
@@ -307,39 +308,36 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ status: 400 },
 					);
 
-				const existing = await db
-					.select({
-						id: codebaseSyncSessions.id,
-						status: codebaseSyncSessions.status,
-						expiresAt: codebaseSyncSessions.expiresAt,
-						consumedAt: codebaseSyncSessions.consumedAt,
-						projectId: codebaseSyncSessions.projectId,
-						userId: codebaseSyncSessions.userId,
-					})
-					.from(codebaseSyncSessions)
+				// Single set-based revocation: one statement expires every
+				// usable credential, so a concurrent handshake can neither
+				// mint-then-escape nor block behind O(n) round trips. The
+				// predicate mirrors getSessionUsability (unconsumed,
+				// unexpired, non-terminal status).
+				const now = new Date();
+				const revoked = await db
+					.update(codebaseSyncSessions)
+					.set({ status: "expired", consumedAt: now, updatedAt: now })
 					.where(
 						and(
 							eq(codebaseSyncSessions.projectId, projectId),
 							eq(codebaseSyncSessions.userId, user.id),
+							isNull(codebaseSyncSessions.consumedAt),
+							gt(codebaseSyncSessions.expiresAt, now),
+							notInArray(codebaseSyncSessions.status, [
+								...CODEBASE_SYNC_TERMINAL_STATUSES,
+							]),
 						),
-					);
-				const now = new Date();
-				const revoked: string[] = [];
-				for (const row of existing) {
-					if (getSessionUsability(row, now).usable) {
-						await db
-							.update(codebaseSyncSessions)
-							.set({ status: "expired", consumedAt: now, updatedAt: now })
-							.where(eq(codebaseSyncSessions.id, row.id));
-						revoked.push(row.id);
-					}
-				}
+					)
+					.returning({ id: codebaseSyncSessions.id });
 				if (revoked.length === 0)
 					return Response.json(
 						{ error: "Belum ada sync session", code: "NO_SYNC_SESSION" },
 						{ status: 404 },
 					);
-				return Response.json({ revoked: true, sessionIds: revoked });
+				return Response.json({
+					revoked: true,
+					sessionIds: revoked.map((r) => r.id),
+				});
 			},
 		},
 	},
