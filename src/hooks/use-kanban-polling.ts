@@ -49,46 +49,96 @@ export function useKanbanTasks({
 	const [sseFailed, setSseFailed] = useState(false);
 	const [sseLoading, setSseLoading] = useState(true);
 	const refreshInFlight = useRef<Promise<void> | null>(null);
+	const reconnectAttemptsRef = useRef(0);
+	const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
-		if (!enabled || !projectId) return;
+		if (!enabled || !projectId) {
+			setSseData(null);
+			setSseFailed(false);
+			setSseLoading(false);
+			if (reconnectTimerRef.current) {
+				clearTimeout(reconnectTimerRef.current);
+				reconnectTimerRef.current = null;
+			}
+			return;
+		}
+
+		let cancelled = false;
+		let es: EventSource | null = null;
+		reconnectAttemptsRef.current = 0;
 
 		// Reset on project change / re-enable so a fresh project doesn't show stale SSE data.
 		setSseData(null);
 		setSseFailed(false);
 		setSseLoading(true);
 
-		const es = new EventSource(
-			`/api/kanban/stream?projectId=${encodeURIComponent(projectId)}`,
-		);
+		const connect = () => {
+			if (cancelled) return;
+			if (es) {
+				es.close();
+				es = null;
+			}
 
-		es.onmessage = (e) => {
-			try {
-				const parsed = JSON.parse(e.data) as KanbanData;
-				setSseData(parsed);
-				setSseFailed(false);
-				setSseLoading(false);
-				// Sync SSE payload into the query cache so optimistic
-				// `setQueryData(["kanban-tasks", projectId], ...)` mutations
-				// stay visible even while SSE is the primary source.
-				queryClient.setQueryData(["kanban-tasks", projectId], parsed);
-			} catch {
-				// A malformed event means the stream protocol is broken; staying
-				// in loading would hang the board on its skeleton forever.
-				// Fail over to polling, which has error and retry handling.
-				setSseFailed(true);
-				setSseLoading(false);
+			const stream = new EventSource(
+				`/api/kanban/stream?projectId=${encodeURIComponent(projectId)}`,
+			);
+			es = stream;
+
+			stream.onmessage = (e) => {
+				if (cancelled) return;
+				try {
+					const parsed = JSON.parse(e.data) as KanbanData;
+					setSseData(parsed);
+					setSseFailed(false);
+					setSseLoading(false);
+					reconnectAttemptsRef.current = 0;
+					// Sync SSE payload into the query cache so optimistic
+					// `setQueryData(["kanban-tasks", projectId], ...)` mutations
+					// stay visible even while SSE is the primary source.
+					queryClient.setQueryData(["kanban-tasks", projectId], parsed);
+				} catch {
+					// A malformed event means the stream protocol is broken; staying
+					// in loading would hang the board on its skeleton forever.
+					// Fail over to polling, which has error and retry handling.
+					setSseFailed(true);
+					setSseLoading(false);
+					stream.close();
+				}
+			};
+
+			stream.onerror = () => {
+				if (cancelled) return;
+				stream.close();
+				const MAX_RECONNECT_ATTEMPTS = 3;
+				if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+					reconnectAttemptsRef.current += 1;
+					const backoffMs = Math.min(
+						1000 * 2 ** (reconnectAttemptsRef.current - 1),
+						4000,
+					);
+					reconnectTimerRef.current = setTimeout(() => {
+						connect();
+					}, backoffMs);
+				} else {
+					setSseFailed(true);
+					setSseLoading(false);
+				}
+			};
+		};
+
+		connect();
+
+		return () => {
+			cancelled = true;
+			if (reconnectTimerRef.current) {
+				clearTimeout(reconnectTimerRef.current);
+				reconnectTimerRef.current = null;
+			}
+			if (es) {
 				es.close();
 			}
 		};
-
-		es.onerror = () => {
-			setSseFailed(true);
-			setSseLoading(false);
-			es.close();
-		};
-
-		return () => es.close();
 	}, [projectId, enabled, queryClient]);
 
 	// Fallback polling — only active after SSE has failed. Keeps the same

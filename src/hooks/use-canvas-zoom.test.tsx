@@ -147,4 +147,37 @@ describe("useCanvasZoom pan coalescing", () => {
 
 		expect(latest.pan.x).toBe(15);
 	});
+
+	it("resets pan and zoom while cancelling pending gesture RAFs", () => {
+		mount();
+
+		act(() => {
+			latest.startPan(fakePointer(0, 0));
+			latest.updatePan(fakePointer(25, 25));
+			latest.resetZoom();
+		});
+
+		// Flushing any leftover frames after reset must not apply old pointer moves
+		act(() => {
+			flushFrame();
+		});
+
+		expect(latest.pan.x).toBe(0);
+		expect(latest.pan.y).toBe(0);
+		expect(latest.zoom).toBe(1);
+	});
+
+	it("clamps zoom within [minZoom, maxZoom] boundaries", () => {
+		mount();
+
+		act(() => {
+			latest.setZoom(999);
+		});
+		expect(latest.zoom).toBe(latest.maxZoom);
+
+		act(() => {
+			latest.setZoom(-10);
+		});
+		expect(latest.zoom).toBe(latest.minZoom);
+	});
 });

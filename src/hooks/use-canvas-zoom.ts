@@ -21,9 +21,22 @@ export function useCanvasZoom({
 	maxZoom = 1.54,
 	initialZoom = 1,
 }: UseCanvasZoomOptions = {}) {
-	const [zoom, setZoom] = useState(initialZoom);
+	const clampZoom = useCallback(
+		(value: number) => Math.min(maxZoom, Math.max(minZoom, value)),
+		[minZoom, maxZoom],
+	);
+	const [zoom, setZoomState] = useState(() => clampZoom(initialZoom));
 	const [pan, setPan] = useState({ x: 0, y: 0 });
 	const isPanningRef = useRef(false);
+
+	const setZoom = useCallback(
+		(value: number | ((prev: number) => number)) => {
+			setZoomState((prev) =>
+				clampZoom(typeof value === "function" ? value(prev) : value),
+			);
+		},
+		[clampZoom],
+	);
 
 	// Latest pointer position not yet committed + baseline of last applied move.
 	const pendingPointerRef = useRef<{ x: number; y: number } | null>(null);
@@ -58,26 +71,42 @@ export function useCanvasZoom({
 		const factor = pendingZoomFactorRef.current;
 		if (factor === 1) return;
 		pendingZoomFactorRef.current = 1;
-		setZoom((prev) => Math.min(maxZoom, Math.max(minZoom, prev * factor)));
-	}, [minZoom, maxZoom]);
+		setZoom((prev) => prev * factor);
+	}, [setZoom]);
 
 	const zoomIn = useCallback(() => {
-		setZoom((prev) => Math.min(prev * 1.2, maxZoom));
-	}, [maxZoom]);
+		setZoom((prev) => prev * 1.2);
+	}, [setZoom]);
 
 	const zoomOut = useCallback(() => {
-		setZoom((prev) => Math.max(prev / 1.2, minZoom));
-	}, [minZoom]);
+		setZoom((prev) => prev / 1.2);
+	}, [setZoom]);
 
 	const resetZoom = useCallback(() => {
+		if (panRafRef.current !== null) {
+			cancelAnimationFrame(panRafRef.current);
+			panRafRef.current = null;
+		}
+		if (zoomRafRef.current !== null) {
+			cancelAnimationFrame(zoomRafRef.current);
+			zoomRafRef.current = null;
+		}
+		pendingPointerRef.current = null;
+		pendingZoomFactorRef.current = 1;
+		isPanningRef.current = false;
 		setZoom(initialZoom);
 		setPan({ x: 0, y: 0 });
-	}, [initialZoom]);
+	}, [initialZoom, setZoom]);
 
 	const startPan = useCallback((e: React.PointerEvent) => {
 		// Only react to primary button / touch / pen contact.
 		if (e.pointerType === "mouse" && e.buttons !== 1) return;
 		isPanningRef.current = true;
+		pendingPointerRef.current = null;
+		if (panRafRef.current !== null) {
+			cancelAnimationFrame(panRafRef.current);
+			panRafRef.current = null;
+		}
 		// Deltas are measured against this baseline until the next commit.
 		lastAppliedRef.current = { x: e.clientX, y: e.clientY };
 		// ponytail: capture so we keep receiving move events outside the element.

@@ -119,4 +119,34 @@ describe("useKanbanTasks", () => {
 			await second;
 		});
 	});
+
+	it("retries connection on error before falling back to polling", async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal("EventSource", FakeEventSource);
+		const fetchMock = vi.fn(async () => ({
+			ok: true,
+			json: async () => boardPayload,
+		}));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await mount("project-1");
+		expect(FakeEventSource.instances.length).toBe(1);
+
+		// First error -> should schedule retry
+		await act(async () => {
+			FakeEventSource.instances[0].onerror?.();
+		});
+
+		expect(latest?.isError).toBe(false);
+
+		// Advance timer for first backoff (1000ms)
+		await act(async () => {
+			vi.advanceTimersByTime(1000);
+		});
+
+		// Second EventSource instance created
+		expect(FakeEventSource.instances.length).toBe(2);
+
+		vi.useRealTimers();
+	});
 });

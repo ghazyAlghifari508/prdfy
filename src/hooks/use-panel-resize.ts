@@ -25,8 +25,12 @@ export function usePanelResize({
 	minLeft = 140,
 	maxLeft = 500,
 }: UsePanelResizeOptions = {}) {
-	const [rightWidth, setRightWidth] = useState(initialRightWidth);
-	const [leftWidth, setLeftWidth] = useState(initialLeftWidth);
+	const [rightWidth, setRightWidth] = useState(() =>
+		Math.max(minRight, Math.min(initialRightWidth, maxRight)),
+	);
+	const [leftWidth, setLeftWidth] = useState(() =>
+		Math.max(minLeft, Math.min(initialLeftWidth, maxLeft)),
+	);
 	const [isDraggingRight, setIsDraggingRight] = useState(false);
 	const [isDraggingLeft, setIsDraggingLeft] = useState(false);
 
@@ -86,10 +90,10 @@ export function usePanelResize({
 
 	useEffect(() => {
 		if (!(isDraggingRight || isDraggingLeft)) {
-			document.body.style.userSelect = "";
 			return;
 		}
 
+		const previousUserSelect = document.body.style.userSelect;
 		document.body.style.userSelect = "none";
 		document.addEventListener("mousemove", handleMouseMove);
 		document.addEventListener("mouseup", handleMouseUp);
@@ -97,16 +101,28 @@ export function usePanelResize({
 		return () => {
 			document.removeEventListener("mousemove", handleMouseMove);
 			document.removeEventListener("mouseup", handleMouseUp);
-			document.body.style.userSelect = "";
+			document.body.style.userSelect = previousUserSelect;
 		};
 	}, [isDraggingRight, isDraggingLeft, handleMouseMove, handleMouseUp]);
 
 	const onStartDragRight = useCallback(() => {
+		if (draggingLeftRef.current) return;
+		if (rafRef.current !== null) {
+			cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
+		}
+		pendingXRef.current = null;
 		draggingRightRef.current = true;
 		setIsDraggingRight(true);
 	}, []);
 
 	const onStartDragLeft = useCallback(() => {
+		if (draggingRightRef.current) return;
+		if (rafRef.current !== null) {
+			cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
+		}
+		pendingXRef.current = null;
 		draggingLeftRef.current = true;
 		setIsDraggingLeft(true);
 	}, []);
