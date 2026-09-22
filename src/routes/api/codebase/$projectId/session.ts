@@ -201,7 +201,10 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					if (isRetry) {
 						const now = new Date();
 						for (const row of existing) {
-							if (getSessionUsability(row, now).usable) {
+							if (
+								!["uploaded", "analyzing", "ready"].includes(row.status) &&
+								getSessionUsability(row, now).usable
+							) {
 								await tx
 									.update(codebaseSyncSessions)
 									.set({
@@ -214,9 +217,13 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						}
 					} else if (!shouldCreateSyncSession(existing)) {
 						const active = existing.find(
-							(row) => getSessionUsability(row).usable,
+							(row) =>
+								!["uploaded", "analyzing", "ready"].includes(row.status) &&
+								getSessionUsability(row).usable,
 						);
-						return { conflictSessionId: active?.id, inserted: null };
+						if (active) {
+							return { conflictSessionId: active.id, inserted: null };
+						}
 					}
 
 					const [inserted] = await tx

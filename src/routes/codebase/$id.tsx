@@ -5,13 +5,13 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodebaseReview } from "@/components/codebase/codebase-review";
 import { ScreenConnect } from "@/components/codebase/screen-connect";
 import { SyncStatus } from "@/components/codebase/sync-status";
 import { db } from "@/db";
-import { projects } from "@/db/schema";
+import { codebaseAnalyses, codebaseSnapshots, projects } from "@/db/schema";
 import type { AnalysisResponse } from "@/lib/codebase-analysis";
 import {
 	getPendingSyncPayloadKey,
@@ -53,10 +53,42 @@ const loadCodebase = createServerFn({ method: "GET" })
 
 		if (!project) throw new Error("NOT_FOUND");
 
+		const [latestSnapshot] = await db
+			.select({
+				id: codebaseSnapshots.id,
+				status: codebaseSnapshots.status,
+			})
+			.from(codebaseSnapshots)
+			.where(eq(codebaseSnapshots.projectId, project.id))
+			.orderBy(desc(codebaseSnapshots.createdAt))
+			.limit(1);
+
+		const [latestAnalysis] = latestSnapshot
+			? await db
+					.select({
+						id: codebaseAnalyses.id,
+						status: codebaseAnalyses.status,
+					})
+					.from(codebaseAnalyses)
+					.where(eq(codebaseAnalyses.snapshotId, latestSnapshot.id))
+					.orderBy(desc(codebaseAnalyses.createdAt))
+					.limit(1)
+			: [null];
+
+		const initialStep: 1 | 2 | 3 =
+			latestAnalysis?.status === "ready"
+				? 3
+				: latestSnapshot?.status === "uploaded" ||
+					  latestSnapshot?.status === "ready"
+					? 2
+					: 1;
+
 		return {
 			projectId: project.id,
 			projectName: project.name,
 			projectMode: project.projectMode,
+			initialStep,
+			initialSnapshotId: latestSnapshot?.id ?? null,
 		};
 	});
 
@@ -112,12 +144,12 @@ function CodebasePage() {
 	const sessionFailedRef = useRef(false);
 	const pollInFlightRef = useRef(false);
 	const [currentSnapshotId, setCurrentSnapshotId] = useState<string | null>(
-		null,
+		d.initialSnapshotId,
 	);
 	const triggeredForRef = useRef<string | null>(null);
 
 	// Screen switcher state (1: Connect, 2: Syncing, 3: Review)
-	const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
+	const [activeStep, setActiveStep] = useState<1 | 2 | 3>(d.initialStep);
 	const userSelectedStepRef = useRef(false);
 
 	useEffect(() => {
@@ -131,7 +163,7 @@ function CodebasePage() {
 		try {
 			const key = getPendingSyncPayloadKey(d.projectId);
 			raw = sessionStorage.getItem(key);
-			if (raw) sessionStorage.removeItem(key);
+			if (raw && activeStep > 1) sessionStorage.removeItem(key);
 		} catch {
 			return;
 		}
@@ -144,7 +176,7 @@ function CodebasePage() {
 		} catch {
 			// Handled gracefully
 		}
-	}, [d.projectId]);
+	}, [d.projectId, activeStep]);
 
 	const readAnalysis = useCallback(
 		async (snapshotId: string) => {
@@ -252,7 +284,7 @@ function CodebasePage() {
 				triggeredForRef.current !== status.sessionId
 			) {
 				triggeredForRef.current = status.sessionId;
-				void triggerAnalysis();
+				void triggerAnalysis(status.snapshotId ?? undefined);
 				return;
 			}
 			if (
@@ -377,11 +409,19 @@ function CodebasePage() {
 			!analysis &&
 			activeStep === 1 &&
 			!isStarting &&
-			!sessionFailedRef.current
+			!sessionFailedRef.current &&
+			!currentSnapshotId
 		) {
 			void startSession(true);
 		}
-	}, [payload, analysis, activeStep, isStarting, startSession]);
+	}, [
+		payload,
+		analysis,
+		activeStep,
+		isStarting,
+		currentSnapshotId,
+		startSession,
+	]);
 
 	// Compute max step unlocked by real server progress
 	const maxAchievedStep: 1 | 2 | 3 = analysis?.output
