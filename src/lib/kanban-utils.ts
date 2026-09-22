@@ -10,8 +10,9 @@ export type TaskPriorityLevel = "utama" | "penting" | "pendukung";
 export interface PriorityConfig {
 	label: "Utama" | "Penting" | "Pendukung";
 	level: TaskPriorityLevel;
-	badgeClassName: string;
-	dotClassName: string;
+	barCount: 1 | 2 | 3;
+	barClassName: string;
+	textClassName: string;
 }
 
 export function getTaskPriorityConfig(
@@ -26,9 +27,9 @@ export function getTaskPriorityConfig(
 		return {
 			label: "Utama",
 			level: "utama",
-			badgeClassName:
-				"border-amber-600/30 bg-amber-500/10 text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200",
-			dotClassName: "bg-amber-500",
+			barCount: 3,
+			barClassName: "bg-amber-600 dark:bg-amber-400",
+			textClassName: "text-amber-700 dark:text-amber-300 font-medium",
 		};
 	}
 	if (
@@ -39,17 +40,17 @@ export function getTaskPriorityConfig(
 		return {
 			label: "Pendukung",
 			level: "pendukung",
-			badgeClassName:
-				"border-graphite bg-charcoal/50 text-slate dark:border-graphite/80 dark:bg-obsidian/60 dark:text-fog",
-			dotClassName: "bg-slate",
+			barCount: 1,
+			barClassName: "bg-slate-400 dark:bg-zinc-500",
+			textClassName: "text-slate-500 dark:text-zinc-400 font-normal",
 		};
 	}
 	return {
 		label: "Penting",
 		level: "penting",
-		badgeClassName:
-			"border-indigo-500/25 bg-indigo-500/10 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300",
-		dotClassName: "bg-indigo-500",
+		barCount: 2,
+		barClassName: "bg-indigo-500 dark:bg-indigo-400",
+		textClassName: "text-indigo-600 dark:text-indigo-300 font-medium",
 	};
 }
 

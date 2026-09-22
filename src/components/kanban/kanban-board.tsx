@@ -6,6 +6,7 @@ import {
 	ArrowUpDown,
 	Check,
 	ChevronDown,
+	Info,
 	KanbanSquare,
 	Loader2,
 } from "lucide-react";
@@ -17,7 +18,6 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useKanbanTasks } from "@/hooks/use-kanban-polling";
@@ -28,7 +28,6 @@ import {
 } from "@/lib/kanban-utils";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
-import { KanbanBanner } from "./kanban-banner";
 import { KanbanColumn, type KanbanColumnHandle } from "./kanban-column";
 
 interface KanbanBoardProps {
@@ -241,14 +240,80 @@ export function KanbanBoard({
 		>
 			{/* Kanban Header / Navigation bar */}
 			<header className="border-b border-graphite bg-obsidian px-4 sm:px-6 py-3.5 shrink-0">
-				<div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4">
-					<div className="flex items-center gap-3 min-w-0">
-						<KanbanSquare size={20} className="text-indigo shrink-0" />
-						<h1 className="truncate font-inter text-base sm:text-lg font-[510] text-snow">
-							Kanban - {projectName}
-						</h1>
+				<div className="mx-auto flex w-full max-w-[1400px] flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+					<div className="flex flex-col min-w-0">
+						<div className="flex items-center gap-2.5 min-w-0">
+							<KanbanSquare size={18} className="text-indigo shrink-0" />
+							<h1 className="truncate font-inter text-base sm:text-lg font-[600] text-snow">
+								Kanban - {projectName}
+							</h1>
+						</div>
+
+						{/* CLI / Connection status as supporting metadata */}
+						<div className="mt-1 flex items-center gap-1.5 text-xs min-w-0">
+							{staleness === "disconnected" ? (
+								<output className="flex items-center gap-1.5 text-crimson min-w-0">
+									<AlertTriangle
+										size={13}
+										className="shrink-0"
+										aria-hidden="true"
+									/>
+									<span className="truncate">
+										Koneksi terputus · Pastikan server aktif
+									</span>
+									<button
+										type="button"
+										onClick={refetch}
+										disabled={isLoading}
+										className="underline hover:text-snow cursor-pointer text-xs ml-1 shrink-0"
+									>
+										Hubungkan kembali
+									</button>
+								</output>
+							) : staleness === "stale" ? (
+								<output className="flex items-center gap-1.5 text-amber min-w-0">
+									<AlertTriangle
+										size={13}
+										className="shrink-0"
+										aria-hidden="true"
+									/>
+									<span className="truncate">
+										Koneksi lambat · Menampilkan data terakhir
+									</span>
+									<button
+										type="button"
+										onClick={refetch}
+										disabled={isLoading}
+										className="underline hover:text-snow cursor-pointer text-xs ml-1 shrink-0"
+									>
+										Coba lagi
+									</button>
+								</output>
+							) : !hasUpdates ? (
+								<output className="flex items-center gap-1.5 text-fog min-w-0">
+									<Info
+										size={13}
+										className="shrink-0 text-slate"
+										aria-hidden="true"
+									/>
+									<span className="truncate">
+										Belum ada update status · Jalankan PrdFy CLI untuk update
+										otomatis
+									</span>
+								</output>
+							) : (
+								<output className="flex items-center gap-1.5 text-fog min-w-0">
+									<span
+										className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0"
+										aria-hidden="true"
+									/>
+									<span className="truncate">Tersinkronisasi dengan CLI</span>
+								</output>
+							)}
+						</div>
 					</div>
-					<div className="flex items-center gap-2 sm:gap-3 shrink-0">
+
+					<div className="flex items-center gap-2 sm:gap-3 shrink-0 self-start sm:self-center">
 						{lastUpdateAt && (
 							<span className="text-[10px] text-fog/60 font-mono hidden md:inline">
 								Update: {new Date(lastUpdateAt).toLocaleTimeString()}
@@ -271,22 +336,7 @@ export function KanbanBoard({
 				</div>
 			</header>
 
-			{/* Dismissable Banners (Full-width with slight margin like previous design) */}
-			{!dismissedBanners.includes("staleness") && (
-				<div className="w-full shrink-0">
-					<KanbanBanner
-						staleness={staleness}
-						hasUpdates={!!hasUpdates}
-						onRetry={refetch}
-						isRetrying={isLoading}
-						onDismiss={() =>
-							setDismissedBanners((prev) => [...prev, "staleness"])
-						}
-					/>
-				</div>
-			)}
-
-			{/* AC Changed Banner (Full-width with slight margin) */}
+			{/* AC Changed Banner (Only shown if AC was updated after tasks generated) */}
 			{!dismissedBanners.includes("ac-changed") && acChanged && (
 				<div className="w-full shrink-0 px-4 pt-3">
 					<div className="flex items-center justify-between rounded-md border border-amber/30 bg-amber/10 p-3 text-sm text-amber animate-slide-down">
@@ -343,45 +393,37 @@ export function KanbanBoard({
 									align="start"
 									className="w-56 sm:w-64 max-h-72 overflow-y-auto custom-scrollbar p-1"
 								>
-									<DropdownMenuItem
-										onClick={() => setSelectedPhase(null)}
-										className={cn(
-											"flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded cursor-pointer",
-											selectedPhase === null
-												? "bg-steel/15 text-snow font-semibold dark:bg-steel/25"
-												: "text-mist hover:text-snow hover:bg-steel/10",
-										)}
-									>
-										<span>Semua</span>
-										{selectedPhase === null && (
-											<Check size={13} className="text-snow shrink-0 ml-2" />
-										)}
-									</DropdownMenuItem>
-									{phases.length > 0 && (
-										<DropdownMenuSeparator className="my-1 bg-graphite" />
-									)}
-									{phases.map((phase) => {
-										const isSelected = selectedPhase === phase.id;
+									{[
+										{ id: null, label: "Semua" },
+										...phases.map((phase) => ({
+											id: phase.id,
+											label: phase.label,
+										})),
+									].map((item) => {
+										const isSelected = selectedPhase === item.id;
 										return (
 											<DropdownMenuItem
-												key={phase.id}
-												onClick={() => setSelectedPhase(phase.id)}
+												key={item.id ?? "all"}
+												onClick={() => setSelectedPhase(item.id)}
 												className={cn(
-													"flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded cursor-pointer gap-2",
+													"flex items-center gap-2 px-2.5 py-1.5 text-xs rounded cursor-pointer transition-colors",
 													isSelected
 														? "bg-steel/15 text-snow font-semibold dark:bg-steel/25"
 														: "text-mist hover:text-snow hover:bg-steel/10",
 												)}
 											>
-												<span className="truncate" title={phase.label}>
-													{phase.label}
+												<span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+													{isSelected && (
+														<Check
+															size={13}
+															className="text-snow shrink-0"
+															aria-hidden="true"
+														/>
+													)}
 												</span>
-												{isSelected && (
-													<Check
-														size={13}
-														className="text-snow shrink-0 ml-2"
-													/>
-												)}
+												<span className="truncate" title={item.label}>
+													{item.label}
+												</span>
 											</DropdownMenuItem>
 										);
 									})}

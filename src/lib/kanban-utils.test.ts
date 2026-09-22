@@ -249,44 +249,57 @@ describe("kanban-utils", () => {
 	});
 
 	describe("getTaskPriorityConfig", () => {
-		it("maps high/utama priority to Utama with amber styling", () => {
+		it("maps high/utama priority to Utama with 3 bars and amber styling", () => {
 			const high = getTaskPriorityConfig("high");
 			expect(high.label).toBe("Utama");
 			expect(high.level).toBe("utama");
-			expect(high.badgeClassName).toContain("amber");
+			expect(high.barCount).toBe(3);
+			expect(high.barClassName).toContain("amber");
+			expect(high.textClassName).toContain("amber");
 
 			const utama = getTaskPriorityConfig("utama");
 			expect(utama.label).toBe("Utama");
+			expect(utama.barCount).toBe(3);
 
 			const urgent = getTaskPriorityConfig("urgent");
 			expect(urgent.label).toBe("Utama");
+			expect(urgent.barCount).toBe(3);
 		});
 
-		it("maps low/pendukung priority to Pendukung with subtle styling", () => {
+		it("maps low/pendukung priority to Pendukung with 1 bar and subtle styling", () => {
 			const low = getTaskPriorityConfig("low");
 			expect(low.label).toBe("Pendukung");
 			expect(low.level).toBe("pendukung");
+			expect(low.barCount).toBe(1);
+			expect(low.barClassName).toContain("slate");
 
 			const pendukung = getTaskPriorityConfig("pendukung");
 			expect(pendukung.label).toBe("Pendukung");
+			expect(pendukung.barCount).toBe(1);
 
 			const supporting = getTaskPriorityConfig("supporting");
 			expect(supporting.label).toBe("Pendukung");
+			expect(supporting.barCount).toBe(1);
 		});
 
-		it("maps medium and legacy/null/undefined to Penting as safe default", () => {
+		it("maps medium and legacy/null/undefined to Penting as safe default with 2 bars", () => {
 			const medium = getTaskPriorityConfig("medium");
 			expect(medium.label).toBe("Penting");
 			expect(medium.level).toBe("penting");
+			expect(medium.barCount).toBe(2);
+			expect(medium.barClassName).toContain("indigo");
 
 			const empty = getTaskPriorityConfig(null);
 			expect(empty.label).toBe("Penting");
+			expect(empty.barCount).toBe(2);
 
 			const undef = getTaskPriorityConfig(undefined);
 			expect(undef.label).toBe("Penting");
+			expect(undef.barCount).toBe(2);
 
 			const unknown = getTaskPriorityConfig("custom_unknown_val");
 			expect(unknown.label).toBe("Penting");
+			expect(unknown.barCount).toBe(2);
 		});
 	});
 });

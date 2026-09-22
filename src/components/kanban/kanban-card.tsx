@@ -50,6 +50,56 @@ const BORDER_COLORS = [
 	"border-l-steel",
 ];
 
+export function PriorityIndicator({ priority }: { priority?: string | null }) {
+	const config = getTaskPriorityConfig(priority);
+
+	return (
+		<span
+			className="inline-flex items-center gap-1.5 shrink-0 select-none"
+			title={`Tingkat Kepentingan: ${config.label}`}
+		>
+			<span
+				className="inline-flex items-end gap-[2px] h-3.5 pb-[1px]"
+				aria-hidden="true"
+			>
+				{/* Bar 1 (pendek): Always present */}
+				<span
+					className={cn(
+						"w-[2.5px] h-[4px] rounded-[0.5px]",
+						config.barClassName,
+					)}
+				/>
+				{/* Bar 2 (sedang): Penting & Utama */}
+				{config.barCount >= 2 && (
+					<span
+						className={cn(
+							"w-[2.5px] h-[8px] rounded-[0.5px]",
+							config.barClassName,
+						)}
+					/>
+				)}
+				{/* Bar 3 (tinggi): Utama only */}
+				{config.barCount >= 3 && (
+					<span
+						className={cn(
+							"w-[2.5px] h-[12px] rounded-[0.5px]",
+							config.barClassName,
+						)}
+					/>
+				)}
+			</span>
+			<span
+				className={cn(
+					"font-mono text-[10px] tracking-tight leading-none",
+					config.textClassName,
+				)}
+			>
+				{config.label}
+			</span>
+		</span>
+	);
+}
+
 export function KanbanCard({
 	card,
 	colorIndex,
@@ -59,7 +109,6 @@ export function KanbanCard({
 
 	const idx = colorIndex % COLORS.length;
 	const _colorClass = BORDER_COLORS[idx];
-	const priorityConfig = getTaskPriorityConfig(card.priority);
 
 	const formatTime = (isoString: string | null) => {
 		if (!isoString) return "";
@@ -80,26 +129,11 @@ export function KanbanCard({
 				onClick={() => setIsOpen(true)}
 				className={`group relative flex cursor-pointer flex-col rounded-lg border border-graphite bg-obsidian p-3 shadow-sm transition-all duration-200 hover:border-steel hover:shadow-md text-left w-full ${highlighted ? "ring-2 ring-amber animate-flash" : ""}`}
 			>
-				<div className="flex items-start justify-between gap-2">
-					<span className="font-inter text-sm font-[510] text-snow line-clamp-2 leading-snug">
+				<div className="flex items-start justify-between gap-2.5">
+					<span className="font-inter text-sm font-[510] text-snow line-clamp-2 leading-snug flex-1">
 						{card.name}
 					</span>
-					<span
-						className={cn(
-							"inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider shrink-0",
-							priorityConfig.badgeClassName,
-						)}
-						title={`Tingkat Kepentingan: ${priorityConfig.label}`}
-					>
-						<span
-							className={cn(
-								"h-1.5 w-1.5 rounded-full shrink-0",
-								priorityConfig.dotClassName,
-							)}
-							aria-hidden="true"
-						/>
-						{priorityConfig.label}
-					</span>
+					<PriorityIndicator priority={card.priority} />
 				</div>
 
 				{card.description && (
@@ -174,21 +208,7 @@ export function KanbanCard({
 								<span className="text-xs text-fog font-medium">
 									Tingkat Kepentingan
 								</span>
-								<span
-									className={cn(
-										"inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider",
-										priorityConfig.badgeClassName,
-									)}
-								>
-									<span
-										className={cn(
-											"h-1.5 w-1.5 rounded-full shrink-0",
-											priorityConfig.dotClassName,
-										)}
-										aria-hidden="true"
-									/>
-									{priorityConfig.label}
-								</span>
+								<PriorityIndicator priority={card.priority} />
 							</div>
 							<div className="flex items-center justify-between rounded-lg border border-graphite/40 bg-onyx/60 p-3">
 								<span className="text-xs text-fog font-medium">

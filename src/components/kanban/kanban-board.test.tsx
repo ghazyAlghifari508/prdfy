@@ -64,39 +64,37 @@ const mockBoardData = {
 					{ name: "Setup GitHub client", status: "pending" },
 				],
 			},
-		],
-		in_progress: [
 			{
 				id: "task-2",
 				type: "task" as const,
 				featureName: "Katalog",
 				name: "Query list produk",
 				description: "Integrasi database Drizzle",
-				status: "in_progress" as const,
+				status: "pending" as const,
 				priority: "medium",
 				dependencies: [],
-				startedAt: "2026-09-22T08:00:00Z",
+				startedAt: null,
 				completedAt: null,
 				subtaskCount: 1,
 				subtaskCompleted: 0,
 			},
-		],
-		completed: [
 			{
 				id: "task-3",
 				type: "task" as const,
 				featureName: "Katalog",
 				name: "Helper format mata uang",
 				description: "Format Rupiah",
-				status: "completed" as const,
+				status: "pending" as const,
 				priority: "low",
 				dependencies: [],
-				startedAt: "2026-09-22T07:00:00Z",
-				completedAt: "2026-09-22T07:30:00Z",
+				startedAt: null,
+				completedAt: null,
 				subtaskCount: 0,
 				subtaskCompleted: 0,
 			},
 		],
+		in_progress: [],
+		completed: [],
 		failed: [],
 	},
 	staleness: "live",
@@ -155,6 +153,25 @@ function renderBoard(
 }
 
 describe("KanbanBoard", () => {
+	it("renders header with title and integrated CLI status metadata", async () => {
+		const c = renderBoard();
+
+		await vi.waitFor(() => {
+			expect(c.textContent).toContain("Kanban - Test Kanban App");
+			expect(c.textContent).toContain(
+				"Belum ada update status · Jalankan PrdFy CLI untuk update otomatis",
+			);
+		});
+
+		// Header contains both title and status within <header>
+		const header = c.querySelector("header");
+		expect(header).toBeDefined();
+		expect(header?.textContent).toContain("Kanban - Test Kanban App");
+		expect(header?.textContent).toContain(
+			"Belum ada update status · Jalankan PrdFy CLI untuk update otomatis",
+		);
+	});
+
 	it("renders toolbar with compact phase filter and wide progress track", async () => {
 		const c = renderBoard();
 
@@ -165,10 +182,10 @@ describe("KanbanBoard", () => {
 
 		const progressbar = c.querySelector('[role="progressbar"]');
 		expect(progressbar).toBeDefined();
-		expect(progressbar?.getAttribute("aria-valuenow")).toBe("33"); // 1 of 3 completed
+		expect(progressbar?.getAttribute("aria-valuenow")).toBe("0"); // 0 of 3 completed
 	});
 
-	it("renders task importance badges (Utama, Penting, Pendukung) on cards", async () => {
+	it("renders task importance indicators (Utama, Penting, Pendukung) with bars", async () => {
 		const c = renderBoard();
 
 		await vi.waitFor(() => {
@@ -178,6 +195,10 @@ describe("KanbanBoard", () => {
 		expect(c.textContent).toContain("Utama");
 		expect(c.textContent).toContain("Penting");
 		expect(c.textContent).toContain("Pendukung");
+
+		// Priority indicators should NOT have pill or badge border classes
+		const badgeClass = c.querySelector(".rounded-full.border-amber");
+		expect(badgeClass).toBeNull();
 	});
 
 	it("opens project documents drawer when triggered by UI store (hamburger integration)", async () => {
