@@ -47,7 +47,6 @@ import { Route as ApiAcSaveRouteImport } from './routes/api/ac/save'
 import { Route as ApiAskOptionsRouteImport } from './routes/api/ask/options'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronBillingRouteImport } from './routes/api/cron/billing'
-import { Route as ApiExportPdfRouteImport } from './routes/api/export/pdf'
 import { Route as ApiExportPrdRouteImport } from './routes/api/export/prd'
 import { Route as ApiExportZipRouteImport } from './routes/api/export/zip'
 import { Route as ApiKanbanPidRouteImport } from './routes/api/kanban/$pid'
@@ -272,11 +271,6 @@ const ApiCronBillingRoute = ApiCronBillingRouteImport.update({
   path: '/api/cron/billing',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiExportPdfRoute = ApiExportPdfRouteImport.update({
-  id: '/api/export/pdf',
-  path: '/api/export/pdf',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiExportPrdRoute = ApiExportPrdRouteImport.update({
   id: '/api/export/prd',
   path: '/api/export/prd',
@@ -489,7 +483,6 @@ export interface FileRoutesByFullPath {
   '/api/ask/options': typeof ApiAskOptionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/billing': typeof ApiCronBillingRoute
-  '/api/export/pdf': typeof ApiExportPdfRoute
   '/api/export/prd': typeof ApiExportPrdRoute
   '/api/export/zip': typeof ApiExportZipRoute
   '/api/kanban/$pid': typeof ApiKanbanPidRoute
@@ -561,7 +554,6 @@ export interface FileRoutesByTo {
   '/api/ask/options': typeof ApiAskOptionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/billing': typeof ApiCronBillingRoute
-  '/api/export/pdf': typeof ApiExportPdfRoute
   '/api/export/prd': typeof ApiExportPrdRoute
   '/api/export/zip': typeof ApiExportZipRoute
   '/api/kanban/$pid': typeof ApiKanbanPidRoute
@@ -636,7 +628,6 @@ export interface FileRoutesById {
   '/api/ask/options': typeof ApiAskOptionsRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/billing': typeof ApiCronBillingRoute
-  '/api/export/pdf': typeof ApiExportPdfRoute
   '/api/export/prd': typeof ApiExportPrdRoute
   '/api/export/zip': typeof ApiExportZipRoute
   '/api/kanban/$pid': typeof ApiKanbanPidRoute
@@ -712,7 +703,6 @@ export interface FileRouteTypes {
     | '/api/ask/options'
     | '/api/auth/$'
     | '/api/cron/billing'
-    | '/api/export/pdf'
     | '/api/export/prd'
     | '/api/export/zip'
     | '/api/kanban/$pid'
@@ -784,7 +774,6 @@ export interface FileRouteTypes {
     | '/api/ask/options'
     | '/api/auth/$'
     | '/api/cron/billing'
-    | '/api/export/pdf'
     | '/api/export/prd'
     | '/api/export/zip'
     | '/api/kanban/$pid'
@@ -858,7 +847,6 @@ export interface FileRouteTypes {
     | '/api/ask/options'
     | '/api/auth/$'
     | '/api/cron/billing'
-    | '/api/export/pdf'
     | '/api/export/prd'
     | '/api/export/zip'
     | '/api/kanban/$pid'
@@ -921,7 +909,6 @@ export interface RootRouteChildren {
   ApiAskOptionsRoute: typeof ApiAskOptionsRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronBillingRoute: typeof ApiCronBillingRoute
-  ApiExportPdfRoute: typeof ApiExportPdfRoute
   ApiExportPrdRoute: typeof ApiExportPrdRoute
   ApiExportZipRoute: typeof ApiExportZipRoute
   ApiKanbanPidRoute: typeof ApiKanbanPidRoute
@@ -1211,13 +1198,6 @@ declare module '@tanstack/react-router' {
       path: '/api/cron/billing'
       fullPath: '/api/cron/billing'
       preLoaderRoute: typeof ApiCronBillingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/export/pdf': {
-      id: '/api/export/pdf'
-      path: '/api/export/pdf'
-      fullPath: '/api/export/pdf'
-      preLoaderRoute: typeof ApiExportPdfRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/export/prd': {
@@ -1567,7 +1547,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAskOptionsRoute: ApiAskOptionsRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronBillingRoute: ApiCronBillingRoute,
-  ApiExportPdfRoute: ApiExportPdfRoute,
   ApiExportPrdRoute: ApiExportPrdRoute,
   ApiExportZipRoute: ApiExportZipRoute,
   ApiKanbanPidRoute: ApiKanbanPidRoute,
