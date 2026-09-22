@@ -113,11 +113,46 @@ describe("CodebaseReview", () => {
 		expect(c.textContent).toMatch(/tidak terdeteksi|belum terdeteksi/i);
 	});
 
-	it("wires retry-sync, retry-analysis, and continue actions", () => {
+	it("renders primary continue action and hides persistent retry actions in normal review state", () => {
+		const onContinue = vi.fn();
+		const onBackToSync = vi.fn();
+		const c = renderReview({ onContinue, onBackToSync });
+
+		// Persistent retry buttons should NOT be present in normal state
+		expect(c.textContent).not.toContain("Sync ulang");
+		expect(c.textContent).not.toContain("Analisis ulang");
+
+		// Secondary action and primary CTA are present and callable
+		const syncLogBtn = [...c.querySelectorAll("button")].find((b) =>
+			/lihat log sync/i.test(b.textContent ?? ""),
+		);
+		expect(syncLogBtn).toBeDefined();
+		act(() => {
+			syncLogBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onBackToSync).toHaveBeenCalledTimes(1);
+
+		const continueBtn = [...c.querySelectorAll("button")].find((b) =>
+			/lanjut/i.test(b.textContent ?? ""),
+		);
+		expect(continueBtn).toBeDefined();
+		act(() => {
+			continueBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onContinue).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders retry actions in recovery/error state when sync or analysis fails", () => {
 		const onRetrySync = vi.fn();
 		const onRetryAnalysis = vi.fn();
-		const onContinue = vi.fn();
-		const c = renderReview({ onRetrySync, onRetryAnalysis, onContinue });
+		const c = renderReview({
+			errorMessage: "Analisis gagal dijalankan",
+			onRetrySync,
+			onRetryAnalysis,
+		});
+
+		expect(c.textContent).toContain("Analisis gagal dijalankan");
+
 		const clickByLabel = (pattern: RegExp) => {
 			const button = [...c.querySelectorAll("button")].find((b) =>
 				pattern.test(b.textContent ?? ""),
@@ -127,12 +162,17 @@ describe("CodebaseReview", () => {
 				button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 			});
 		};
+
 		clickByLabel(/sync ulang/i);
 		clickByLabel(/analisis ulang/i);
-		clickByLabel(/lanjut/i);
 		expect(onRetrySync).toHaveBeenCalledTimes(1);
 		expect(onRetryAnalysis).toHaveBeenCalledTimes(1);
-		expect(onContinue).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders relevant files with structured explorer items", () => {
+		const c = renderReview();
+		expect(c.textContent).toContain("FILE RELEVAN (1)");
+		expect(c.textContent).toContain("schema.ts");
 	});
 
 	it("disables actions and shows indeterminate state while working", () => {

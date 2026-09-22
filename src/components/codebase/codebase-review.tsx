@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, FileCode, Folder } from "lucide-react";
 import type { CodebaseAnalysis } from "@/lib/codebase-analysis";
 
 function valueOrUnknown(value?: string | null): string {
@@ -14,6 +14,24 @@ function formatTimestamp(value?: string): string {
 	return date.toLocaleString("id-ID");
 }
 
+function splitPath(fullPath: string): {
+	dir: string;
+	name: string;
+	isFile: boolean;
+} {
+	const normalized = fullPath.trim();
+	const isFile = /\.[a-z0-9]+$/i.test(normalized);
+	const lastSlash = normalized.lastIndexOf("/");
+	if (lastSlash === -1) {
+		return { dir: "", name: normalized, isFile };
+	}
+	return {
+		dir: normalized.slice(0, lastSlash + 1),
+		name: normalized.slice(lastSlash + 1),
+		isFile,
+	};
+}
+
 interface CodebaseReviewProps {
 	analysis: CodebaseAnalysis;
 	snapshotId: string;
@@ -21,8 +39,9 @@ interface CodebaseReviewProps {
 	fileCount?: number;
 	excludedCount?: number;
 	isWorking?: boolean;
-	onRetrySync: () => void;
-	onRetryAnalysis: () => void;
+	errorMessage?: string | null;
+	onRetrySync?: () => void;
+	onRetryAnalysis?: () => void;
 	onContinue: () => void;
 	onBackToSync?: () => void;
 }
@@ -34,6 +53,7 @@ export function CodebaseReview({
 	fileCount,
 	excludedCount,
 	isWorking = false,
+	errorMessage,
 	onRetrySync,
 	onRetryAnalysis,
 	onContinue,
@@ -67,8 +87,11 @@ export function CodebaseReview({
 						mengoreksi hasil deteksi yang tidak sesuai.
 					</p>
 				</div>
-				<span className="inline-flex items-center gap-2 rounded-full border border-iron bg-charcoal/80 px-3 py-1.5 text-xs text-fog backdrop-blur-md self-start sm:self-auto">
-					<span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+				<span className="inline-flex items-center gap-2 rounded-lg border border-graphite bg-charcoal px-3 py-1.5 text-xs text-fog self-start sm:self-auto">
+					<span
+						className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
+						aria-hidden="true"
+					/>
 					Sync selesai
 				</span>
 			</div>
@@ -76,12 +99,12 @@ export function CodebaseReview({
 			{/* Summary Grid (2 Columns: Detected Environment + Repository Map) */}
 			<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				{/* Panel 1: Detected environment */}
-				<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col">
+				<div className="rounded-xl border border-graphite bg-charcoal overflow-hidden flex flex-col shadow-sm">
 					<div className="flex items-center justify-between border-b border-graphite p-4 sm:p-5">
 						<h3 className="font-inter text-sm font-[600] text-snow">
 							Detected environment
 						</h3>
-						<Check size={14} className="text-emerald-400 font-bold" />
+						<Check size={14} className="text-emerald-500 font-bold" />
 					</div>
 					<div className="flex flex-col divide-y divide-graphite/60 p-0">
 						{envRows.map(([label, value]) => {
@@ -92,9 +115,9 @@ export function CodebaseReview({
 									key={label}
 									className="flex items-center justify-between px-4 sm:px-5 py-3 text-xs"
 								>
-									<label className="font-mono text-[10px] text-slate tracking-wider">
+									<span className="font-mono text-[10px] text-slate tracking-wider">
 										{label}
-									</label>
+									</span>
 									<strong
 										className={`font-mono text-xs font-semibold ${
 											isUnknown ? "text-slate italic font-normal" : "text-mist"
@@ -115,7 +138,7 @@ export function CodebaseReview({
 								{analysis.dependencies.map((dep) => (
 									<span
 										key={dep}
-										className="rounded border border-iron bg-obsidian px-2 py-0.5 font-mono text-[11px] text-mist"
+										className="rounded border border-graphite/80 bg-obsidian px-2 py-0.5 font-mono text-[11px] text-mist"
 									>
 										{dep}
 									</span>
@@ -126,7 +149,7 @@ export function CodebaseReview({
 				</div>
 
 				{/* Panel 2: Repository map */}
-				<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col">
+				<div className="rounded-xl border border-graphite bg-charcoal overflow-hidden flex flex-col shadow-sm">
 					<div className="flex items-center justify-between border-b border-graphite p-4 sm:p-5">
 						<h3 className="font-inter text-sm font-[600] text-snow">
 							Repository map
@@ -136,32 +159,93 @@ export function CodebaseReview({
 							{excludedCount === undefined ? "—" : excludedCount} excluded)
 						</span>
 					</div>
-					<div className="p-4 sm:p-5 flex-1 flex flex-col gap-3 text-xs">
+					<div className="p-4 sm:p-5 flex-1 flex flex-col gap-4 text-xs">
 						{analysis.moduleMap && analysis.moduleMap.length > 0 ? (
-							<div className="flex flex-col gap-1.5 font-mono text-[11px] text-mist rounded-lg border border-graphite/60 bg-onyx p-3 max-h-56 overflow-y-auto hide-scrollbar">
-								{analysis.moduleMap.map((entry, index) => (
-									<div
-										key={`${entry.path}-${index}`}
-										className="flex items-center gap-2 py-0.5"
-									>
-										<span className="text-fog">▾</span>
-										<b className="text-snow">{entry.path}</b>
-										<span className="text-slate text-[10px] ml-auto">
-											{entry.summary}
-										</span>
-									</div>
-								))}
+							<div className="rounded-lg border border-graphite/60 bg-onyx/50 divide-y divide-graphite/40 overflow-hidden max-h-64 overflow-y-auto">
+								{analysis.moduleMap.map((entry) => {
+									const parsed = splitPath(entry.path);
+									return (
+										<div
+											key={entry.path}
+											className="group flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between px-3 py-2 text-xs transition-colors hover:bg-steel/10 dark:hover:bg-steel/20"
+										>
+											<div className="flex items-center gap-2 min-w-0 sm:max-w-[52%]">
+												{parsed.isFile ? (
+													<FileCode
+														size={14}
+														className="text-slate shrink-0"
+														aria-hidden="true"
+													/>
+												) : (
+													<Folder
+														size={14}
+														className="text-slate shrink-0"
+														aria-hidden="true"
+													/>
+												)}
+												<span
+													className="font-mono text-[11px] truncate text-snow"
+													title={entry.path}
+												>
+													{parsed.dir && (
+														<span className="text-slate font-normal">
+															{parsed.dir}
+														</span>
+													)}
+													<strong className="font-semibold text-snow">
+														{parsed.name}
+													</strong>
+												</span>
+											</div>
+											<span
+												className="text-[11px] text-fog sm:text-right sm:max-w-[46%] truncate"
+												title={entry.summary}
+											>
+												{entry.summary}
+											</span>
+										</div>
+									);
+								})}
 							</div>
 						) : (
-							<p className="text-slate italic">Tidak terdeteksi</p>
+							<p className="text-slate italic text-xs">Tidak terdeteksi</p>
 						)}
 
 						{analysis.relevantFiles && analysis.relevantFiles.length > 0 && (
-							<div className="mt-auto border-t border-graphite/60 pt-2 text-[11px] text-fog">
-								<span>File relevan: </span>
-								<span className="font-mono text-snow">
-									{analysis.relevantFiles.join(", ")}
+							<div className="mt-auto border-t border-graphite/60 pt-3 flex flex-col gap-2">
+								<span className="font-mono text-[10px] uppercase text-slate tracking-wider">
+									FILE RELEVAN ({analysis.relevantFiles.length})
 								</span>
+								<div className="rounded-lg border border-graphite/40 bg-onyx/30 divide-y divide-graphite/30 max-h-40 overflow-y-auto">
+									{analysis.relevantFiles.map((file) => {
+										const parsed = splitPath(file);
+										return (
+											<div
+												key={file}
+												className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-steel/10 dark:hover:bg-steel/20 transition-colors"
+											>
+												<FileCode
+													size={13}
+													className="text-slate shrink-0"
+													aria-hidden="true"
+												/>
+												<span
+													className="font-mono text-[11px] text-snow truncate"
+													title={file}
+												>
+													{parsed.dir && (
+														<span className="text-slate font-normal">
+															{parsed.dir}
+														</span>
+													)}
+													<strong className="font-medium text-snow">
+														{parsed.name}
+													</strong>
+												</span>
+											</div>
+										);
+									})}
+								</div>
 							</div>
 						)}
 					</div>
@@ -169,12 +253,12 @@ export function CodebaseReview({
 			</div>
 
 			{/* Panel 3: Potential Impact Areas from existing-codebase-flow.html */}
-			<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden">
+			<div className="rounded-xl border border-graphite bg-charcoal overflow-hidden shadow-sm">
 				<div className="flex items-center justify-between border-b border-graphite p-4 sm:p-5">
 					<h3 className="font-inter text-sm font-[600] text-snow">
 						Potential impact areas
 					</h3>
-					<span className="rounded-full border border-iron bg-obsidian px-2.5 py-0.5 font-mono text-[10px] text-fog">
+					<span className="rounded border border-graphite bg-obsidian px-2.5 py-0.5 font-mono text-[10px] text-fog">
 						AI generated · review
 					</span>
 				</div>
@@ -184,7 +268,7 @@ export function CodebaseReview({
 						<div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
 							{analysis.impactAreas.map((area, idx) => (
 								<div
-									key={`${area}-${idx}`}
+									key={area}
 									className="rounded-lg border border-graphite/80 bg-obsidian/60 p-3.5 flex flex-col gap-1"
 								>
 									<h4 className="font-inter text-xs font-semibold text-snow">
@@ -194,9 +278,7 @@ export function CodebaseReview({
 												? "Application & Logic"
 												: "Interface & Routing"}
 									</h4>
-									<p className="text-[11px] text-fog leading-relaxed">
-										{area}
-									</p>
+									<p className="text-[11px] text-fog leading-relaxed">{area}</p>
 								</div>
 							))}
 						</div>
@@ -206,27 +288,26 @@ export function CodebaseReview({
 
 					{/* Findings & Uncertainties */}
 					{analysis.findings && analysis.findings.length > 0 && (
-						<div className="rounded-lg border border-graphite/60 bg-obsidian/40 p-3.5 flex flex-col gap-2">
+						<div className="rounded-lg border border-graphite/60 bg-obsidian/40 p-4 flex flex-col gap-3">
 							<span className="font-mono text-[10px] uppercase text-slate tracking-wider">
 								TEMUAN DAN KETIDAKPASTIAN
 							</span>
-							<div className="flex flex-col gap-2">
-								{analysis.findings.map((f, idx) => (
-									<div
-										key={`${f.title}-${idx}`}
-										className="text-xs flex flex-col gap-0.5"
-									>
+							<div className="flex flex-col gap-2.5">
+								{analysis.findings.map((f) => (
+									<div key={f.title} className="text-xs flex flex-col gap-1">
 										<div className="flex items-center gap-2">
 											<span className="font-medium text-snow">{f.title}</span>
 											{f.uncertainty && (
-												<span className="rounded bg-amber-500/15 border border-amber-500/25 px-1.5 py-0.2 text-[10px] text-amber-300">
+												<span className="inline-flex items-center rounded border border-amber-600/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200">
 													Perlu verifikasi
 												</span>
 											)}
 										</div>
-										<span className="text-fog text-[11px]">{f.detail}</span>
+										<span className="text-fog text-[11px] leading-relaxed">
+											{f.detail}
+										</span>
 										{f.uncertainty && (
-											<span className="text-slate text-[10px] italic">
+											<span className="text-slate text-[11px] italic">
 												Perlu verifikasi: {f.uncertainty}
 											</span>
 										)}
@@ -249,13 +330,48 @@ export function CodebaseReview({
 							<span className="text-slate font-mono text-[10px] uppercase">
 								Keterbatasan:
 							</span>
-							{analysis.limitations.map((lim, idx) => (
-								<span key={`${lim}-${idx}`}>• {lim}</span>
+							{analysis.limitations.map((lim) => (
+								<span key={lim}>• {lim}</span>
 							))}
 						</div>
 					)}
 
-					{/* Screen Nav matching existing-codebase-flow.html */}
+					{/* Error Recovery Banner (only shown if error occurred) */}
+					{errorMessage && (
+						<div
+							role="alert"
+							className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-crimson/30 bg-crimson/10 p-3.5 text-xs text-crimson"
+						>
+							<div className="flex items-center gap-2">
+								<span className="font-semibold">Gagal:</span>
+								<span>{errorMessage}</span>
+							</div>
+							<div className="flex items-center gap-2">
+								{onRetrySync && (
+									<button
+										type="button"
+										onClick={onRetrySync}
+										disabled={isWorking}
+										className="rounded border border-crimson/40 px-3 py-1.5 text-xs font-medium text-crimson hover:bg-crimson/15 transition disabled:opacity-50"
+									>
+										Sync ulang
+									</button>
+								)}
+								{onRetryAnalysis && (
+									<button
+										type="button"
+										onClick={onRetryAnalysis}
+										disabled={isWorking}
+										className="rounded border border-crimson/40 px-3 py-1.5 text-xs font-medium text-crimson hover:bg-crimson/15 transition disabled:opacity-50"
+									>
+										{isWorking ? "Memproses..." : "Analisis ulang"}
+									</button>
+								)}
+							</div>
+						</div>
+					)}
+
+					{/* Screen Nav / Actions */}
 					<div className="flex flex-wrap items-center justify-between gap-3 border-t border-graphite pt-4 text-xs">
 						<div className="flex items-center gap-3 text-fog text-[11px]">
 							<span>
@@ -264,40 +380,26 @@ export function CodebaseReview({
 							<span>· {formatTimestamp(snapshotCreatedAt)}</span>
 						</div>
 
-						<div className="flex items-center gap-2">
+						<div className="flex items-center gap-3">
 							{onBackToSync && (
 								<button
 									type="button"
 									onClick={onBackToSync}
-									className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel"
+									className="rounded-lg border border-graphite bg-transparent px-3 py-1.5 text-xs font-medium text-fog hover:text-snow hover:border-iron hover:bg-steel/10 transition cursor-pointer"
 								>
 									Lihat log sync
 								</button>
 							)}
 							<button
 								type="button"
-								onClick={onRetrySync}
-								disabled={isWorking}
-								className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel disabled:opacity-50"
-							>
-								Sync ulang
-							</button>
-							<button
-								type="button"
-								onClick={onRetryAnalysis}
-								disabled={isWorking}
-								className="rounded border border-iron bg-obsidian px-3 py-1.5 text-xs text-mist hover:text-snow transition hover:bg-steel disabled:opacity-50"
-							>
-								{isWorking ? "Memproses..." : "Analisis ulang"}
-							</button>
-							<button
-								type="button"
 								onClick={onContinue}
 								disabled={isWorking}
-								className="inline-flex items-center gap-1.5 rounded bg-snow px-4 py-1.5 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-110 transition disabled:opacity-50"
+								className="inline-flex items-center gap-1.5 rounded-lg bg-snow px-4 py-1.5 font-inter text-xs font-semibold text-onyx shadow-sm hover:brightness-105 active:scale-[0.98] transition disabled:opacity-50 cursor-pointer"
 							>
 								<span>Lanjut ke Pertanyaan</span>
-								<span className="font-mono text-xs">-&gt;</span>
+								<span className="font-mono text-xs" aria-hidden="true">
+									-&gt;
+								</span>
 							</button>
 						</div>
 					</div>

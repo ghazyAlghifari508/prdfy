@@ -79,7 +79,7 @@ const loadCodebase = createServerFn({ method: "GET" })
 			latestAnalysis?.status === "ready"
 				? 3
 				: latestSnapshot?.status === "uploaded" ||
-					  latestSnapshot?.status === "ready"
+						latestSnapshot?.status === "ready"
 					? 2
 					: 1;
 
@@ -562,6 +562,7 @@ function CodebasePage() {
 					fileCount={latestStatus?.fileCount}
 					excludedCount={latestStatus?.excludedCount}
 					isWorking={isWorking}
+					errorMessage={pageError ?? failedAnalysis?.message ?? null}
 					onRetrySync={() => void startSession(true)}
 					onRetryAnalysis={() => void triggerAnalysis(currentSnapshotId)}
 					onBackToSync={() => {
