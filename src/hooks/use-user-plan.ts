@@ -24,6 +24,10 @@ export interface UserPlan {
 	subscriptionState?: SubscriptionUiState;
 	/** ISO string of the current billing period end, if any. */
 	currentPeriodEnd?: string | null;
+	/** May buy a mid-period credit top-up (server-derived billing rule). */
+	topUpEligible?: boolean;
+	/** Paid plan fully spent: offer a top-up, never another subscription. */
+	creditsExhausted?: boolean;
 }
 
 export function useUserPlan() {
@@ -41,6 +45,8 @@ export function useUserPlan() {
 					creditsUsed: 0,
 					remaining: 0,
 					subscriptionState: "free_active" as const,
+					topUpEligible: false,
+					creditsExhausted: false,
 				};
 			}
 			if (!res.ok) throw new Error(`Failed to load plan: ${res.status}`);

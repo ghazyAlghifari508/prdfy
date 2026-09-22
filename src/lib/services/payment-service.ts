@@ -14,7 +14,11 @@
  * honored until their credits run out.
  */
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
-import { computePurchaseGrant, resolveSubscriptionState } from "@/lib/billing";
+import {
+	canPurchaseTopUp,
+	computePurchaseGrant,
+	resolveSubscriptionState,
+} from "@/lib/billing";
 import { ADAPTIVE_CREDIT_PRICING, TOPUP_SKU } from "@/lib/constants";
 import { prdFyPlans } from "@/lib/pricing-data";
 import type { Plan } from "@/types/database";
@@ -160,7 +164,7 @@ export function createPaymentService(store: PaymentServiceStore) {
 
 			const now = new Date();
 			const eff = resolveSubscriptionState(sub, now);
-			if (eff.state !== "active_paid" || !sub) {
+			if (!canPurchaseTopUp(eff) || !sub) {
 				payment.status = "failed";
 				payment.midtransResponse = {
 					...(typeof payment.midtransResponse === "object" &&
@@ -431,7 +435,7 @@ export async function applyTopUpSuccess(orderId: string) {
 			.limit(1);
 
 		const eff = resolveSubscriptionState(sub, now);
-		if (eff.state !== "active_paid" || !sub) {
+		if (!canPurchaseTopUp(eff) || !sub) {
 			await tx
 				.update(payments)
 				.set({

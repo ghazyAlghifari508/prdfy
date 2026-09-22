@@ -2,9 +2,11 @@ import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions } from "@/db/schema";
 import {
+	canPurchaseTopUp,
 	computeFreeRolloverPeriod,
 	isFreeRolloverDue,
 	resolveSubscriptionState,
+	shouldTopUpInsteadOfResubscribe,
 	type SubscriptionRowLike,
 	type SubscriptionStateKind,
 } from "@/lib/billing";
@@ -19,6 +21,16 @@ export interface CreditBalance {
 	remaining: number;
 	subscriptionState: SubscriptionStateKind;
 	currentPeriodEnd: Date | null;
+	/**
+	 * Whether this account may buy a mid-period credit top-up. Derived from the
+	 * billing rules so the UI never re-derives eligibility from raw state.
+	 */
+	topUpEligible: boolean;
+	/**
+	 * Paid plan whose allowance is fully spent. The UI must offer a top-up
+	 * instead of another subscription, which would reset the running period.
+	 */
+	creditsExhausted: boolean;
 }
 
 /** AC / Task / Kanban access. Free tier is PRD-only. */
@@ -141,6 +153,8 @@ export async function getCreditBalance(userId: string): Promise<CreditBalance> {
 			remaining: 0,
 			subscriptionState: "free_active",
 			currentPeriodEnd: null,
+			topUpEligible: false,
+			creditsExhausted: false,
 		};
 	}
 
@@ -155,6 +169,8 @@ export async function getCreditBalance(userId: string): Promise<CreditBalance> {
 		remaining: eff.remaining,
 		subscriptionState: eff.state,
 		currentPeriodEnd: eff.currentPeriodEnd,
+		topUpEligible: canPurchaseTopUp(eff),
+		creditsExhausted: shouldTopUpInsteadOfResubscribe(eff),
 	};
 }
 

@@ -180,9 +180,36 @@ export function computePurchaseGrant(params: {
 	};
 }
 
-/** Top-up purchase is exclusive to an ACTIVE paid subscription (spec §1). */
+/**
+ * Top-up purchase is exclusive to a paid plan that still holds a live credit
+ * balance. Two paid shapes qualify:
+ *
+ * - `active_paid`: a running period — the classic mid-period case.
+ * - `legacy_grandfathered`: a one-time purchase with no period columns. Its
+ *   credits never expire, so running out of them is exactly when the user
+ *   needs more; refusing here would force a pointless new subscription.
+ *
+ * `paused` is excluded: its leftover credits are forfeited, so selling more
+ * would take money for credits the user cannot use. `free` has nothing to
+ * top up into.
+ */
 export function canPurchaseTopUp(eff: EffectiveSubscription): boolean {
-	return eff.state === "active_paid";
+	return eff.state === "active_paid" || eff.state === "legacy_grandfathered";
+}
+
+/**
+ * Whether the account should be offered a top-up instead of a new
+ * subscription: a paid plan that has spent its whole allowance.
+ *
+ * This is the "Hengker credits exhausted" rule. The plan is still live, so
+ * buying the same tier again would silently reset the period and forfeit the
+ * remaining time — the user needs more credits, not a new subscription.
+ */
+export function shouldTopUpInsteadOfResubscribe(
+	eff: EffectiveSubscription,
+): boolean {
+	if (!canPurchaseTopUp(eff)) return false;
+	return eff.remaining <= 0;
 }
 
 /**

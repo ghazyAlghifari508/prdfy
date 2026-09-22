@@ -86,17 +86,27 @@ export const Route = createFileRoute("/api/payments/create")({
 							{ status: 403 },
 						);
 					}
-					const used = await getTopUpCreditsUsedThisPeriod(user.id);
-					if (
-						remainingTopUpQuota({ plan: balance.plan, usedThisPeriod: used }) <
-						TOPUP_SKU.credits
-					) {
-						return Response.json(
-							{
-								error: `Kuota top-up periode ini sudah habis (maksimal ${PLAN_CREDITS[balance.plan]} kredit). Kuota reset saat periode berikutnya.`,
-							},
-							{ status: 400 },
-						);
+					// The anti-undercut cap is defined per billing period, so it only
+					// applies while a period exists. Legacy grandfathered rows have no
+					// period columns: their balance never expires and there is no window
+					// to count against, so the cap is skipped rather than misreported as
+					// exhausted. getTopUpCreditsUsedThisPeriod already returns 0 there.
+					const hasRunningPeriod = balance.currentPeriodEnd !== null;
+					if (hasRunningPeriod) {
+						const used = await getTopUpCreditsUsedThisPeriod(user.id);
+						if (
+							remainingTopUpQuota({
+								plan: balance.plan,
+								usedThisPeriod: used,
+							}) < TOPUP_SKU.credits
+						) {
+							return Response.json(
+								{
+									error: `Kuota top-up periode ini sudah habis (maksimal ${PLAN_CREDITS[balance.plan]} kredit). Kuota reset saat periode berikutnya.`,
+								},
+								{ status: 400 },
+							);
+						}
 					}
 					amount = TOPUP_SKU.priceIdr;
 					planCredits = TOPUP_SKU.credits;
@@ -173,9 +183,11 @@ export const Route = createFileRoute("/api/payments/create")({
 							.limit(1)
 							.for("update");
 						const eff = resolveSubscriptionState(locked, new Date());
-						if (!locked || eff.state !== "active_paid")
+						if (!canPurchaseTopUp(eff))
 							throw new Error("TOPUP_NOT_ELIGIBLE");
 						quotaCapCredits = PLAN_CREDITS[eff.effectivePlan];
+						// Same per-period rule as the pre-check: legacy rows have no
+						// window to count against, so only a running period is capped.
 						let usedThisPeriod = 0;
 						if (locked.currentPeriodStart && locked.currentPeriodEnd) {
 							const [usageRow] = await tx
@@ -192,14 +204,14 @@ export const Route = createFileRoute("/api/payments/create")({
 								);
 							usedThisPeriod =
 								(usageRow?.n ?? 0) * TOPUP_SKU.credits;
+							if (
+								remainingTopUpQuota({
+									plan: eff.effectivePlan,
+									usedThisPeriod,
+								}) < TOPUP_SKU.credits
+							)
+								throw new Error("TOPUP_QUOTA_EXCEEDED");
 						}
-						if (
-							remainingTopUpQuota({
-								plan: eff.effectivePlan,
-								usedThisPeriod,
-							}) < TOPUP_SKU.credits
-						)
-							throw new Error("TOPUP_QUOTA_EXCEEDED");
 						await tx.insert(payments).values(paymentRow);
 					});
 				} catch (e) {

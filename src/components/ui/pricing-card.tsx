@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { TopUpCard } from "@/components/ui/top-up-card";
 import { useUserPlan } from "@/hooks/use-user-plan";
+import { TOPUP_SKU } from "@/lib/constants";
 import { type Feature, type PriceTier, prdFyPlans } from "@/lib/pricing-data";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
@@ -54,6 +55,11 @@ interface PricingComponentProps extends React.HTMLAttributes<HTMLDivElement> {
 	compact?: boolean;
 	/** Hide the "Pilih Paket yang Sesuai" header (modal embedding) */
 	showHeader?: boolean;
+	/**
+	 * Paid plan whose allowance is spent. Renewing the same tier would reset the
+	 * running period, so those cards point at the top-up card instead.
+	 */
+	creditsExhausted?: boolean;
 }
 
 export const PricingComponent: React.FC<PricingComponentProps> = ({
@@ -63,6 +69,7 @@ export const PricingComponent: React.FC<PricingComponentProps> = ({
 	showComparison = true,
 	compact = false,
 	showHeader = true,
+	creditsExhausted = false,
 	className,
 	...props
 }) => {
@@ -141,15 +148,25 @@ export const PricingComponent: React.FC<PricingComponentProps> = ({
 								// ponytail: credit model — all paid tiers always purchasable.
 								// Free card disabled only if already on free (nothing to buy).
 								let buttonLabel = plan.buttonLabel;
+								// Checkout target: a plan tier, or the top-up SKU when the
+								// current plan's allowance is spent (renewing would reset the
+								// running period and forfeit the remaining days).
+								let buttonTarget: PriceTier["id"] | typeof TOPUP_SKU.id =
+									plan.id;
 								const isDisabled = isFreeCard && isCurrentPlan;
 
 								if (isCurrentPlan && !isFreeCard) {
 									buttonLabel = `Beli Lagi ${plan.name}`;
 								}
 
+								if (creditsExhausted && isCurrentPlan && !isFreeCard) {
+									buttonLabel = "Top Up Kredit";
+									buttonTarget = TOPUP_SKU.id;
+								}
+
 								return (
 									<Button
-										onClick={() => !isDisabled && onPlanSelect(plan.id)}
+										onClick={() => !isDisabled && onPlanSelect(buttonTarget)}
 										disabled={isDisabled}
 										className={cn(
 											"w-full font-inter font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
@@ -372,12 +389,11 @@ export default function PricingWrapper() {
 				plans={prdFyPlans}
 				onPlanSelect={handlePlanSelect}
 				currentPlan={currentPlan}
+				creditsExhausted={planData?.creditsExhausted === true}
 			/>
-			{/* Mid-period top-up: only meaningful for ACTIVE paid subscribers
-			    (spec §7). Free/paused/legacy users see nothing extra. */}
-			{planData?.subscriptionState === "active_paid" && (
-				<TopUpCard className="mt-6" />
-			)}
+			{/* Mid-period top-up: visible to any paid plan that can still buy
+			    credits (active period or legacy grandfathered). */}
+			{planData?.topUpEligible && <TopUpCard className="mt-6" />}
 		</>
 	);
 }

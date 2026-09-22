@@ -11,6 +11,7 @@ import {
 	isFreeRolloverDue,
 	remainingTopUpQuota,
 	resolveSubscriptionState,
+	shouldTopUpInsteadOfResubscribe,
 	type SubscriptionRowLike,
 } from "./billing";
 
@@ -176,8 +177,22 @@ describe("addDays", () => {
 });
 
 describe("canPurchaseTopUp", () => {
-	it("true only for active_paid", () => {
+	it("true for active_paid", () => {
 		expect(canPurchaseTopUp(resolveSubscriptionState(row(), NOW))).toBe(true);
+	});
+
+	it("true for legacy_grandfathered paid rows (credits never expire)", () => {
+		// Legacy one-time purchases keep a paid plan with NULL period columns.
+		// They hold a real credit balance, so they must be able to buy more
+		// instead of being pushed into an unnecessary new subscription.
+		for (const plan of ["pro", "hengker"] as const) {
+			const eff = resolveSubscriptionState(
+				row({ plan, currentPeriodEnd: null }),
+				NOW,
+			);
+			expect(eff.state).toBe("legacy_grandfathered");
+			expect(canPurchaseTopUp(eff)).toBe(true);
+		}
 	});
 
 	it("false for paused (expired period)", () => {
@@ -185,11 +200,6 @@ describe("canPurchaseTopUp", () => {
 			row({ currentPeriodEnd: addDays(NOW, -3) }),
 			NOW,
 		);
-		expect(canPurchaseTopUp(eff)).toBe(false);
-	});
-
-	it("false for legacy_grandfathered (no running period)", () => {
-		const eff = resolveSubscriptionState(row({ currentPeriodEnd: null }), NOW);
 		expect(canPurchaseTopUp(eff)).toBe(false);
 	});
 
@@ -202,6 +212,65 @@ describe("canPurchaseTopUp", () => {
 				resolveSubscriptionState(row({ cancelledAt: NOW }), NOW),
 			),
 		).toBe(false);
+		expect(canPurchaseTopUp(resolveSubscriptionState(undefined, NOW))).toBe(
+			false,
+		);
+	});
+});
+
+describe("shouldTopUpInsteadOfResubscribe", () => {
+	it("true when a paid plan has run out of credits", () => {
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(row({ credits: 30, creditsUsed: 30 }), NOW),
+			),
+		).toBe(true);
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(
+					row({ plan: "hengker", credits: 105, creditsUsed: 105, currentPeriodEnd: null }),
+					NOW,
+				),
+			),
+		).toBe(true);
+	});
+
+	it("counts reserved credits as spent", () => {
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(
+					row({ credits: 30, creditsUsed: 20, creditsReserved: 10 }),
+					NOW,
+				),
+			),
+		).toBe(true);
+	});
+
+	it("false while credits remain, so renewal stays available", () => {
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(row({ credits: 30, creditsUsed: 29 }), NOW),
+			),
+		).toBe(false);
+	});
+
+	it("false for paused, free, and missing subscriptions", () => {
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(
+					row({ credits: 30, creditsUsed: 30, currentPeriodEnd: addDays(NOW, -1) }),
+					NOW,
+				),
+			),
+		).toBe(false);
+		expect(
+			shouldTopUpInsteadOfResubscribe(
+				resolveSubscriptionState(row({ plan: "free", credits: 2, creditsUsed: 2 }), NOW),
+			),
+		).toBe(false);
+		expect(shouldTopUpInsteadOfResubscribe(resolveSubscriptionState(undefined, NOW))).toBe(
+			false,
+		);
 	});
 });
 

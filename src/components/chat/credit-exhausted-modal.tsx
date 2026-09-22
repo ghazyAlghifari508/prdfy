@@ -156,15 +156,14 @@ export function CreditExhaustedModal({
 
 				{/* Embedded pricing cards */}
 				<div className="px-2 pb-3">
-					{/* Credits gone but period still running = ideal top-up case
+					{/* Credits gone but the plan is still live = the ideal top-up case
 					    (spec §7). Paused users get the renewal cards instead. */}
-					{planData?.subscriptionState === "active_paid" && (
-						<TopUpCard className="mx-2 mb-2" />
-					)}
+					{planData?.topUpEligible && <TopUpCard className="mx-2 mb-2" />}
 					<PricingComponent
 						plans={prdFyPlans as [PriceTier, PriceTier, PriceTier]}
 						onPlanSelect={handlePlanSelect}
 						currentPlan={plan}
+						creditsExhausted={planData?.creditsExhausted === true}
 						showComparison={false}
 						showHeader={false}
 						compact

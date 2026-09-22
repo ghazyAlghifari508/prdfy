@@ -6,11 +6,13 @@ import { TOPUP_SKU } from "@/lib/constants";
 import { useUIStore } from "@/store";
 
 /**
- * Mid-period credit top-up card (spec §7). Parents decide visibility via
- * useUserPlan().subscriptionState === "active_paid"; this component assumes
- * it should render. Dark tokens (snow/fog/white-alpha) match BOTH mounting
- * surfaces: /pricing (bg-onyx) and the credit-exhausted modal (bg-obsidian).
- * Buying NEVER extends the current period — copy says so explicitly.
+ * Mid-period credit top-up card (spec §7). Parents decide visibility from
+ * useUserPlan().topUpEligible; this component assumes it should render. Dark
+ * tokens (snow/fog/white-alpha) match BOTH mounting surfaces: /pricing
+ * (bg-onyx) and the credit-exhausted modal (bg-obsidian).
+ *
+ * Credits are additive: the plan, status, and any running period are left
+ * untouched, so buying never extends or resets the subscription.
  */
 export function TopUpCard({ className }: { className?: string }) {
 	const showToast = useUIStore((s) => s.showToast);

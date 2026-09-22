@@ -233,6 +233,48 @@ describe("payment service grant lifecycle (in-memory)", () => {
 		});
 		expect(store.ledger).toHaveLength(0);
 	});
+
+	it("top-up grant succeeds for a legacy grandfathered row with no period", () => {
+		// Legacy one-time purchase: paid plan, NULL period columns, credits never
+		// expire. Exhausting those credits must be fixable with a top-up instead
+		// of forcing the user into a brand new subscription.
+		const store = makePaymentStore();
+		store.payments.set("order-topup-legacy", {
+			orderId: "order-topup-legacy",
+			userId: "user-legacy",
+			amount: TOPUP_SKU.priceIdr,
+			plan: TOPUP_SKU.id,
+			status: "pending",
+		});
+		store.subscriptions.push({
+			id: "sub-legacy",
+			userId: "user-legacy",
+			plan: "hengker",
+			status: "active",
+			credits: 105,
+			creditsUsed: 105,
+			creditsReserved: 0,
+			currentPeriodStart: null,
+			currentPeriodEnd: null,
+			cancelledAt: null,
+			reminderCount: 0,
+			createdAt: new Date("2026-08-01T00:00:00.000Z"),
+		});
+		const service = createPaymentService(store);
+
+		const result = service.applyTopUpSuccess("order-topup-legacy");
+		expect(result).toEqual({ plan: "hengker" });
+
+		const sub = store.subscriptions.find((s) => s.userId === "user-legacy");
+		expect(sub?.credits).toBe(105 + TOPUP_SKU.credits);
+		// Additive only: the plan, status, and period columns stay untouched.
+		expect(sub?.plan).toBe("hengker");
+		expect(sub?.creditsUsed).toBe(105);
+		expect(sub?.currentPeriodStart).toBeNull();
+		expect(sub?.currentPeriodEnd).toBeNull();
+		expect(store.payments.get("order-topup-legacy")?.status).toBe("success");
+		expect(store.ledger).toHaveLength(1);
+	});
 });
 
 describe("payment service database contracts", () => {
