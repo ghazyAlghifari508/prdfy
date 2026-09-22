@@ -184,6 +184,11 @@ export const PRE_EXPIRY_NOTICE_DAYS = 3;
 // reminder_count tracks how many of these have been sent (see lib/services/billing-emails.ts).
 export const REMINDER_SCHEDULE_DAYS = [1, 7, 14] as const;
 
+// Single display timezone for every user-facing date and time. The database
+// stores instants (timestamptz); rendering must not depend on the host or
+// browser timezone, or the same payment can show a different calendar day.
+export const APP_TIME_ZONE = "Asia/Jakarta";
+
 // === Credit top-up (mid-period purchase) ===
 // Single universal SKU: bought by ACTIVE Pro/Hengker subscribers only
 // (state active_paid). Credits join the SAME pool as the monthly allocation

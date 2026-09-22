@@ -326,3 +326,75 @@ describe("payment service database contracts", () => {
 		expect(serviceSource).toContain("payment.plan !== derivedPlan");
 	});
 });
+
+describe("payments timezone migration contract", () => {
+	// Regression: payment rows lived in `timestamp without time zone`, so the
+	// digits were reinterpreted in the reader's timezone. A payment taken late
+	// in the Jakarta evening then displayed as the following day. The columns
+	// must be `timestamptz`, and the one-time data fix must interpret each
+	// column in the zone it was actually written in.
+	it("converts payment/subscription timestamps to timestamptz", async () => {
+		const schema = await readFile(
+			new URL("../../db/schema.ts", import.meta.url),
+			"utf8",
+		);
+		const paymentsTable = schema.slice(schema.indexOf("export const payments"));
+		expect(paymentsTable).toMatch(
+			/timestamp\(\s*"created_at"\s*,\s*\{\s*withTimezone:\s*true\s*\}\s*\)/,
+		);
+		expect(paymentsTable).toMatch(
+			/timestamp\(\s*"updated_at"\s*,\s*\{\s*withTimezone:\s*true\s*\}\s*\)/,
+		);
+
+		const subscriptionsTable = schema.slice(
+			schema.indexOf("export const subscriptions"),
+			schema.indexOf("export interface CreditOperationFailure"),
+		);
+		for (const column of [
+			"current_period_start",
+			"current_period_end",
+			"cancelled_at",
+			"created_at",
+			"updated_at",
+		]) {
+			// Whitespace- and trailing-comma-agnostic: assert the column is
+			// declared withTimezone, not how the formatter wrapped the call.
+			const declaration = new RegExp(
+				`timestamp\\(\\s*"${column}"\\s*,\\s*\\{\\s*withTimezone:\\s*true\\s*,?\\s*\\}`,
+			);
+			expect(subscriptionsTable).toMatch(declaration);
+		}
+	});
+
+	it("interprets stored digits in the zone each producer wrote them in", async () => {
+		const migration = await readFile(
+			new URL(
+				"../../../drizzle/0022_payments_subscriptions_timestamptz.sql",
+				import.meta.url,
+			),
+			"utf8",
+		);
+		// created_at came from SQL now() in the app's Jakarta session.
+		expect(migration).toContain(
+			`"created_at" AT TIME ZONE 'Asia/Jakarta'`,
+		);
+		// updated_at came from a JS Date (UTC digits) once the row was rewritten,
+		// but still carried the Jakarta insert default while untouched.
+		expect(migration).toContain(`"updated_at" AT TIME ZONE 'UTC'`);
+		expect(migration).toContain(
+			`WHEN "updated_at" = "created_at" THEN`,
+		);
+		// Guard so re-applying the file cannot shift the rows twice.
+		expect(migration).toContain(
+			`data_type = 'timestamp without time zone'`,
+		);
+
+		const journal = await readFile(
+			new URL("../../../drizzle/meta/_journal.json", import.meta.url),
+			"utf8",
+		);
+		expect(journal).toContain(
+			'"tag": "0022_payments_subscriptions_timestamptz"',
+		);
+	});
+});

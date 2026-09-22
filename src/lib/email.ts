@@ -6,6 +6,8 @@
  * `false` as "not sent, continue anyway" — email NEVER breaks a request path.
  */
 
+import { APP_TIME_ZONE } from "@/lib/constants";
+
 export interface SendEmailArgs {
 	to: string;
 	subject: string;
@@ -14,7 +16,7 @@ export interface SendEmailArgs {
 
 // Billing/account timezone: expiry dates must render deterministically,
 // never in the host process timezone.
-export const BILLING_TIME_ZONE = "Asia/Jakarta";
+export const BILLING_TIME_ZONE = APP_TIME_ZONE;
 
 function escapeHtml(value: string): string {
 	return value

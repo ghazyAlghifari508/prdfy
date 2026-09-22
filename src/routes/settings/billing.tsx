@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { TOPUP_SKU } from "@/lib/constants";
 import { requireUserServer } from "@/lib/session";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { useUIStore } from "@/store";
 
 export interface BillingSubscription {
@@ -380,8 +380,11 @@ function BillingPage() {
 										<div className="font-medium">
 											{formatCurrency(p.amount ?? 0)}
 										</div>
+										{/* Time included: payment history is a ledger of instants,
+										    and the date alone hid which day a late-evening
+										    transaction belonged to. */}
 										<div className="mt-1 text-xs text-(--text-secondary)">
-											{formatDate(p.createdAt ?? "")}
+											{p.createdAt ? formatDateTime(p.createdAt) : "—"}
 										</div>
 									</div>
 									<div className="flex items-center gap-2">

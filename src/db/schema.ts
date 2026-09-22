@@ -108,17 +108,21 @@ export const subscriptions = pgTable(
 		// are forfeited at period end. NULL period on a PAID row = legacy
 		// one-time purchase (grandfathered, never expires). NULL on a FREE row
 		// is initialized lazily by the write-on-read rollover in credits.ts.
-		currentPeriodStart: timestamp("current_period_start"),
-		currentPeriodEnd: timestamp("current_period_end"),
-		cancelledAt: timestamp("cancelled_at"),
+		// timestamptz: a period boundary is an instant; storing it without a
+		// zone made the rendered date depend on the reader's timezone.
+		currentPeriodStart: timestamp("current_period_start", {
+			withTimezone: true,
+		}),
+		currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+		cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
 		// Email notification progress: 0 none, 1 = pre-expiry notice,
 		// 2..4 = paused reminders D+1/D+7/D+14 (see billing-emails.ts).
 		reminderCount: integer("reminder_count").notNull().default(0),
 		credits: integer("credits").notNull().default(0),
 		creditsUsed: integer("credits_used").notNull().default(0),
 		creditsReserved: integer("credits_reserved").notNull().default(0),
-		createdAt: timestamp("created_at").defaultNow(),
-		updatedAt: timestamp("updated_at").defaultNow(),
+		createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 	},
 	(t) => [
 		// Hot path: credits.ts getCreditBalance/consumeCredit query
@@ -747,8 +751,11 @@ export const payments = pgTable(
 		amount: integer("amount"),
 		status: text("status").default("pending"),
 		midtransResponse: jsonb("midtrans_response"),
-		createdAt: timestamp("created_at").defaultNow(),
-		updatedAt: timestamp("updated_at").defaultNow(),
+		// timestamptz: a payment instant must not depend on the server session
+		// timezone. With `timestamp` the driver parsed the stored wall clock in
+		// the host zone (UTC on Vercel), shifting every displayed date.
+		createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 	},
 	(t) => [index("payments_user_id_idx").on(t.userId)],
 );
