@@ -21,6 +21,7 @@ import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { depthDirective } from "@/lib/prompt-depth";
 import { PRD_REVISION_PROMPT, PRD_SYSTEM_PROMPT } from "@/lib/prompts";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { buildRevisionAssistantReply, stripSectionMarkers } from "@/lib/revision-reply";
 import {
 	selectModels,
 	tryStreamWithFallback,
@@ -617,37 +618,14 @@ export const Route = createFileRoute("/api/chat")({
 								enqueueDelta(chunk);
 							}
 
-							let assistantReply: string;
-							if (mode === "revise") {
-								const preamble = fullResponse
-									.split(":::UPDATE_SECTION")[0]
-									.trim();
-								assistantReply = preamble || "Revisi berhasil diterapkan.";
-							} else if (mode === "generate" || mode === "resume") {
-								assistantReply = "Selesai menyusun PRD awal.";
-							} else {
-								assistantReply = fullResponse;
-							}
-
-							// ponytail: only genuine conversation modes persist chat bubbles.
-							// generate/resume originate from the home prompt, persisting them
-							// here leaked the seed prompt + "Selesai menyusun PRD awal." into
-							// the chat panel after the loader repopulated the store on refresh.
-							// PRD content itself is saved via savePrdVersion below; the chat
-							// panel is for follow-up Q&A only.
-							if (
-								conversationIdToUse &&
-								(mode === "chat" || mode === "revise")
-							) {
-								await saveMessages(
-									conversationIdToUse,
-									displayMessage || message,
-									assistantReply,
-									modelsToTry[0],
-								);
-							}
-
+							// PRD merge runs before the chat bubbles are written: the
+							// revision reply must name the sections that actually
+							// changed, which is only known once the patches are folded
+							// into the stored document.
+							let assistantReply = "";
 							let finalPrdToSave: string | undefined;
+							const patchedSections: string[] = [];
+
 							if (
 								(mode === "generate" ||
 									mode === "revise" ||
@@ -661,10 +639,11 @@ export const Route = createFileRoute("/api/chat")({
 									);
 									return;
 								}
-								finalPrdToSave =
+								let mergedPrdToSave: string =
 									mode === "resume" && partialContent
 										? partialContent + fullResponse
 										: fullResponse;
+								finalPrdToSave = mergedPrdToSave;
 
 								if (mode === "revise" && projectIdToUse) {
 									const currentPrd = selectedVersionNum
@@ -674,7 +653,7 @@ export const Route = createFileRoute("/api/chat")({
 											)
 										: await getLatestPrdContent(projectIdToUse);
 									if (currentPrd) {
-										finalPrdToSave = currentPrd;
+										mergedPrdToSave = currentPrd;
 										const updateRegex =
 											/:::UPDATE_SECTION\[(.*?)\]:::\s*([\s\S]*?)(?:\s*:::END_UPDATE:::|$)/g;
 										let mergedPrd = currentPrd;
@@ -682,7 +661,12 @@ export const Route = createFileRoute("/api/chat")({
 
 										for (const match of fullResponse.matchAll(updateRegex)) {
 											const sectionName = match[1].trim();
-											const newSectionContent = match[2].trim();
+											// The stored document's section markers are written by
+											// the merge below; strip any the model repeated inside
+											// its own payload so they cannot double per revision.
+											const newSectionContent = stripSectionMarkers(
+												match[2],
+											);
 											const escapedSectionName = sectionName.replace(
 												/[.*+?^${}()|[\]\\]/g,
 												"\\$&",
@@ -700,6 +684,7 @@ export const Route = createFileRoute("/api/chat")({
 													`${openingTag}\n${newSectionContent}\n<!-- /SECTION -->`,
 												);
 												isMerged = true;
+												patchedSections.push(sectionName);
 												continue;
 											}
 
@@ -739,11 +724,40 @@ export const Route = createFileRoute("/api/chat")({
 													`${openingTag}\n${newSectionContent}${endMarker}`,
 												);
 												isMerged = true;
+												patchedSections.push(sectionName);
 											}
 										}
 
 										if (isMerged) finalPrdToSave = mergedPrd;
 									}
+								}
+
+								if (mode === "revise") {
+									// The reply names the sections that really merged, so it
+									// cannot end on a dangling introducer and never exposes
+									// the patch protocol.
+									assistantReply = buildRevisionAssistantReply({
+										rawResponse: fullResponse,
+										patchedSections,
+										language: projectLanguage,
+									});
+								} else {
+									assistantReply = "Selesai menyusun PRD awal.";
+								}
+
+								// ponytail: only genuine conversation modes persist chat bubbles.
+								// generate/resume originate from the home prompt, persisting them
+								// here leaked the seed prompt + "Selesai menyusun PRD awal." into
+								// the chat panel after the loader repopulated the store on refresh.
+								// PRD content itself is saved via savePrdVersion below; the chat
+								// panel is for follow-up Q&A only.
+								if (mode === "revise") {
+									await saveMessages(
+										conversationIdToUse,
+										displayMessage || message,
+										assistantReply,
+										modelsToTry[0],
+									);
 								}
 
 								const { FEATURES } = await import("@/types/database");
@@ -760,6 +774,7 @@ export const Route = createFileRoute("/api/chat")({
 									message,
 									mode === "resume" ? "generate" : mode,
 									allowShare,
+									mode === "revise" ? assistantReply : undefined,
 								);
 
 								// Task 8: link snapshot identity (non-fatal, no

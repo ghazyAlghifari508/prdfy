@@ -14,6 +14,10 @@ import { CLAIM_POLL_MS, CLAIM_RETRY_MS } from "@/lib/constants";
 import { hasFullWorkflow } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
 import { normalizeLanguage } from "@/lib/language";
+import {
+	extractPageInventory,
+	findUnknownSurfaces,
+} from "@/lib/page-inventory";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getLatestAcMarkdown } from "@/lib/services/ac-service";
 import {
@@ -509,6 +513,27 @@ export const Route = createFileRoute("/api/task/generate")({
 								}
 
 								const taskTree = coverage.tree;
+								// Task → Page traceability: tasks may only reference the
+								// surfaces the PRD declares. Legacy PRDs without the
+								// inventory have nothing authoritative to validate
+								// against, so their surfaces pass through unvalidated
+								// rather than being checked against a guess.
+								const pageInventory = extractPageInventory(prdContext);
+								if (pageInventory.length > 0) {
+									const unknownSurfaces = taskTree.features.flatMap((feature) =>
+										feature.tasks.flatMap((task) =>
+											findUnknownSurfaces(task.surfaces, pageInventory),
+										),
+									);
+									const uniqueUnknown = [...new Set(unknownSurfaces)];
+									if (uniqueUnknown.length > 0) {
+										await safeRelease("unknown task surfaces");
+										await safeError(
+											`Task merujuk halaman yang tidak ada di PRD (${uniqueUnknown.join(", ")}). Tidak disimpan — coba generate ulang.`,
+										);
+										return;
+									}
+								}
 								const saveResult = await saveTaskTree(projectId, taskTree);
 								if (codebaseSnapshotId && saveResult.success) {
 									await linkGenerationContext(

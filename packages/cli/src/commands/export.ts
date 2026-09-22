@@ -11,6 +11,28 @@ interface PrdAcResponse {
 	version: number;
 }
 
+/**
+ * Product-surface map lives inside User Flow as the `Pages & Screens`
+ * subsection. Pulled out verbatim so the generated rules file points the agent
+ * at the authoritative list instead of restating it (one source of truth).
+ */
+function extractProductSurfaces(prd: string): string {
+	const lines = prd.split(/\r?\n/);
+	const start = lines.findIndex((line) =>
+		/^#{3,4}\s*(?:\d+(?:\.\d+)*[.)]?\s*)?Pages\s*&\s*Screens\s*$/i.test(line),
+	);
+	if (start === -1) return "";
+
+	const captured: string[] = [];
+	for (let i = start; i < lines.length; i++) {
+		const line = lines[i];
+		// The subsection ends at the next heading of level 3 or higher.
+		if (i > start && /^#{1,3}\s+/.test(line)) break;
+		captured.push(line);
+	}
+	return captured.join("\n").trim();
+}
+
 function extractTechStack(prd: string): string {
 	const headings = [
 		/^##\s+Tech\s+Stack\s*$/im,
@@ -78,6 +100,7 @@ export async function exportRulesCommand(
 		]);
 
 		const techStack = extractTechStack(prdData.content);
+		const productSurfaces = extractProductSurfaces(prdData.content);
 		const projectName = `Project ${projectId}`; // ponytail: PRD name extraction skipped; add when PRD title is reliably structured.
 
 		const md = [
@@ -87,6 +110,11 @@ export async function exportRulesCommand(
 			``,
 			techStack,
 			``,
+			`## Product Surfaces (Pages & Screens)`,
+			``,
+			productSurfaces ||
+				`PRD ini belum memuat sub-section "Pages & Screens" pada User Flow. Baca PRD lengkap (\`prdfy prd ${projectId}\`) dan turunkan seluruh surface yang dibutuhkan requirement sebelum mulai implementasi.`,
+			``,
 			`## Acceptance Criteria`,
 			``,
 			acData.content,
@@ -94,8 +122,13 @@ export async function exportRulesCommand(
 			`## Strict Rules`,
 			`- ONLY implement features explicitly listed in Acceptance Criteria above`,
 			`- DO NOT add features, pages, endpoints, or roles not mentioned in AC`,
-			`- Every task declares the AC ids it delivers in its \`covers\` field. Implement ALL AC points listed there, not just the happy path (include loading, empty, error, validation, and authorization behavior).`,
+			`- Implement EVERY product surface listed under "Product Surfaces (Pages & Screens)" above. Read the PRD (\`prdfy prd ${projectId}\`) for each surface's purpose, actor, responsibilities, and states.`,
+			`- DO NOT drop a required page/screen, and DO NOT merge several distinct surfaces into one page to finish faster. A modal/drawer/inline interaction is valid when the PRD defines it that way or when the interaction semantics genuinely fit better.`,
+			`- DO NOT create pages outside the listed surfaces.`,
+			`- Product surfaces define WHAT users must be able to reach; the folder structure defines HOW the source code is organized. Satisfy both.`,
+			`- Every task declares the AC ids it delivers in its \`covers\` field and the surfaces it touches in its \`surfaces\` field. Implement ALL AC points listed there, not just the happy path (include loading, empty, error, validation, and authorization behavior).`,
 			`- DO NOT simplify a requirement to finish faster. A task is not complete just because the happy-path UI renders.`,
+			`- DO NOT reduce the product to a minimal prototype: finish every in-scope surface, state, and validation before reporting done.`,
 			`- Follow the Tech Stack and folder structure exactly as specified`,
 			`- All tasks must be tracked via prdfy CLI commands`,
 			``,

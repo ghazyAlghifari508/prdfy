@@ -12,6 +12,7 @@ describe("parseTaskJson", () => {
 							{
 								name: "Cart state",
 								description: "State keranjang",
+								priority: "high",
 								covers: ["AC-1.1", "AC-1.2"],
 								subtasks: [
 									{
@@ -40,6 +41,7 @@ describe("parseTaskJson", () => {
 							{
 								name: "Task",
 								description: "d",
+								priority: "medium",
 								covers: ["ac-1.1", "AC-1.1", "AC-2.3"],
 								subtasks: [],
 							},
@@ -61,6 +63,7 @@ describe("parseTaskJson", () => {
 							{
 								name: "Task lama",
 								description: "Mengerjakan sesuatu. (Cover AC-3.1, AC-3.2)",
+								priority: "low",
 								subtasks: [],
 							},
 						],
@@ -71,14 +74,19 @@ describe("parseTaskJson", () => {
 		expect(parsed?.features[0].tasks[0].covers).toEqual(["AC-3.1", "AC-3.2"]);
 	});
 
-	it("yields empty coverage for a legacy task with no references", () => {
+	it("yields empty coverage for a task with no references", () => {
 		const parsed = parseTaskJson(
 			JSON.stringify({
 				features: [
 					{
 						name: "Fitur",
 						tasks: [
-							{ name: "Task", description: "Tanpa referensi", subtasks: [] },
+							{
+								name: "Task",
+								description: "Tanpa referensi",
+								priority: "medium",
+								subtasks: [],
+							},
 						],
 					},
 				],
@@ -97,6 +105,7 @@ describe("parseTaskJson", () => {
 							{
 								name: "Task",
 								description: "d",
+								priority: "medium",
 								covers: ["AC-1.1", "bukan-id", ""],
 								subtasks: [],
 							},
@@ -128,6 +137,7 @@ describe("parseTaskJson", () => {
 								{
 									name: "Task",
 									description: "d",
+									priority: "medium",
 									covers: "AC-1.1",
 									subtasks: [],
 								},
@@ -150,6 +160,7 @@ describe("parseTaskJson", () => {
 								{
 									name: "Task",
 									description: "d",
+									priority: "medium",
 									covers: ["AC-1.1", 42],
 									subtasks: [],
 								},
@@ -167,6 +178,7 @@ describe("parseTaskJson", () => {
 			tasks: Array.from({ length: 20 }, (_, ti) => ({
 				name: `Task ${fi + 1}.${ti + 1}`,
 				description: "d",
+				priority: "medium",
 				covers: [`AC-${fi + 1}.${ti + 1}`],
 				subtasks: [{ name: "s", description: "d", details: ["langkah"] }],
 			})),
@@ -186,6 +198,7 @@ describe("parseTaskJson", () => {
 							{
 								name: "Task",
 								description: "d",
+								priority: "medium",
 								covers: ["AC-1.1"],
 								subtasks: [{ name: "Sub", description: "d" }],
 							},

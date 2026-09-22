@@ -14,6 +14,7 @@ const PRD_HEADINGS: Record<"id" | "en", Record<string, string>> = {
 		"4.1": "Core Features",
 		"5.1": "Flow Utama",
 		"5.2": "Flow Tambahan",
+		"5.3": "Pages & Screens",
 		"6.1": "High-Level Architecture",
 		"6.2": "Tech Stack",
 		"6.3": "Struktur Folder",
@@ -35,6 +36,7 @@ const PRD_HEADINGS: Record<"id" | "en", Record<string, string>> = {
 		"4.1": "Core Features",
 		"5.1": "Primary Flow",
 		"5.2": "Secondary Flow",
+		"5.3": "Pages & Screens",
 		"6.1": "High-Level Architecture",
 		"6.2": "Tech Stack",
 		"6.3": "Folder Structure",
@@ -87,6 +89,18 @@ const PRD_SECTION_TEMPLATE = `<!-- SECTION: Overview -->
 (Narrative or mermaid sequenceDiagram.)
 ### 5.2 {5.2}
 (Other important feature flows.)
+### 5.3 {5.3}
+(WAJIB. Product surface map: setiap halaman/screen yang benar-benar harus dilihat atau digunakan user. Format setiap surface sebagai heading level 4 dengan field berlabel, contoh:
+
+#### Nama Surface
+- Tujuan: kenapa surface ini ada
+- Aktor: role yang memakainya (jika relevan)
+- Tanggung jawab utama: apa yang bisa dilakukan user di sini
+- State penting: loading/empty/error/success yang relevan (jika ada)
+- Requirement terkait: ID FR atau nama fitur
+- Navigasi: hubungan ke surface lain (jika diketahui)
+
+Aturan: turunkan daftar dari Requirements, Core Features, dan User Journeys — bukan dari template kategori. Jumlah surface ADAPTIF: produk simpel boleh punya sedikit surface, produk kompleks boleh banyak. DILARANG mengarang halaman di luar scope requirement (jangan menambah auth, admin, dashboard, cart, atau settings hanya karena kategori produknya). DILARANG mencantumkan path file, nama komponen, route URL, endpoint, atau tabel database yang belum ditentukan — surface didefinisikan sebagai surface, bukan sebagai implementasi. Jangan memaksa setiap langkah flow menjadi halaman terpisah: modal/drawer/inline interaction valid bila semantics-nya memang cocok. User Journey dan daftar surface ini WAJIB konsisten. Untuk proyek existing_codebase, tandai setiap surface: EXISTING (sudah ada dan tetap dipakai), MODIFIED (sudah ada, behavior berubah), atau NEW (memang perlu ditambahkan).)
 <!-- /SECTION -->
 
 <!-- SECTION: Architecture & Tech Stack -->
@@ -149,6 +163,9 @@ export function PRD_SYSTEM_PROMPT(lang: "id" | "en" = "id"): string {
 ## KEDALAMAN ADAPTIF:
 Sesuaikan kedalaman dan panjang setiap section dengan KOMPLEKSITAS deskripsi produk dari user. Produk simpel (1-2 fitur) → ringkas dan padat. Produk menengah (3-5 fitur) → kedalaman moderat. Produk kompleks (6+ fitur, banyak integrasi) → mendalam dan detail. SEMUA 8 section WAJIB tetap ada, tapi isinya proporsional.
 
+## KONSISTENSI PRODUCT SURFACE (WAJIB):
+Sub-section 5.3 Pages & Screens adalah peta product surface yang AUTHORITATIVE — dipakai untuk generate AC dan Task. Section 6 (Architecture & Tech Stack, termasuk Struktur Folder) WAJIB konsisten dengannya: jelaskan bagaimana surface tersebut diorganisir oleh arsitektur (route, route group, tab, modal, stack navigation, atau stateful screen — sesuai framework). Struktur Folder TIDAK menggantikan Pages & Screens: folder menunjukkan organisasi source code, sedangkan Pages & Screens menunjukkan apa yang benar-benar dilihat user. JANGAN menyebut hanya sebagian surface di arsitektur lalu menghilangkan sisanya.
+
 ## STRUKTUR PRD WAJIB:
 
 ${structure}
@@ -186,4 +203,10 @@ Baik, pergantian tech stack dari Next.js ke Laravel telah diterapkan pada bagian
 
 6. **PENGGUNAAN NAMA SECTION YANG TEPAT**: Pastikan nama section yang ditulis di dalam bracket \`[Nama Section Asli]\` SAMA PERSIS dengan penanda aslinya (Pilih salah satu: Overview, Goals & Success Metrics, Requirements, Core Features, User Flow, Architecture & Tech Stack, Database Schema, Design & Technical Constraints).
 7. **KONTEN LENGKAP DALAM BLOCK**: Meskipun kamu tidak menulis ulang seluruh PRD, di dalam block \`:::UPDATE_SECTION...\` kamu WAJIB menuliskan isi section tersebut secara UTUH dari awal sampai akhir section tersebut (termasuk semua sub-headingnya), jangan ada yang terpotong.
-8. **HORMATI STACK & ARSITEKTUR ASLI**: JANGAN PERNAH mengubah framework proyek (misal dari Vue ke React) atau menambahkan tabel SQL/database internal jika proyek berstatus Frontend-Only, kecuali jika pengguna secara eksplisit meminta migrasi framework atau penambahan backend/database.`;
+8. **HORMATI STACK & ARSITEKTUR ASLI**: JANGAN PERNAH mengubah framework proyek (misal dari Vue ke React) atau menambahkan tabel SQL/database internal jika proyek berstatus Frontend-Only, kecuali jika pengguna secara eksplisit meminta migrasi framework atau penambahan backend/database.
+9. **JAGA PETA PRODUCT SURFACE (Pages & Screens)**: Section User Flow memuat sub-section 5.3 "Pages & Screens" — peta halaman/screen yang AUTHORITATIVE untuk generate AC dan Task.
+   - Jika permintaan user menyentuh product surface (menambah/menghapus role, menambah/menghapus workflow, menambah capability pengelolaan, mengubah navigasi, mengubah onboarding, mengubah primary flow, menambah fitur yang butuh screen tersendiri, atau mengubah halaman menjadi modal/drawer atau sebaliknya), kamu WAJIB menyertakan blok \`:::UPDATE_SECTION[User Flow]:::\` yang memuat 5.1, 5.2, DAN 5.3 secara lengkap serta konsisten dengan perubahan tersebut. Membiarkan 5.3 stale adalah KEGAGALAN.
+   - Jika permintaan user TIDAK berdampak pada product surface, JANGAN mengubah isi 5.3.
+   - Surface baru hanya boleh muncul bila requirement memang membutuhkannya; JANGAN mengarang halaman di luar scope (auth, admin, dashboard, cart, settings) tanpa dasar requirement.
+   - Surface tetap didefinisikan sebagai surface: JANGAN menambahkan path file, nama komponen, route URL, atau endpoint yang belum ditentukan.
+   - Jika permintaan mengubah arsitektur/routing, pastikan section Architecture & Tech Stack tetap konsisten dengan daftar surface pada 5.3.`;

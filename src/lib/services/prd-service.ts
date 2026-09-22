@@ -420,6 +420,10 @@ export async function deriveProjectName(message: string): Promise<string> {
 /**
  * Save a PRD version + mark project completed. On generate, set share token.
  * Resolves projectId from conversationId if needed.
+ *
+ * `changeSummary` overrides the derived summary when the caller already holds a
+ * better one — a revision passes the same completion message the user saw, so
+ * version history and the chat bubble never drift apart.
  */
 export async function savePrdVersion(
 	idOrConversationId: string,
@@ -427,6 +431,7 @@ export async function savePrdVersion(
 	userMessage: string,
 	mode: "generate" | "revise",
 	allowShareLink = true,
+	changeSummaryOverride?: string,
 ): Promise<{ prdVersionId: string; version: number } | undefined> {
 	let projectId: string | undefined;
 	const [conv] = await db
@@ -465,7 +470,7 @@ export async function savePrdVersion(
 	const changeSummary =
 		mode === "generate"
 			? "Initial PRD generation"
-			: `${userMessage.substring(0, 50)}...`;
+			: changeSummaryOverride?.trim() || `${userMessage.substring(0, 50)}...`;
 
 	// One transaction per project: the row lock serializes concurrent writers
 	// so version allocation is atomic (no read-then-insert race and no

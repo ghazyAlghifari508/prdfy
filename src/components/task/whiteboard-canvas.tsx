@@ -349,14 +349,23 @@ export const WhiteboardCanvas = memo(function WhiteboardCanvas({
 		[taskTree, projectName, isEmpty],
 	);
 
+	// While loading, the same layout engine sizes the skeleton, so the board
+	// auto-fits a representative tree instead of a fixed empty canvas.
+	const skeletonLayout = useMemo(
+		() => (isEmpty ? layoutGraph(SKELETON_TREE, projectName) : null),
+		[isEmpty, projectName],
+	);
+	const effectiveWidth = skeletonLayout?.width ?? canvasWidth;
+	const effectiveHeight = skeletonLayout?.height ?? canvasHeight;
+
 	// Auto-fit zoom: scale diagram to fit viewport
 	const containerRef = useRef<HTMLDivElement>(null);
 	const hasFittedRef = useRef(false);
 
 	useEffect(() => {
 		if (
-			!canvasWidth ||
-			!canvasHeight ||
+			!effectiveWidth ||
+			!effectiveHeight ||
 			!containerRef.current ||
 			hasFittedRef.current
 		)
@@ -365,24 +374,21 @@ export const WhiteboardCanvas = memo(function WhiteboardCanvas({
 
 		const rect = containerRef.current.getBoundingClientRect();
 		const padding = 60;
-		const fitW = (rect.width - padding * 2) / canvasWidth;
-		const fitH = (rect.height - padding * 2) / canvasHeight;
+		const fitW = (rect.width - padding * 2) / effectiveWidth;
+		const fitH = (rect.height - padding * 2) / effectiveHeight;
 		const fitZoom = Math.min(fitW, fitH, 1);
 		const clampedZoom = Math.max(minZoom, Math.min(maxZoom, fitZoom));
 
 		setZoom(clampedZoom);
-		const offsetX = (rect.width - canvasWidth * clampedZoom) / 2;
-		const offsetY = (rect.height - canvasHeight * clampedZoom) / 2;
+		const offsetX = (rect.width - effectiveWidth * clampedZoom) / 2;
+		const offsetY = (rect.height - effectiveHeight * clampedZoom) / 2;
 		setPan({ x: offsetX, y: offsetY });
-	}, [canvasWidth, canvasHeight, setZoom, setPan, minZoom, maxZoom]);
+	}, [effectiveWidth, effectiveHeight, setZoom, setPan, minZoom, maxZoom]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: taskTree triggers hasFittedRef reset
 	useEffect(() => {
 		hasFittedRef.current = false;
 	}, [taskTree]);
-
-	const skeletonCanvasW = 900;
-	const skeletonCanvasH = 500;
 
 	// Modal open freezes the board: pan/zoom/keyboard-nudge all no-op until closed.
 	const handleKeyDown = useCallback(
@@ -462,8 +468,8 @@ export const WhiteboardCanvas = memo(function WhiteboardCanvas({
 					className="absolute left-0 top-0 origin-top-left will-change-transform"
 					style={{
 						transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-						width: skeletonCanvasW,
-						height: skeletonCanvasH,
+						width: effectiveWidth,
+						height: effectiveHeight,
 					}}
 				>
 					<SkeletonDiagram />
@@ -531,85 +537,297 @@ export const WhiteboardCanvas = memo(function WhiteboardCanvas({
 
 /* ── Skeleton diagram ── */
 
+/**
+ * Loading representation only. It mirrors the real tree's spatial language by
+ * running a fixed, synthetic tree through the SAME `layoutGraph` the actual
+ * tasks use, so node geometry, depth, and edge routing can never drift from the
+ * rendered board. Labels are never rendered (only shimmer bars), so no fake task
+ * data is shown, and the shape is deliberately irregular — varied feature
+ * heights, task counts, subtask counts, and detail depth — so the loading state
+ * reads like a task tree instead of a symmetric placeholder.
+ */
+const SKELETON_TREE: TaskTree = {
+	features: [
+		{
+			name: "Fitur",
+			tasks: [
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: ["", "", ""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: ["", ""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [{ name: "Subtask", description: "", details: [""] }],
+				},
+			],
+		},
+		{
+			name: "Fitur",
+			tasks: [
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: ["", ""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [{ name: "Subtask", description: "", details: [""] }],
+				},
+			],
+		},
+		{
+			name: "Fitur",
+			tasks: [
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: ["", ""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [{ name: "Subtask", description: "", details: [""] }],
+				},
+			],
+		},
+		{
+			name: "Fitur",
+			tasks: [
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: ["", "", ""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [{ name: "Subtask", description: "", details: [""] }],
+				},
+			],
+		},
+		{
+			name: "Fitur",
+			tasks: [
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: ["", ""] },
+						{ name: "Subtask", description: "", details: [""] },
+					],
+				},
+				{
+					name: "Task",
+					description: "",
+					priority: "medium",
+					covers: [],
+					surfaces: [],
+					subtasks: [
+						{ name: "Subtask", description: "", details: [""] },
+						{ name: "Subtask", description: "", details: ["", ""] },
+					],
+				},
+			],
+		},
+	],
+};
+
+const SKELETON_BAR = "rounded bg-fog/10";
+
+/** Ghost shells mirroring the real node types, sized by the shared layout. */
 function SkeletonDiagram() {
-	const rootX = 40;
-	const rootY = 210;
-	const featureX = rootX + ROOT_W + LEVEL_GAP_X;
-	const taskX = featureX + FEATURE_W + LEVEL_GAP_X;
+	const { nodes, edges } = useMemo(
+		() => layoutGraph(SKELETON_TREE, "Project"),
+		[],
+	);
 
 	return (
 		<>
-			<div
-				className="absolute flex animate-pulse items-center justify-center rounded-xl border-2 border-fog/20 bg-fog/5"
-				style={{ left: rootX, top: rootY, width: ROOT_W, height: ROOT_H }}
-			>
-				<div className="h-4 w-24 rounded bg-fog/10" />
-			</div>
-
-			{[0, 1, 2].map((i) => {
-				const fy = 40 + i * 150;
-				return (
-					<div key={`skel-${i}`}>
-						<svg
-							className="pointer-events-none absolute left-0 top-0"
-							width={taskX + TASK_W + 10}
-							height={fy + FEATURE_H + 10}
-							style={{ overflow: "visible" }}
-						>
-							<path
-								d={`M ${rootX + ROOT_W} ${rootY + ROOT_H / 2} C ${featureX - 40} ${rootY + ROOT_H / 2}, ${featureX - 40} ${fy + FEATURE_H / 2}, ${featureX} ${fy + FEATURE_H / 2}`}
-								fill="none"
-								stroke="var(--color-fog)"
-								strokeWidth={1}
-								strokeOpacity={0.15}
-								strokeDasharray="6 4"
-							/>
-						</svg>
+			<Edges edges={edges} />
+			{nodes.map((node) => {
+				if (node.type === "root") {
+					return (
 						<div
-							className="absolute animate-pulse rounded-lg border border-fog/15 bg-fog/5"
+							key={node.id}
+							className="absolute flex animate-pulse items-center justify-center rounded-xl border-2 border-fog/20 bg-fog/5"
 							style={{
-								left: featureX,
-								top: fy,
-								width: FEATURE_W,
-								height: FEATURE_H,
+								left: node.x,
+								top: node.y,
+								width: node.w,
+								height: node.h,
 							}}
 						>
-							<div className="flex h-full flex-col justify-center px-4 gap-2">
-								<div className="h-3 w-12 rounded bg-fog/10" />
-								<div className="h-4 w-36 rounded bg-fog/10" />
+							<div className={`h-4 w-24 ${SKELETON_BAR}`} />
+						</div>
+					);
+				}
+				if (node.type === "feature") {
+					return (
+						<div
+							key={node.id}
+							className="absolute animate-pulse rounded-lg border border-fog/15 bg-fog/5"
+							style={{
+								left: node.x,
+								top: node.y,
+								width: node.w,
+								height: node.h,
+							}}
+						>
+							<div className="flex h-full flex-col justify-center gap-2 px-4">
+								<div className={`h-3 w-12 ${SKELETON_BAR}`} />
+								<div className={`h-4 w-36 ${SKELETON_BAR}`} />
 							</div>
 						</div>
-						{[0, 1].map((j) => {
-							const ty = fy + j * 100;
-							return (
-								<div key={`skel-t-${i}-${j}`}>
-									<svg
-										className="pointer-events-none absolute left-0 top-0"
-										width={taskX + TASK_W + 10}
-										height={ty + 80}
-										style={{ overflow: "visible" }}
-									>
-										<path
-											d={`M ${featureX + FEATURE_W} ${fy + FEATURE_H / 2} C ${taskX - 40} ${fy + FEATURE_H / 2}, ${taskX - 40} ${ty + 40}, ${taskX} ${ty + 40}`}
-											fill="none"
-											stroke="var(--color-fog)"
-											strokeWidth={1}
-											strokeOpacity={0.15}
-											strokeDasharray="6 4"
-										/>
-									</svg>
+					);
+				}
+				if (node.type === "detail") {
+					return (
+						<div
+							key={node.id}
+							className="absolute animate-pulse rounded-md border border-fog/10 bg-fog/[0.03]"
+							style={{
+								left: node.x,
+								top: node.y,
+								width: node.w,
+								height: node.h,
+							}}
+						>
+							<div className="px-3 pt-2 pb-1.5">
+								<div className={`h-2.5 w-16 ${SKELETON_BAR}`} />
+							</div>
+							<div className="space-y-1.5 px-3 pb-2">
+								<div className={`h-2.5 w-32 ${SKELETON_BAR}`} />
+								<div className={`h-2.5 w-24 ${SKELETON_BAR}`} />
+							</div>
+						</div>
+					);
+				}
+				return (
+					<div
+						key={node.id}
+						className="absolute animate-pulse rounded-lg border border-fog/10 bg-fog/[0.03]"
+						style={{
+							left: node.x,
+							top: node.y,
+							width: node.w,
+							height: node.h,
+						}}
+					>
+						<div className="border-b border-fog/10 px-3 py-2.5">
+							<div className={`h-3 w-28 ${SKELETON_BAR}`} />
+						</div>
+						<div className="space-y-2 px-3 py-2">
+							{Array.from(
+								{
+									length: Math.min(
+										node.subtasks?.length ?? 0,
+										MAX_VISIBLE_SUBTASKS,
+									),
+								},
+								(_, index) => (
 									<div
-										className="absolute animate-pulse rounded-lg border border-fog/10 bg-fog/[0.03]"
-										style={{ left: taskX, top: ty, width: TASK_W, height: 80 }}
+										// biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows are positional
+										key={index}
+										className="flex items-center gap-2"
 									>
-										<div className="px-3 py-3 space-y-2">
-											<div className="h-3 w-28 rounded bg-fog/[0.08]" />
-											<div className="h-2.5 w-20 rounded bg-fog/[0.06]" />
-										</div>
+										<div className="h-3.5 w-3.5 shrink-0 rounded border border-fog/15" />
+										<div className={`h-2.5 w-24 ${SKELETON_BAR}`} />
 									</div>
-								</div>
-							);
-						})}
+								),
+							)}
+						</div>
 					</div>
 				);
 			})}

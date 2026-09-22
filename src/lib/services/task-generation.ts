@@ -133,7 +133,9 @@ export async function repairTaskCoverage(
 /**
  * Fold repair tasks into the tree without duplicating existing work. Coverage
  * is unioned onto an existing task when the repair repeats a task name inside
- * the same feature, so no declared requirement is dropped.
+ * the same feature, so no declared requirement is dropped. Surface references
+ * are unioned the same way; priority is never overwritten, because the existing
+ * task's classification was made from its actual product impact.
  */
 function mergeRepair(
 	original: TaskTree,
@@ -146,7 +148,9 @@ function mergeRepair(
 			tasks: feature.tasks.map((task) => ({
 				name: task.name,
 				description: task.description,
+				priority: task.priority,
 				covers: [...task.covers],
+				surfaces: [...task.surfaces],
 				subtasks: task.subtasks.map((subtask) => ({
 					name: subtask.name,
 					description: subtask.description,
@@ -180,13 +184,20 @@ function mergeRepair(
 				for (const id of incomingTask.covers) {
 					if (!existing.covers.includes(id)) existing.covers.push(id);
 				}
+				for (const surface of incomingTask.surfaces) {
+					const key = normalize(surface);
+					if (existing.surfaces.some((s) => normalize(s) === key)) continue;
+					existing.surfaces.push(surface);
+				}
 				continue;
 			}
 			addedCount++;
 			feature.tasks.push({
 				name: incomingTask.name,
 				description: incomingTask.description,
+				priority: incomingTask.priority,
 				covers: [...incomingTask.covers],
+				surfaces: [...incomingTask.surfaces],
 				subtasks: incomingTask.subtasks.map((subtask) => ({
 					name: subtask.name,
 					description: subtask.description,

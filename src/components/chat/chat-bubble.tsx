@@ -46,7 +46,8 @@ export const ChatBubble = memo(function ChatBubble({
 
 	// Defer marker cleanup until streaming completes: filtering mid-stream
 	// hides incomplete responses and flickers as later tokens arrive.
-	const displayContent = !isUser && !isStreaming ? cleanMessage(content) : content;
+	const displayContent =
+		!isUser && !isStreaming ? cleanMessage(content) : content;
 
 	return (
 		<div
@@ -69,12 +70,7 @@ export const ChatBubble = memo(function ChatBubble({
 						: { color: "var(--text-primary)" }
 				}
 			>
-				<p className="whitespace-pre-wrap">
-					{displayContent}
-					{isStreaming && (
-						<span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current" />
-					)}
-				</p>
+				<p className="whitespace-pre-wrap">{displayContent}</p>
 			</div>
 		</div>
 	);

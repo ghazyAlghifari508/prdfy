@@ -442,6 +442,10 @@ export const tasks = pgTable(
 		// Nullable: rows generated before the coverage contract existed carry
 		// their references in prose only and are read via the legacy fallback.
 		covers: jsonb("covers").$type<string[]>(),
+		// Page/Screen inventory entries this task implements, referencing the
+		// PRD's `User Flow → Pages & Screens` names. Nullable: legacy rows
+		// predate the surface contract and read as no references.
+		surfaces: jsonb("surfaces").$type<string[]>(),
 		subtasks: jsonb("subtasks"),
 		position: jsonb("position"), // { x, y } for kanban
 		order: integer("order").default(0),

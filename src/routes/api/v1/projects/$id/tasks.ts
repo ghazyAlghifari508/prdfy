@@ -11,6 +11,7 @@ import {
 	extractFeatureSection,
 	getLatestAcContent,
 } from "@/lib/services/ac-service";
+import { storedTaskPriority } from "@/lib/task-priority";
 
 export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 	server: {
@@ -65,11 +66,13 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 					title: string;
 					description: string | null;
 					status: string | null;
+					priority: string | null;
 					featureName: string | null;
 					startedAt: Date | null;
 					completedAt: Date | null;
 					dependencies: unknown;
 					covers: string[] | null;
+					surfaces: string[] | null;
 					subtasks: unknown;
 				}>;
 				let acMarkdown: string | null;
@@ -81,11 +84,13 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 							title: tasks.title,
 							description: tasks.description,
 							status: tasks.status,
+							priority: tasks.priority,
 							featureName: tasks.featureName,
 							startedAt: tasks.startedAt,
 							completedAt: tasks.completedAt,
 							dependencies: tasks.dependencies,
 							covers: tasks.covers,
+							surfaces: tasks.surfaces,
 							subtasks: tasks.subtasks,
 						})
 						.from(tasks)
@@ -113,11 +118,19 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 						name: t.title,
 						description: t.description,
 						status: t.status ?? "pending",
+						// Validated level with the documented legacy fallback: rows
+						// written before the priority contract read as medium.
+						priority: storedTaskPriority(t.priority),
 						featureName: t.featureName || "Umum",
 						// Requirement ids this task delivers. Legacy rows carry
 						// their references in the description only.
 						covers: Array.isArray(t.covers)
 							? t.covers.filter((c): c is string => typeof c === "string")
+							: [],
+						// Page/Screen inventory entries this task implements,
+						// referencing the PRD's User Flow → Pages & Screens.
+						surfaces: Array.isArray(t.surfaces)
+							? t.surfaces.filter((s): s is string => typeof s === "string")
 							: [],
 						acContext: acMarkdown
 							? extractFeatureSection(acMarkdown, t.featureName || "Umum")

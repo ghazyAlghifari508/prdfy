@@ -10,17 +10,26 @@ interface TaskResponse {
 	name: string;
 	description: string | null;
 	status: string;
+	priority?: string | null;
 	featureName: string;
 	startedAt: string | null;
 	completedAt: string | null;
 	acContext: string | null;
 	covers: string[];
+	surfaces?: string[];
 	subtasks: Array<{
 		name: string;
 		description: string;
 		status: string;
 		details: string[];
 	}>;
+}
+
+/** Priority level as printed for the agent: the stored machine value. */
+function priorityLabel(priority: string | null | undefined): string | null {
+	if (typeof priority !== "string") return null;
+	const normalized = priority.trim().toLowerCase();
+	return normalized || null;
 }
 
 export async function taskListCommand(
@@ -53,9 +62,20 @@ export async function taskListCommand(
 			console.log(
 				`  ${statusColor(t.status.padEnd(12))} ${chalk.white(t.name)} ${chalk.dim(`[${t.featureName}]`)} ${chalk.dim(`id: ${t.id.slice(0, 8)}...`)}`,
 			);
+			const priority = priorityLabel(t.priority);
+			if (priority) {
+				console.log(
+					`  ${chalk.dim("             ")} ${chalk.magenta(`priority: ${priority}`)}`,
+				);
+			}
 			if (t.covers && t.covers.length > 0) {
 				console.log(
 					`  ${chalk.dim("             ")} ${chalk.cyan(`covers: ${t.covers.join(", ")}`)}`,
+				);
+			}
+			if (t.surfaces && t.surfaces.length > 0) {
+				console.log(
+					`  ${chalk.dim("             ")} ${chalk.yellow(`surfaces: ${t.surfaces.join(", ")}`)}`,
 				);
 			}
 			if (t.description) {
@@ -119,9 +139,20 @@ export async function taskNextCommand(projectId: string) {
 		console.log(`  ${chalk.white("Nama:")}        ${task.name}`);
 		console.log(`  ${chalk.white("Fitur:")}       ${task.featureName}`);
 		console.log(`  ${chalk.white("Status:")}      ${chalk.gray(task.status)}`);
+		const priority = priorityLabel(task.priority);
+		if (priority) {
+			console.log(
+				`  ${chalk.white("Priority:")}    ${chalk.magenta(priority)}`,
+			);
+		}
 		if (task.covers && task.covers.length > 0) {
 			console.log(
 				`  ${chalk.white("Covers:")}      ${chalk.cyan(task.covers.join(", "))}`,
+			);
+		}
+		if (task.surfaces && task.surfaces.length > 0) {
+			console.log(
+				`  ${chalk.white("Surfaces:")}    ${chalk.yellow(task.surfaces.join(", "))}`,
 			);
 		}
 		if (task.description) {

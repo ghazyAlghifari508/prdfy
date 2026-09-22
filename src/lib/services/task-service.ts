@@ -22,6 +22,11 @@ import {
 	extractReferencedAcIds,
 } from "@/lib/ac-coverage";
 import { advanceStep } from "@/lib/flow-progress";
+import {
+	normalizeTaskPriority,
+	storedTaskPriority,
+	type TaskPriority,
+} from "@/lib/task-priority";
 
 export interface TaskTree {
 	features: Array<{
@@ -29,8 +34,17 @@ export interface TaskTree {
 		tasks: Array<{
 			name: string;
 			description: string;
+			/** Product-impact classification decided by Task generation. */
+			priority: TaskPriority;
 			/** Requirement ids this task delivers, e.g. ["AC-1.1", "AC-1.2"]. */
 			covers: string[];
+			/**
+			 * Page/Screen inventory entries this task implements, using the names
+			 * declared by the PRD's `User Flow → Pages & Screens`. Empty when the
+			 * task touches no user-facing surface (or the PRD predates the
+			 * inventory). Definitions stay in the PRD; this is a reference only.
+			 */
+			surfaces: string[];
 			subtasks: Array<{ name: string; description: string; details: string[] }>;
 		}>;
 	}>;
@@ -38,6 +52,39 @@ export interface TaskTree {
 
 const MAX_TASK_NAME_CHARS = 500;
 const MAX_TASK_DESC_CHARS = 5000;
+const MAX_SURFACES = 50;
+
+/** Surface references are labels, not prose; bound each one before persisting. */
+function normalizeSurfaceName(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const name = value.replace(/\s+/g, " ").trim();
+	if (!name || name.length > MAX_TASK_NAME_CHARS) return null;
+	return name;
+}
+
+/**
+ * Read a task's `surfaces` field. Absent is valid — a task may touch no
+ * user-facing surface — while a present-but-malformed field is a contract
+ * violation and rejects the payload.
+ */
+function parseSurfaces(
+	value: unknown,
+): { ok: true; surfaces: string[] } | { ok: false } {
+	if (value === undefined || value === null) return { ok: true, surfaces: [] };
+	if (!Array.isArray(value)) return { ok: false };
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of value) {
+		const name = normalizeSurfaceName(entry);
+		if (!name) continue;
+		const key = name.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(name);
+		if (out.length >= MAX_SURFACES) break;
+	}
+	return { ok: true, surfaces: out };
+}
 
 /**
  * Legacy fallback: task trees generated before the `covers` field existed only
@@ -84,6 +131,13 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 				)
 					return null;
 				if (!Array.isArray(task.subtasks)) return null;
+				// Priority is part of the generation contract: a new tree must
+				// state a known level, so an absent or invented value is rejected
+				// instead of silently falling back to the storage default.
+				const priority = normalizeTaskPriority(task.priority);
+				if (!priority) return null;
+				const surfacesResult = parseSurfaces(task.surfaces);
+				if (!surfacesResult.ok) return null;
 				// Coverage is structural when present. A legacy tree without the
 				// field falls back to prose references so it stays readable.
 				let covers: string[];
@@ -117,7 +171,9 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 					name: task.name.trim(),
 					description:
 						typeof task.description === "string" ? task.description : "",
+					priority,
 					covers,
+					surfaces: surfacesResult.surfaces,
 					subtasks: [],
 				};
 				for (const subtask of task.subtasks) {
@@ -216,7 +272,9 @@ export async function saveTaskTree(
 				description: task.description || null,
 				featureName: feature.name,
 				status: "pending",
+				priority: task.priority,
 				covers: task.covers,
+				surfaces: task.surfaces,
 				subtasks: task.subtasks.map((s) => ({
 					name: s.name,
 					description: s.description,
@@ -269,7 +327,9 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 				title: tasks.title,
 				description: tasks.description,
 				featureName: tasks.featureName,
+				priority: tasks.priority,
 				covers: tasks.covers,
+				surfaces: tasks.surfaces,
 				subtasks: tasks.subtasks,
 			})
 			.from(tasks)
@@ -327,7 +387,15 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 			feature.tasks.push({
 				name: row.title,
 				description: row.description || "",
+				// Legacy rows predate the priority contract: they read as the
+				// documented default rather than surfacing an unknown level.
+				priority: storedTaskPriority(row.priority),
 				covers,
+				surfaces: Array.isArray(row.surfaces)
+					? row.surfaces
+							.map((surface) => normalizeSurfaceName(surface))
+							.filter((surface): surface is string => surface !== null)
+					: [],
 				subtasks,
 			});
 		}

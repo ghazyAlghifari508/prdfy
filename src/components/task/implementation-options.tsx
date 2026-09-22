@@ -102,39 +102,52 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
 - JANGAN menambahkan halaman, role, endpoint, atau fitur baru yang tidak disebut di AC.
 - Jika ingin menambah sesuatu yang tidak ada di AC, abaikan — itu bukan scope kamu.
 
-### 2. WAJIB selesaikan SEMUA task
+### 2. WAJIB implementasikan SEMUA product surface yang in-scope
+- PRD memuat peta product surface di section \`User Flow → Pages & Screens\` (sub-section 5.3). Peta itu adalah daftar AUTHORITATIVE halaman/screen yang harus ada.
+- WAJIB membaca daftar tersebut (\`prdfy prd {projectId}\`) SEBELUM mulai implementasi, dan implementasikan SEMUA surface yang tercantum.
+- JANGAN menghilangkan surface yang ada di daftar.
+- JANGAN menggabungkan beberapa surface yang distinct menjadi satu halaman hanya supaya implementasi lebih cepat atau lebih sederhana. Setiap surface dengan tujuan/aktor/workflow berbeda tetap menjadi surface tersendiri.
+- JANGAN membuat halaman tambahan yang tidak ada di daftar tersebut.
+- Modal, drawer, atau inline interaction TETAP VALID bila PRD memang mendefinisikannya demikian atau bila semantics interaksinya memang lebih cocok daripada halaman terpisah. Yang dilarang adalah memangkas surface yang distinct.
+- Setiap task punya field \`surfaces\` (halaman yang disentuh) dan \`covers\` (ID AC). Gunakan keduanya sebagai peta kerja per task.
+- Sebuah surface bisa dikerjakan oleh beberapa task, dan satu task boleh menyentuh beberapa surface.
+
+### 3. WAJIB selesaikan SEMUA task
 - Semua task dan subtask WAJIB diselesaikan. JANGAN berhenti di tengah jalan.
 - Jika task gagal, perbaiki error dan retry. JANGAN skip ke task berikutnya.
 - Proyek dianggap SELESAI hanya jika SEMUA task berstatus completed.
 - Jika dependency eksternal benar-benar tidak tersedia: tandai failed + jelaskan alasannya.
+- Priority task (\`high\`/\`medium\`/\`low\`) menunjukkan dampak produk, bukan urutan teknis: kerjakan \`high\` lebih dulu bila ada pilihan, tetapi SEMUA task tetap wajib selesai.
 
-### 3. Ikuti detail subtask
+### 4. Ikuti detail subtask
 - Setiap subtask punya field "details" — ini instruksi teknis spesifik. IKUTI persis.
 - JANGAN mengganti teknologi, library, atau approach yang sudah ditentukan di details.
 - Jika details bilang gunakan teknologi X, gunakan X — JANGAN substitusi dengan teknologi Y.
 
-### 4. Improvisasi HANYA dalam konteks task
+### 5. Improvisasi HANYA dalam konteks task
 - Improvisasi BOLEH untuk kualitas: error handling, loading state, responsive, aksesibilitas.
 - Improvisasi TIDAK BOLEH menambah scope: fitur, halaman, endpoint, atau role baru.
 - Prinsip: lebih baik, bukan lebih banyak.
 
-### 5. Ikuti arsitektur dari PRD
-- PRD punya section "Struktur Folder" dan "Tech Stack" — IKUTI keduanya.
+### 6. Ikuti arsitektur dari PRD
+- PRD punya section "Architecture & Tech Stack" (termasuk Struktur Folder) — IKUTI keduanya.
+- Struktur folder mengatur ORGANISASI source code; daftar Pages & Screens mengatur SURFACE yang harus ada. Keduanya harus dipenuhi, bukan salah satu.
 - JANGAN buat struktur folder atau arsitektur sendiri yang berbeda dari PRD.
 - JANGAN ganti framework, ORM, database, atau library utama yang sudah ditentukan.
 - Kamu BOLEH menambah library kecil untuk utility (format angka, classnames, dll) tapi JANGAN ganti stack utama.
 
-### 6. VERIFIKASI ACCEPTANCE CRITERIA SEBELUM COMPLETED
+### 7. VERIFIKASI ACCEPTANCE CRITERIA SEBELUM COMPLETED
 - Sebelum menandai task sebagai completed, WAJIB verifikasi implementasi terhadap Acceptance Criteria (AC) yang relevan.
 - Setiap task punya field \`covers\` berisi ID AC yang menjadi tanggung jawabnya. Baca daftar itu lewat \`prdfy task list {projectId}\` atau \`prdfy task next {projectId}\`.
 - WAJIB implementasikan SEMUA poin AC di dalam \`covers\`, bukan hanya happy path-nya. Termasuk state loading, empty, error, validasi, dan authorization yang tertulis di AC.
 - Jika implementasi TIDAK memenuhi semua poin AC tersebut, DILARANG mengubah status ke completed.
 - Perbaiki implementasi sampai memenuhi AC, baru tandai completed.
 
-### 7. JANGAN MENYEDERHANAKAN SCOPE
+### 8. JANGAN MENYEDERHANAKAN SCOPE
 - Setiap task dan subtask menggambarkan deliverable yang sudah dipisah berdasarkan responsibility (data model, service logic, API boundary, UI, validasi, authorization, async lifecycle, integrasi, error/recovery, state). JANGAN menggabungkannya kembali menjadi satu implementasi minimal.
 - JANGAN mengganti requirement dengan versi lebih sederhana agar cepat selesai. Jika satu bagian terasa berat, kerjakan bagian itu, bukan menghapusnya.
 - JANGAN menganggap task selesai hanya karena UI happy path muncul. Cek behavior, state, dan edge case di detail subtask.
+- DILARANG menyederhanakan product requirement menjadi prototype minimal. Aplikasi harus selesai untuk seluruh surface yang in-scope, bukan versi cepat yang hanya bisa didemokan.
 - Detail subtask adalah instruksi teknis. IKUTI persis, termasuk endpoint, aturan validasi, dan penanganan error yang tertulis.
 
 ## Instruksi Implementasi
@@ -144,9 +157,9 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
    Jalankan \`prdfy export rules {projectId} --format agents\` untuk generate file AGENTS.md di root project.
    File ini berisi Tech Stack, Architecture, dan Acceptance Criteria yang WAJIB diikuti.
    BACA ULANG file AGENTS.md ini di awal SETIAP session baru sebelum mulai bekerja.
-1. BACA ULANG PRD: \`prdfy prd {projectId}\` — refresh konteks sebelum mulai fase baru
+1. BACA ULANG PRD: \`prdfy prd {projectId}\` — refresh konteks (termasuk daftar Pages & Screens) sebelum mulai fase baru
 2. BACA ULANG AC: \`prdfy ac {projectId}\` — pastikan tahu persis apa yang harus diimplementasi
-3. Baca tasks untuk fase ini: \`prdfy task list {projectId}\`
+3. Baca tasks untuk fase ini: \`prdfy task list {projectId}\` — perhatikan \`covers\`, \`surfaces\`, dan \`priority\`
 4. Kerjakan setiap task dalam fase:
    a. \`prdfy task update <taskId> --status in_progress\`
    b. Kerjakan subtask sesuai field "details"
@@ -156,14 +169,14 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
 
 ### CHECKPOINT WAJIB ANTAR FASE:
 - Setelah SEMUA task dalam satu fase berstatus completed, BERHENTI. JANGAN langsung mulai fase berikutnya.
-- Sajikan ringkasan fase: task yang diselesaikan, poin AC yang tercakup (sebutkan nomor AC-X.Y), dan file yang dibuat/diubah.
+- Sajikan ringkasan fase: task yang diselesaikan, poin AC yang tercakup (sebutkan nomor AC-X.Y), surface yang disentuh, dan file yang dibuat/diubah.
 - TUNGGU user menulis "lanjut" sebelum memulai fase berikutnya.
 
 ### Aturan penting:
 - WAJIB baca ulang PRD + AC di awal SETIAP fase — jangan andalkan memori dari fase sebelumnya
 - JANGAN skip task. Jika error, perbaiki dan retry.
 - Jika dependency eksternal benar-benar tidak tersedia: tandai failed DAN jelaskan alasannya
-- Setelah semua task selesai: \`prdfy task list {projectId}\` untuk verifikasi SEMUA completed`;
+- Setelah semua task selesai: \`prdfy task list {projectId}\` untuk verifikasi SEMUA completed DAN verifikasi seluruh surface di Pages & Screens sudah terimplementasi`;
 
 /**
  * PRD-07: Implementation Options dropdown + modal.

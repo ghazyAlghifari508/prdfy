@@ -21,6 +21,7 @@ import {
 	savePendingPrdPrompt,
 	savePrdDraft,
 } from "@/lib/prompt-handoff";
+import { stripSectionMarkers } from "@/lib/revision-reply";
 import { readSseStream } from "@/lib/sse-stream";
 import { cn } from "@/lib/utils";
 import { useChatStore, useUIStore } from "@/store";
@@ -54,7 +55,9 @@ function livePatchPrd(baseContent: string, streamContent: string): string {
 
 	for (const match of streamContent.matchAll(regex)) {
 		const sectionName = match[1].trim();
-		const newContent = match[2].trim();
+		// The viewer's markers are written below, so drop any the model repeated
+		// inside its own patch body (otherwise the live preview shows doubles).
+		const newContent = stripSectionMarkers(match[2]);
 
 		const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const openingTag = `<!-- SECTION: ${escaped} -->`;
@@ -1083,7 +1086,7 @@ export const ChatPanel = memo(function ChatPanel({
 				{isStreaming && streamingContent && (
 					<ChatBubble role="assistant" content={streamingContent} isStreaming />
 				)}
-				{isRevising && !streamingContent && !thinkingText && (
+				{isStreaming && !streamingContent && !thinkingText && (
 					<TypingIndicator />
 				)}
 			</div>
