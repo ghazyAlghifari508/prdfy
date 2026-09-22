@@ -15,7 +15,10 @@ export function SubscriptionBanner() {
 		// biome-ignore lint/a11y/useSemanticElements: role="status" is mandated by spec for the pause notice
 		<div
 			role="status"
-			className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-500/15 px-4 py-2 text-center text-sm text-amber-700 dark:text-amber-400"
+			// shrink-0: the notice keeps its full height inside the fixed-height
+			// workspace shell, so the scrollable route below shrinks instead of
+			// pushing content (and the Next button) out of reach.
+			className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-amber-500/15 px-4 py-2 text-center text-sm text-amber-700 dark:text-amber-400"
 		>
 			<AlertTriangle size={16} className="shrink-0" aria-hidden />
 			<span>

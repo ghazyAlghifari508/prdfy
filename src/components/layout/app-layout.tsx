@@ -50,14 +50,28 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 		<>
 			{!hideNavbar && <Navbar />}
 			<div
+				data-workspace-shell={isWorkspace ? "" : undefined}
 				className={
 					hideNavbar
 						? "flex flex-col min-h-screen"
 						: isWorkspace
-							? "pt-14 flex flex-col h-screen overflow-hidden"
+							? // h-dvh, not h-screen: 100vh resolves to the LARGE mobile
+								// viewport (browser chrome hidden), so a full-height shell
+								// overflows the visible area. Body scroll is locked here, so
+								// nothing could compensate and the bottom of the route — where
+								// the Next button lives — sank out of reach. The dynamic unit
+								// tracks the visible viewport instead.
+								"pt-14 flex flex-col h-dvh overflow-hidden"
 							: "pt-14 flex flex-col min-h-screen"
 				}
 			>
+				{/* The shell is a fixed-height flex column that owns no scrolling.
+				    Children (the banner, then the route) are the only scroll
+				    consumers, so every direct child must be allowed to shrink
+				    below its content height: without min-h-0 a flex item keeps
+				    its intrinsic height, overflows the shell, and the bottom of
+				    the route (the Next/Generate button) becomes unreachable
+				    because body scroll is locked. */}
 				{!hideNavbar && <SubscriptionBanner />}
 				{children}
 			</div>
