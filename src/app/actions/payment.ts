@@ -51,11 +51,10 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 		}
 
 		// Verify with Midtrans before applying.
-		const { getMidtransConfig, midtransAuthHeader } = await import(
+		const { getMidtransConfig, midtransRequestHeaders } = await import(
 			"@/lib/midtrans"
 		);
 		const gateway = getMidtransConfig();
-		const authString = midtransAuthHeader(gateway.serverKey);
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), 10_000);
 		let response: Response;
@@ -63,10 +62,7 @@ export const syncPaymentStatus = createServerFn({ method: "POST" })
 			response = await fetch(
 				`${gateway.apiBaseUrl}/${encodeURIComponent(orderId)}/status`,
 				{
-					headers: {
-						Authorization: `Basic ${authString}`,
-						"Content-Type": "application/json",
-					},
+					headers: midtransRequestHeaders(gateway.serverKey),
 					signal: controller.signal,
 				},
 			);

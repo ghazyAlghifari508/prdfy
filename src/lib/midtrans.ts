@@ -50,6 +50,27 @@ export function getMidtransConfig(): MidtransConfig {
 	};
 }
 
+/**
+ * Midtrans Basic Auth header for the server key (blank password). The scheme
+ * is part of the returned value, so it must be sent as-is: prefixing it again
+ * produces "Basic Basic <b64>", which Midtrans rejects with HTTP 400.
+ */
 export function midtransAuthHeader(serverKey: string): string {
 	return `Basic ${Buffer.from(`${serverKey}:`).toString("base64")}`;
+}
+
+/**
+ * JSON request headers for every Midtrans API call. Centralized so no caller
+ * can re-derive the Authorization value and double the Basic scheme.
+ */
+export function midtransRequestHeaders(serverKey: string): {
+	"Content-Type": string;
+	Accept: string;
+	Authorization: string;
+} {
+	return {
+		"Content-Type": "application/json",
+		Accept: "application/json",
+		Authorization: midtransAuthHeader(serverKey),
+	};
 }

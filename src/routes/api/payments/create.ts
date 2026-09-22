@@ -12,7 +12,7 @@ import {
 import { TOPUP_SKU } from "@/lib/constants";
 import { getCreditBalance } from "@/lib/credits";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
-import { getMidtransConfig, midtransAuthHeader } from "@/lib/midtrans";
+import { getMidtransConfig, midtransRequestHeaders } from "@/lib/midtrans";
 import { prdFyPlans } from "@/lib/pricing-data";
 import { getTopUpCreditsUsedThisPeriod } from "@/lib/services/payment-service";
 import { requireUser } from "@/lib/session";
@@ -230,7 +230,6 @@ export const Route = createFileRoute("/api/payments/create")({
 			const safeOrigin = ALLOWED_ORIGINS.includes(origin)
 				? origin
 				: ALLOWED_ORIGINS[0];
-			const authString = midtransAuthHeader(gateway.serverKey);
 
 				const parameters = {
 					transaction_details: { order_id: orderId, gross_amount: amount },
@@ -268,9 +267,7 @@ export const Route = createFileRoute("/api/payments/create")({
 					{
 						method: "POST",
 						headers: {
-							"Content-Type": "application/json",
-							Accept: "application/json",
-							Authorization: `Basic ${authString}`,
+							...midtransRequestHeaders(gateway.serverKey),
 							"X-Override-Notification": `${safeOrigin}/api/payments/webhook`,
 						},
 						body: JSON.stringify(parameters),
