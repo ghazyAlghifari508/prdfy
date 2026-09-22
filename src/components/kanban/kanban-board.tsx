@@ -429,16 +429,6 @@ export function KanbanBoard({
 									})}
 								</DropdownMenuContent>
 							</DropdownMenu>
-
-							{selectedPhase !== null && (
-								<button
-									type="button"
-									onClick={() => setSelectedPhase(null)}
-									className="text-xs text-fog hover:text-snow underline underline-offset-2 ml-0.5 cursor-pointer"
-								>
-									Reset
-								</button>
-							)}
 						</div>
 
 						{/* Right: Progress info & bar spanning remaining horizontal space */}
