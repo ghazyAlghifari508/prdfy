@@ -45,48 +45,163 @@ function renderModal(
 }
 
 describe("buildAgentPrompt", () => {
-	it("states the objective, session details, sync command, and CLI-owned prep", () => {
-		const prompt = buildAgentPrompt(payload);
-		// Objective-oriented opening, not a numbered procedure.
-		expect(prompt).toContain("Sinkronkan codebase repositori ini");
-		// Required session context.
-		expect(prompt).toContain("proj_123");
-		expect(prompt).toContain("https://prdfy.example.com");
-		expect(prompt).toContain("token-rahasia-abc123");
-		// The command that actually performs the sync.
-		expect(prompt).toContain("prdfy codebase sync --project-id proj_123");
-		// Preparation the CLI owns, stated as automatic rather than as steps.
-		expect(prompt).toContain(".prdfyignore");
-		expect(prompt).toContain("deteksi root repositori");
-		expect(prompt).toContain("validasi versi minimum");
-		// Security rules.
-		expect(prompt).toMatch(/jangan mengubah source code/i);
-		expect(prompt).toMatch(/jangan menulis sync token/i);
+	it("renders the eight required sections in order", () => {
+		const prompt = buildAgentPrompt(payload, { projectName: "Wishlist Fitur" });
+		const headings = [
+			"## Informasi Project",
+			"## Prasyarat Eksekusi",
+			"## Perintah Yang Harus Dieksekusi",
+			"## Yang Dilakukan CLI Otomatis",
+			"## Aturan Yang Wajib Dipatuhi",
+			"## Penanganan Kegagalan",
+			"## Format Laporan Akhir",
+		];
+		let cursor = -1;
+		for (const heading of headings) {
+			const at = prompt.indexOf(heading);
+			expect(at, `missing section: ${heading}`).toBeGreaterThan(-1);
+			expect(at, `out of order: ${heading}`).toBeGreaterThan(cursor);
+			cursor = at;
+		}
+		// Section 1 (Tujuan) precedes the first heading.
+		const objectiveAt = prompt.indexOf("Sinkronkan codebase repositori lokal");
+		expect(objectiveAt).toBeGreaterThan(-1);
+		expect(objectiveAt).toBeLessThan(prompt.indexOf("## Informasi Project"));
 	});
 
-	it("omits robotic step scaffolding, version numbers, and hardcoded ignore lists", () => {
+	it("states the objective as synchronization only", () => {
 		const prompt = buildAgentPrompt(payload);
-		// The old checklist form is gone.
+		expect(prompt).toContain(
+			"Sinkronkan codebase repositori lokal ini ke project PrdFy menggunakan CLI resmi.",
+		);
+		expect(prompt).toMatch(/fokus hanya pada proses sinkronisasi/i);
+		expect(prompt).toMatch(/jangan melakukan perubahan terhadap source code/i);
+	});
+
+	it("lists every project information field as a labelled block", () => {
+		const prompt = buildAgentPrompt(payload, { projectName: "Wishlist Fitur" });
+		expect(prompt).toContain("Nama Fitur   : Wishlist Fitur");
+		expect(prompt).toContain("Project ID   : proj_123");
+		expect(prompt).toContain("Server       : https://prdfy.example.com");
+		expect(prompt).toContain("Sync Token   : token-rahasia-abc123");
+		expect(prompt).toContain(`Expired At   : ${payload.expiresAt}`);
+	});
+
+	it("omits the Nama Fitur line when no project name is known", () => {
+		const prompt = buildAgentPrompt(payload);
+		// An empty placeholder would read as a value the agent should fill in.
+		expect(prompt).not.toContain("Nama Fitur");
+		// The rest of the block is unaffected.
+		expect(prompt).toContain("Project ID   : proj_123");
+	});
+
+	it("states root, CLI, and install-as-fallback prerequisites", () => {
+		const prompt = buildAgentPrompt(payload);
+		expect(prompt).toMatch(/berada di root repositori git/i);
+		expect(prompt).toMatch(/gunakan PrdFy CLI/i);
+		expect(prompt).toContain("npm i -g @ghazynabiel/prdfy");
+		// Install is a fallback, not the main step.
+		expect(prompt).toMatch(/jika command `prdfy` tidak tersedia, install/i);
+	});
+
+	it("gives exactly one single-line command with inline flags", () => {
+		const prompt = buildAgentPrompt(payload);
+		const command =
+			"prdfy codebase sync --project-id proj_123 --sync-token token-rahasia-abc123";
+		expect(prompt).toContain(command);
+		// One command only: no alternative invocation and no env var.
+		expect(prompt.match(/prdfy codebase sync/g)).toHaveLength(1);
+		expect(prompt).not.toContain("PRDFY_SYNC_TOKEN");
+		expect(prompt).not.toContain("--api-url");
+		// No shell continuation character: a backslash line break is valid in
+		// bash/zsh but a parse error in PowerShell and cmd.exe.
+		expect(prompt).not.toMatch(/\\\r?\n/);
+		expect(command).not.toContain("\n");
+	});
+
+	it("describes CLI-owned work as information, not manual steps", () => {
+		const prompt = buildAgentPrompt(payload);
+		expect(prompt).toMatch(/bersifat informasi/i);
+		expect(prompt).toMatch(/jangan kerjakan ulang secara manual/i);
+		for (const item of [
+			"Deteksi root repository",
+			"Validasi versi minimum CLI",
+			"Pembuatan `.prdfyignore` jika belum ada",
+			"Penggunaan ignore bawaan",
+			"Hashing dan upload hanya file yang diizinkan",
+		]) {
+			expect(prompt, `missing CLI-owned item: ${item}`).toContain(item);
+		}
+		// Exclusion categories, with `.env` as the concrete example.
+		expect(prompt).toMatch(/file rahasia \(termasuk `\.env`\)/i);
+		expect(prompt).toMatch(/dependency, build, dan cache/i);
+	});
+
+	it("lists every mandatory rule as a checklist item", () => {
+		const prompt = buildAgentPrompt(payload);
+		for (const rule of [
+			"Jangan mengubah source code.",
+			"Jangan membuat commit.",
+			"Jangan push.",
+			"Jangan mengedit `.gitignore`.",
+			"Jangan menulis Sync Token ke file proyek.",
+			"Jangan menyimpan token ke konfigurasi permanen.",
+			"Jangan memodifikasi `.prdfyignore` kecuali diminta user.",
+			"Jangan mengklaim sinkronisasi berhasil tanpa output CLI.",
+		]) {
+			expect(prompt, `missing rule: ${rule}`).toContain(`- [ ] ${rule}`);
+		}
+	});
+
+	it("instructs honest failure reporting", () => {
+		const prompt = buildAgentPrompt(payload);
+		expect(prompt).toMatch(/tampilkan error CLI asli tanpa diringkas/i);
+		expect(prompt).toMatch(/jangan perbaiki sendiri/i);
+		expect(prompt).toMatch(/jangan retry dengan command berbeda/i);
+		expect(prompt).toMatch(/jangan mengarang penyebab/i);
+		expect(prompt).toMatch(/laporkan hanya hasil nyata/i);
+	});
+
+	it("defines a fixed final report format", () => {
+		const prompt = buildAgentPrompt(payload);
+		expect(prompt).toMatch(/format berikut tanpa menambah bagian lain/i);
+		for (const field of [
+			"Status:",
+			"Project:",
+			"Server:",
+			"CLI Version:",
+			"Hasil CLI:",
+			"Catatan:",
+		]) {
+			expect(prompt, `missing report field: ${field}`).toContain(field);
+		}
+		expect(prompt).toContain("Berhasil / Gagal");
+		expect(prompt).toContain("<output CLI asli>");
+		// CLI Version is sourced from CLI output with an explicit fallback.
+		expect(prompt).toContain(
+			"<x.x.x dari output CLI, atau - jika tidak tersedia>",
+		);
+	});
+
+	it("omits version numbers and path-pattern ignore lists", () => {
+		const prompt = buildAgentPrompt(payload);
+		// The old robotic scaffolding is gone.
 		expect(prompt).not.toMatch(/Langkah \d/);
-		// No version-gate copy: the CLI enforces the minimum and prints the
-		// update notice, so the prompt must not carry a version number.
+		// The CLI enforces the minimum and prints the update notice, so the
+		// prompt must not carry a version number or a version check step.
 		expect(prompt).not.toContain("2.0.0");
 		expect(prompt).not.toContain("prdfy --version");
-		// No enumerated ignore list (a hardcoded ignore list in UI copy would
-		// rot and could contradict the CLI's built-ins).
+		// No path-pattern ignore list: it would rot and could contradict the
+		// CLI's built-ins. Categories only.
 		expect(prompt).not.toContain("node_modules");
 		expect(prompt).not.toContain("*.pem");
-		expect(prompt).not.toContain(".env");
+		expect(prompt).not.toContain("dist/");
+		expect(prompt).not.toContain("coverage/");
 	});
 
 	it("embeds the real credential only in the copyable prompt", () => {
 		const prompt = buildAgentPrompt(payload);
 		expect(prompt).toContain("token-rahasia-abc123");
-	});
-
-	it("includes the project name when provided", () => {
-		const prompt = buildAgentPrompt(payload, { projectName: "Wishlist Fitur" });
-		expect(prompt).toContain("Wishlist Fitur");
 	});
 });
 

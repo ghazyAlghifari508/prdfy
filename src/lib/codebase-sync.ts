@@ -529,52 +529,107 @@ export function buildSyncCommand(projectId: string): string {
 }
 
 // === External-agent prompt ===
-// The prompt asks a local AI coding agent (Claude Code, Codex, Gemini CLI,
-// OpenCode, …) to run the sync. It is objective-oriented, not a numbered
-// procedure: every preparation concern — minimum version, update notice,
-// repository-root detection, `.prdfyignore` bootstrap, ignore validation, and
-// secret protection — is the CLI's responsibility and fails closed there. The
-// prompt therefore states the objective and the boundaries, and never
-// duplicates a version number or an exclusion list (a hardcoded ignore list in
-// UI copy would rot and could contradict the CLI's built-ins).
+// Self-contained execution document for a local AI coding agent (Claude Code,
+// Codex CLI, Gemini CLI, OpenCode, …). The agent must not have to guess where
+// it runs, when to install, whether to create `.prdfyignore`, what the CLI
+// already handles, what is forbidden, or how to report. Sections follow a fixed
+// order: tujuan → project info → prasyarat → command → CLI-otomatis → aturan →
+// kegagalan → format laporan.
 //
-// The raw credential appears inline because a single copy-pasteable command
-// works identically in PowerShell, bash, and zsh; the `<token>` placeholder is
-// what every other surface renders (see `buildSyncCommand`).
+// Boundaries kept deliberately:
+// - One command, inline flags, no environment variable, no alternative. The
+//   command stays on a single line: a backslash continuation is valid in
+//   bash/zsh but is a parse error in PowerShell and cmd.exe, so a multi-line
+//   form would break on Windows for no benefit.
+// - No minimum-version number: the CLI validates it and prints the update
+//   notice. The prompt only states that the CLI does it.
+// - The exclusions section names categories with `.env` as the one concrete
+//   example (it is a stable, universally understood name) but never enumerates
+//   path patterns, which would rot and could contradict the CLI's built-ins.
+// - The raw credential appears inline because a single copy-pasteable command
+//   is the whole point; every other surface renders `<token>` instead (see
+//   `buildSyncCommand`).
 export function buildAgentPrompt(
 	payload: SyncPromptPayload,
 	context?: { projectName?: string },
 ): string {
 	const command = `prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`;
-	const lines = ["Sinkronkan codebase repositori ini ke project PrdFy."];
+	const infoLines = [
+		`Project ID   : ${payload.projectId}`,
+		`Server       : ${payload.apiBaseUrl}`,
+		`Sync Token   : ${payload.syncToken}`,
+		`Expired At   : ${payload.expiresAt}`,
+	];
+	// "Nama Fitur" is only rendered when the name is actually known; an empty
+	// placeholder would read as a missing value the agent might try to fill in.
 	if (context?.projectName) {
-		lines.push("", "Fitur yang direncanakan:", `"${context.projectName}"`);
+		infoLines.unshift(`Nama Fitur   : ${context.projectName}`);
 	}
-	lines.push(
+
+	return [
+		"Sinkronkan codebase repositori lokal ini ke project PrdFy menggunakan CLI resmi.",
+		"Fokus hanya pada proses sinkronisasi; jangan melakukan perubahan terhadap source code.",
 		"",
-		`Project ID : ${payload.projectId}`,
-		`Server     : ${payload.apiBaseUrl}`,
-		`Sync Token : ${payload.syncToken}`,
-		`Berlaku sampai: ${payload.expiresAt}`,
+		"## Informasi Project",
+		...infoLines,
 		"",
-		"Dari dalam root repositori, jalankan:",
+		"## Prasyarat Eksekusi",
+		"1. Pastikan kamu berada di root repositori Git.",
+		"2. Gunakan PrdFy CLI untuk menjalankan sinkronisasi.",
+		"3. Jika command `prdfy` tidak tersedia, install dulu:",
+		"   npm i -g @ghazynabiel/prdfy",
 		"",
+		"## Perintah Yang Harus Dieksekusi",
 		command,
 		"",
-		"PrdFy CLI belum terpasang? npm i -g @ghazynabiel/prdfy",
+		"## Yang Dilakukan CLI Otomatis",
+		"Bagian ini bersifat informasi. Jangan kerjakan ulang secara manual.",
+		"- Deteksi root repository.",
+		"- Validasi versi minimum CLI.",
+		"- Pembuatan `.prdfyignore` jika belum ada.",
+		"- Penggunaan ignore bawaan.",
+		"- Pengecualian file rahasia (termasuk `.env`), secret, dependency, build, dan cache.",
+		"- Hashing dan upload hanya file yang diizinkan.",
 		"",
-		"CLI menangani persiapan berikut secara otomatis, tidak perlu dikerjakan manual:",
-		"- deteksi root repositori",
-		"- pembuatan .prdfyignore bila belum ada",
-		"- eksklusi file rahasia, dependensi, dan build",
-		"- validasi versi minimum",
+		"## Aturan Yang Wajib Dipatuhi",
+		"- [ ] Jangan mengubah source code.",
+		"- [ ] Jangan membuat commit.",
+		"- [ ] Jangan push.",
+		"- [ ] Jangan mengedit `.gitignore`.",
+		"- [ ] Jangan menulis Sync Token ke file proyek.",
+		"- [ ] Jangan menyimpan token ke konfigurasi permanen.",
+		"- [ ] Jangan memodifikasi `.prdfyignore` kecuali diminta user.",
+		"- [ ] Jangan mengklaim sinkronisasi berhasil tanpa output CLI.",
 		"",
-		"Batasan:",
-		"- Jangan mengubah source code, membuat commit, atau push.",
-		"- Jangan menulis Sync Token ke file, log, atau commit.",
-		"- Laporkan keluaran CLI apa adanya. Jangan menyatakan sukses tanpa keluaran CLI yang sukses.",
-	);
-	return lines.join("\n");
+		"## Penanganan Kegagalan",
+		"Jika sinkronisasi gagal:",
+		"- Tampilkan error CLI asli tanpa diringkas.",
+		"- Jangan perbaiki sendiri.",
+		"- Jangan retry dengan command berbeda.",
+		"- Jangan mengarang penyebab.",
+		"Laporkan hanya hasil nyata.",
+		"",
+		"## Format Laporan Akhir",
+		"Kembalikan laporan dengan format berikut tanpa menambah bagian lain:",
+		"",
+		"Status:",
+		"Berhasil / Gagal",
+		"",
+		"Project:",
+		payload.projectId,
+		"",
+		"Server:",
+		payload.apiBaseUrl,
+		"",
+		"CLI Version:",
+		"<x.x.x dari output CLI, atau - jika tidak tersedia>",
+		"",
+		"Hasil CLI:",
+		"<output CLI asli>",
+		"",
+		"Catatan:",
+		"Kosong jika tidak ada.",
+	].join("\n");
 }
 
 // === Upload transport DTOs (Task 5) ===
