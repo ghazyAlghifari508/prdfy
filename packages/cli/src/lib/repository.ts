@@ -8,12 +8,55 @@
  */
 
 import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+	dirname,
+	isAbsolute,
+	join,
+	parse,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 import {
 	type IgnoreRules,
 	isBuiltInExcluded,
 	matchesCustomIgnore,
 } from "./ignore.js";
+
+/**
+ * Resolve the repository root for a sync run.
+ *
+ * An explicit `--root` always wins. Otherwise walk up from `startDir` to the
+ * nearest ancestor containing a `.git` entry, so an agent launched from a
+ * subdirectory still scans the whole repository. A `.git` file counts as a
+ * match, not only a directory, so git worktrees and submodules resolve.
+ * Without any marker the start directory is kept, matching prior behavior.
+ *
+ * Walks the filesystem directly rather than shelling out to git: that keeps
+ * this deterministic and free of new failure modes (git absent, not on PATH,
+ * output encoding).
+ */
+export async function resolveRepositoryRoot(
+	startDir: string,
+	explicitRoot?: string,
+): Promise<string> {
+	if (explicitRoot) return resolve(explicitRoot);
+
+	let current = resolve(startDir);
+	const { root: filesystemRoot } = parse(current);
+	while (true) {
+		try {
+			await lstat(join(current, ".git"));
+			return current;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+		}
+		if (current === filesystemRoot) return resolve(startDir);
+		const parent = dirname(current);
+		if (parent === current) return resolve(startDir);
+		current = parent;
+	}
+}
 
 export interface ScannedFile {
 	/** Safe repository-relative path with `/` separators. */

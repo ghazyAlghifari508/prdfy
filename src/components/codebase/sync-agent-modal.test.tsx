@@ -45,19 +45,48 @@ function renderModal(
 }
 
 describe("buildAgentPrompt", () => {
-	it("mentions CLI version check, install, .prdfyignore, and the sync command", () => {
+	it("states the objective, session details, sync command, and CLI-owned prep", () => {
 		const prompt = buildAgentPrompt(payload);
-		expect(prompt).toContain("prdfy --version");
-		expect(prompt).toContain("@ghazynabiel/prdfy");
-		expect(prompt).toContain("2.0.0");
-		expect(prompt).toContain(".prdfyignore");
-		expect(prompt).toContain("prdfy codebase sync");
+		// Objective-oriented opening, not a numbered procedure.
+		expect(prompt).toContain("Sinkronkan codebase repositori ini");
+		// Required session context.
 		expect(prompt).toContain("proj_123");
+		expect(prompt).toContain("https://prdfy.example.com");
+		expect(prompt).toContain("token-rahasia-abc123");
+		// The command that actually performs the sync.
+		expect(prompt).toContain("prdfy codebase sync --project-id proj_123");
+		// Preparation the CLI owns, stated as automatic rather than as steps.
+		expect(prompt).toContain(".prdfyignore");
+		expect(prompt).toContain("deteksi root repositori");
+		expect(prompt).toContain("validasi versi minimum");
+		// Security rules.
+		expect(prompt).toMatch(/jangan mengubah source code/i);
+		expect(prompt).toMatch(/jangan menulis sync token/i);
+	});
+
+	it("omits robotic step scaffolding, version numbers, and hardcoded ignore lists", () => {
+		const prompt = buildAgentPrompt(payload);
+		// The old checklist form is gone.
+		expect(prompt).not.toMatch(/Langkah \d/);
+		// No version-gate copy: the CLI enforces the minimum and prints the
+		// update notice, so the prompt must not carry a version number.
+		expect(prompt).not.toContain("2.0.0");
+		expect(prompt).not.toContain("prdfy --version");
+		// No enumerated ignore list (a hardcoded ignore list in UI copy would
+		// rot and could contradict the CLI's built-ins).
+		expect(prompt).not.toContain("node_modules");
+		expect(prompt).not.toContain("*.pem");
+		expect(prompt).not.toContain(".env");
 	});
 
 	it("embeds the real credential only in the copyable prompt", () => {
 		const prompt = buildAgentPrompt(payload);
 		expect(prompt).toContain("token-rahasia-abc123");
+	});
+
+	it("includes the project name when provided", () => {
+		const prompt = buildAgentPrompt(payload, { projectName: "Wishlist Fitur" });
+		expect(prompt).toContain("Wishlist Fitur");
 	});
 });
 

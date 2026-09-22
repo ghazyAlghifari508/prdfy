@@ -241,4 +241,56 @@ describe("SyncStatus", () => {
 		expect(second.textContent).toContain("9");
 		expect(second.textContent).not.toContain("%");
 	});
+
+	it("renders exactly three stages, each backed by an observable signal", async () => {
+		mockFetchSequence([
+			statusResponse({
+				status: "uploading",
+				fileCount: 12,
+				excludedCount: 3,
+			}),
+		]);
+		const c = renderStatus();
+		await settle();
+		// Stage labels that map to real signals.
+		expect(c.textContent).toContain("CLI terhubung");
+		expect(c.textContent).toContain("Mengirim snapshot source context");
+		expect(c.textContent).toContain("Menyusun analisis codebase");
+	});
+
+	it("does not claim scan or manifest stages the client never observes", async () => {
+		// `scanning`/`filtering` are server bookkeeping the CLI never reports, so
+		// no user-facing stage may imply them.
+		mockFetchSequence([statusResponse({ status: "uploading" })]);
+		const c = renderStatus();
+		await settle();
+		expect(c.textContent).not.toMatch(/memindai/i);
+		expect(c.textContent).not.toMatch(/filtering/i);
+		expect(c.textContent).not.toMatch(
+			/package manifest dan framework dibaca/i,
+		);
+	});
+
+	it("shows the exclusion count only when the server reports it", async () => {
+		mockFetchSequence([statusResponse({ status: "uploading" })]);
+		const without = renderStatus();
+		await settle();
+		expect(without.textContent).not.toMatch(/dikecualikan otomatis/i);
+		if (root) {
+			const r = root;
+			act(() => {
+				r.unmount();
+			});
+			root = null;
+		}
+		container.remove();
+
+		mockFetchSequence([
+			statusResponse({ status: "uploaded", excludedCount: 7 }),
+		]);
+		const withCount = renderStatus();
+		await settle();
+		expect(withCount.textContent).toContain("7");
+		expect(withCount.textContent).toMatch(/dikecualikan otomatis/i);
+	});
 });

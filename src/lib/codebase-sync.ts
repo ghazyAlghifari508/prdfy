@@ -528,6 +528,55 @@ export function buildSyncCommand(projectId: string): string {
 	return `prdfy codebase sync --project-id ${projectId} --sync-token <token>`;
 }
 
+// === External-agent prompt ===
+// The prompt asks a local AI coding agent (Claude Code, Codex, Gemini CLI,
+// OpenCode, …) to run the sync. It is objective-oriented, not a numbered
+// procedure: every preparation concern — minimum version, update notice,
+// repository-root detection, `.prdfyignore` bootstrap, ignore validation, and
+// secret protection — is the CLI's responsibility and fails closed there. The
+// prompt therefore states the objective and the boundaries, and never
+// duplicates a version number or an exclusion list (a hardcoded ignore list in
+// UI copy would rot and could contradict the CLI's built-ins).
+//
+// The raw credential appears inline because a single copy-pasteable command
+// works identically in PowerShell, bash, and zsh; the `<token>` placeholder is
+// what every other surface renders (see `buildSyncCommand`).
+export function buildAgentPrompt(
+	payload: SyncPromptPayload,
+	context?: { projectName?: string },
+): string {
+	const command = `prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`;
+	const lines = ["Sinkronkan codebase repositori ini ke project PrdFy."];
+	if (context?.projectName) {
+		lines.push("", "Fitur yang direncanakan:", `"${context.projectName}"`);
+	}
+	lines.push(
+		"",
+		`Project ID : ${payload.projectId}`,
+		`Server     : ${payload.apiBaseUrl}`,
+		`Sync Token : ${payload.syncToken}`,
+		`Berlaku sampai: ${payload.expiresAt}`,
+		"",
+		"Dari dalam root repositori, jalankan:",
+		"",
+		command,
+		"",
+		"PrdFy CLI belum terpasang? npm i -g @ghazynabiel/prdfy",
+		"",
+		"CLI menangani persiapan berikut secara otomatis, tidak perlu dikerjakan manual:",
+		"- deteksi root repositori",
+		"- pembuatan .prdfyignore bila belum ada",
+		"- eksklusi file rahasia, dependensi, dan build",
+		"- validasi versi minimum",
+		"",
+		"Batasan:",
+		"- Jangan mengubah source code, membuat commit, atau push.",
+		"- Jangan menulis Sync Token ke file, log, atau commit.",
+		"- Laporkan keluaran CLI apa adanya. Jangan menyatakan sukses tanpa keluaran CLI yang sukses.",
+	);
+	return lines.join("\n");
+}
+
 // === Upload transport DTOs (Task 5) ===
 // These schemas mirror `packages/cli/src/lib/sync-client.ts` request shapes
 // EXACTLY. The CLI POSTs manifest batches as

@@ -10,57 +10,23 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
-import { buildSyncCommand, type SyncPromptPayload } from "@/lib/codebase-sync";
-import { CODEBASE_CLI_MIN_VERSION } from "@/lib/constants";
+import {
+	buildAgentPrompt,
+	buildSyncCommand,
+	type SyncPromptPayload,
+} from "@/lib/codebase-sync";
+
+// The prompt builder now lives beside `buildSyncCommand` in
+// `@/lib/codebase-sync` — one source of truth for payload-to-string rendering.
+// It is re-exported here so existing modal tests keep exercising it without
+// duplicating the prompt text.
+export { buildAgentPrompt };
 
 // Copyable external-agent prompt. The raw sync credential travels ONLY inside
 // the textarea value (and the clipboard copy of it): every other surface —
 // the command preview, labels, errors — renders the `<token>` placeholder via
 // buildSyncCommand so the credential can never leak through a screenshot,
 // log, or accidental selection outside the copy action.
-export function buildAgentPrompt(
-	payload: SyncPromptPayload,
-	context?: { projectName?: string },
-): string {
-	const syncCommand = `prdfy codebase sync --project-id ${payload.projectId} --sync-token ${payload.syncToken}`;
-	const headerLines = [
-		"Kamu adalah agen AI coding yang berjalan di komputer lokal user. Tugasmu: sinkronkan repositori lokal ke PrdFy memakai CLI resmi.",
-	];
-	if (context?.projectName) {
-		headerLines.push(
-			"",
-			"Fitur yang sedang direncanakan di PrdFy:",
-			`"${context.projectName}"`,
-		);
-	}
-
-	return [
-		...headerLines,
-		"",
-		"Langkah 1 — Cek CLI. Jalankan `prdfy --version`. Jika perintah tidak tersedia, install dulu:",
-		"npm i -g @ghazynabiel/prdfy",
-		"",
-		`Langkah 2 — Cek versi minimum ${payload.cliMinVersion || CODEBASE_CLI_MIN_VERSION}. Jika versi lebih lama, update:`,
-		"npm i -g @ghazynabiel/prdfy",
-		"",
-		"Langkah 3 — Tinjau file `.prdfyignore` di root repositori. Tambahkan pola eksklusi bila perlu. File ini bersifat lokal — JANGAN commit atau push otomatis.",
-		"",
-		"Langkah 4 — Pastikan kamu berada di root repositori yang benar, lalu jalankan:",
-		"",
-		syncCommand,
-		"",
-		"Info sesi:",
-		`- Server PrdFy: ${payload.apiBaseUrl}`,
-		`- Project ID: ${payload.projectId}`,
-		`- Kedaluwarsa: ${payload.expiresAt}`,
-		"",
-		"Aturan:",
-		"- JANGAN mengubah source code, membuat commit, atau push.",
-		"- File rahasia (.env, kunci, sertifikat) serta direktori build/dependensi otomatis dikecualikan — jangan kirim isinya.",
-		"- Laporkan status sync apa adanya; jangan mengarang progres persen.",
-	].join("\n");
-}
-
 interface SyncAgentModalProps {
 	open: boolean;
 	onClose: () => void;

@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readPrdfyIgnore } from "./ignore.js";
+import {
+	ensurePrdfyIgnore,
+	PRDFY_IGNORE_TEMPLATE,
+	readPrdfyIgnore,
+} from "./ignore.js";
 
 async function makeTempRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "prdfy-ignore-test-"));
@@ -67,5 +71,52 @@ describe("readPrdfyIgnore", () => {
 		// Negations are recorded but must never override secret/unsafe protection;
 		// the scanner enforces built-ins independently of these patterns.
 		expect(rules.patterns).toEqual([]);
+		// They are reported instead of failing silently.
+		expect(rules.droppedNegations).toEqual(["!.env", "!node_modules/"]);
+	});
+});
+
+describe("ensurePrdfyIgnore", () => {
+	it("creates .prdfyignore from the default template when missing", async () => {
+		const root = await makeTempRoot();
+		const result = await ensurePrdfyIgnore(root);
+		expect(result.created).toBe(true);
+		const content = await readFile(join(root, ".prdfyignore"), "utf-8");
+		expect(content).toBe(PRDFY_IGNORE_TEMPLATE);
+	});
+
+	it("is idempotent and never overwrites existing user rules", async () => {
+		const root = await makeTempRoot();
+		const userRules = "internal/\n*.log\n";
+		await writeFile(join(root, ".prdfyignore"), userRules, "utf-8");
+		const before = await stat(join(root, ".prdfyignore"));
+
+		const result = await ensurePrdfyIgnore(root);
+
+		expect(result.created).toBe(false);
+		expect(await readFile(join(root, ".prdfyignore"), "utf-8")).toBe(userRules);
+		expect((await stat(join(root, ".prdfyignore"))).mtimeMs).toBe(
+			before.mtimeMs,
+		);
+	});
+
+	it("creates a template containing no active patterns", async () => {
+		// Built-ins already cover secrets/build/binaries; an active pattern in
+		// the seed file would silently change what gets uploaded.
+		const root = await makeTempRoot();
+		await ensurePrdfyIgnore(root);
+		const rules = await readPrdfyIgnore(root);
+		expect(rules.patterns).toEqual([]);
+		expect(rules.droppedNegations).toEqual([]);
+	});
+
+	it("writes a template that is readable as custom rules when uncommented", async () => {
+		const root = await makeTempRoot();
+		await ensurePrdfyIgnore(root);
+		const content = await readFile(join(root, ".prdfyignore"), "utf-8");
+		// Documents the built-in coverage and shows example syntax.
+		expect(content).toContain("node_modules/");
+		expect(content).toContain(".env");
+		expect(content).toContain("!...");
 	});
 });

@@ -180,9 +180,20 @@ describe("syncCodebase happy path", () => {
 		expect(res.sessionId).toBe("sess-1");
 		expect(res.status).toBe("uploaded");
 		// fileCount = eligible entries, excludedCount = all exclusions (Task 2).
+		// The run bootstraps `.prdfyignore`, and the scanner excludes its own
+		// control file, so one exclusion is expected here.
 		expect(res.fileCount).toBe(2);
-		expect(res.excludedCount).toBe(0);
+		expect(res.excludedCount).toBe(1);
 		expect(res.uploadedFiles).toBe(2);
+		expect(res.ignoreCreated).toBe(true);
+		// The ignore file is local sync configuration, never uploaded content.
+		const uploadedPaths = client.uploadFileChunksWithRetry.mock.calls.flatMap(
+			(call) =>
+				(call[2] as Array<{ path: string }> | undefined)?.map((c) => c.path) ??
+				[],
+		);
+		expect(uploadedPaths).not.toContain(".prdfyignore");
+		expect(uploadedPaths).toEqual(["README.md", "src/app.ts"]);
 
 		const logged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
 		const parsed = JSON.parse(logged);

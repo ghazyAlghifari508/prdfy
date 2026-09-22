@@ -15,16 +15,18 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ApiError, DEFAULT_REQUEST_TIMEOUT_MS } from "../lib/api-client.js";
 import { resolveApiUrl } from "../lib/config.js";
-import { readPrdfyIgnore } from "../lib/ignore.js";
+import { ensurePrdfyIgnore, readPrdfyIgnore } from "../lib/ignore.js";
 import {
 	buildManifest,
 	ManifestTooLargeError,
 	type RepositoryManifest,
 } from "../lib/manifest.js";
-import { scanRepository } from "../lib/repository.js";
+import { resolveRepositoryRoot, scanRepository } from "../lib/repository.js";
 import {
+	CODEBASE_CLI_MIN_VERSION,
+	CODEBASE_CLI_VERSION,
+	compareCliVersions,
 	createSyncClient,
-	type FileChunkInput,
 	type FileChunkUploadResponse,
 	planFileChunks,
 	type SyncClient,
@@ -53,6 +55,14 @@ export interface SyncResult {
 	excludedCount: number;
 	uploadedFiles: number;
 	uploadedBytes: number;
+	/** Resolved repository root; human output only, never in JSON payloads. */
+	root?: string;
+	/** True when this run created `.prdfyignore` from the default template. */
+	ignoreCreated?: boolean;
+	/** `.prdfyignore` negation lines ignored because built-ins cannot be lifted. */
+	droppedNegations?: string[];
+	/** Set when the server requires a newer CLI than this one. */
+	cliUpdate?: { current: string; minimum: string };
 	snapshotId?: string;
 	errorCode?: string;
 	errorMessage?: string;
@@ -126,22 +136,48 @@ function failure(
 
 function printResult(result: SyncResult, output: SyncOutputMode): void {
 	if (output === "json") {
-		console.log(JSON.stringify(result, null, 2));
+		// Local filesystem paths stay out of the JSON contract; `manifest.ts`
+		// keeps every payload path repository-relative and JSON output must
+		// not reintroduce an absolute path.
+		const { root: _root, ...machineReadable } = result;
+		console.log(JSON.stringify(machineReadable, null, 2));
 		return;
+	}
+	const lines: string[] = [];
+	if (result.root) lines.push(`Repository   : ${result.root}`);
+	if (result.ignoreCreated !== undefined) {
+		lines.push(
+			`Ignore file  : ${
+				result.ignoreCreated
+					? ".prdfyignore dibuat dari template PrdFy (lokal, jangan di-commit)"
+					: ".prdfyignore sudah ada (tidak diubah)"
+			}`,
+		);
+	}
+	for (const negation of result.droppedNegations ?? []) {
+		lines.push(
+			`Peringatan   : pola negasi "${negation}" diabaikan; aturan bawaan tidak bisa dibatalkan`,
+		);
+	}
+	if (result.cliUpdate) {
+		lines.push(
+			`Update CLI   : versi ${result.cliUpdate.current} di bawah minimum ${result.cliUpdate.minimum}. Jalankan: npm i -g @ghazynabiel/prdfy`,
+		);
 	}
 	if (result.ok) {
-		console.log(
-			[
-				`Sync ${result.status}: ${result.uploadedFiles} file(s), ${result.uploadedBytes} byte(s)`,
-				`Session ${result.sessionId} · project ${result.projectId}`,
-				`Manifest: ${result.fileCount} included, ${result.excludedCount} excluded`,
-			].join("\n"),
+		lines.push(
+			`Sync ${result.status}: ${result.uploadedFiles} file(s), ${result.uploadedBytes} byte(s)`,
+			`Session      : ${result.sessionId} · project ${result.projectId}`,
+			`Manifest     : ${result.fileCount} included, ${result.excludedCount} excluded`,
 		);
+		if (result.snapshotId) lines.push(`Snapshot     : ${result.snapshotId}`);
+		console.log(lines.join("\n"));
 		return;
 	}
-	console.log(
+	lines.push(
 		`Sync ${result.status} [${result.errorCode}]: ${result.errorMessage}`,
 	);
+	console.log(lines.join("\n"));
 }
 
 export async function syncCodebase(
@@ -166,11 +202,30 @@ export async function syncCodebase(
 	}
 
 	const { projectId } = options;
-	const root = options.root ?? process.cwd();
 
+	// Preparation is the CLI's job, not the agent prompt's: resolve the real
+	// repository root, then bootstrap the local ignore file so the user never
+	// has to create it by hand.
+	let root: string;
+	try {
+		root = await resolveRepositoryRoot(process.cwd(), options.root);
+	} catch (err) {
+		const res = failure(
+			projectId,
+			"failed",
+			"ROOT_RESOLUTION_FAILED",
+			err instanceof Error ? err.message : String(err),
+		);
+		printResult({ ...res, root: options.root }, output);
+		return res;
+	}
+
+	let ignoreCreated: boolean;
+	let rules: Awaited<ReturnType<typeof readPrdfyIgnore>>;
 	let manifest: RepositoryManifest;
 	try {
-		const rules = await readPrdfyIgnore(root);
+		({ created: ignoreCreated } = await ensurePrdfyIgnore(root));
+		rules = await readPrdfyIgnore(root);
 		const scan = await scanRepository(root, rules);
 		manifest = await buildManifest(scan);
 	} catch (err) {
@@ -183,9 +238,18 @@ export async function syncCodebase(
 						"SCAN_FAILED",
 						err instanceof Error ? err.message : String(err),
 					);
-		printResult(res, output);
+		printResult({ ...res, root }, output);
 		return res;
 	}
+
+	// Non-fatal preparation context, present on every subsequent exit path.
+	// The root is carried in the result (never in JSON output) so warnings
+	// survive both the failure and success printers below.
+	const preparation = {
+		root,
+		ignoreCreated,
+		droppedNegations: rules.droppedNegations,
+	};
 
 	try {
 		assertNoBlockedContent(manifest);
@@ -196,6 +260,7 @@ export async function syncCodebase(
 				fileCount: manifest.fileCount,
 				excludedCount: manifest.excludedCount,
 			}),
+			...preparation,
 		};
 		printResult(res, output);
 		return res;
@@ -213,6 +278,15 @@ export async function syncCodebase(
 	try {
 		const client = createClient(syncToken, options.apiUrl ?? resolveApiUrl());
 		const handshake = await client.handshakeWithRetry(projectId);
+		// Update notice comes from the server's advertised minimum only: no
+		// registry lookup, no invented urgency. The handshake already fails
+		// closed for an unsupported version, so this is purely informational
+		// and rides along with whatever result the run produces.
+		const minimum = handshake.cliMinVersion ?? CODEBASE_CLI_MIN_VERSION;
+		const cliUpdate =
+			compareCliVersions(CODEBASE_CLI_VERSION, minimum) < 0
+				? { current: CODEBASE_CLI_VERSION, minimum }
+				: undefined;
 		if (output === "human") {
 			console.log(`Session ${handshake.sessionId}: ${handshake.status}`);
 		}
@@ -289,6 +363,8 @@ export async function syncCodebase(
 			excludedCount: completion.excludedCount ?? manifest.excludedCount,
 			uploadedFiles: ok ? eligible.length : 0,
 			uploadedBytes: ok ? uploadedBytes : 0,
+			...preparation,
+			...(cliUpdate ? { cliUpdate } : {}),
 			...(completion.snapshotId ? { snapshotId: completion.snapshotId } : {}),
 			...(!ok
 				? {
@@ -315,17 +391,21 @@ export async function syncCodebase(
 								excludedCount: manifest.excludedCount,
 							},
 						),
+						...preparation,
 					}
-				: failure(
-						projectId,
-						"failed",
-						"SYNC_FAILED",
-						err instanceof Error ? err.message : String(err),
-						{
-							fileCount: manifest.fileCount,
-							excludedCount: manifest.excludedCount,
-						},
-					);
+				: {
+						...failure(
+							projectId,
+							"failed",
+							"SYNC_FAILED",
+							err instanceof Error ? err.message : String(err),
+							{
+								fileCount: manifest.fileCount,
+								excludedCount: manifest.excludedCount,
+							},
+						),
+						...preparation,
+					};
 		printResult(res, output);
 		return res;
 	}

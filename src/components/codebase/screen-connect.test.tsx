@@ -114,4 +114,54 @@ describe("ScreenConnect", () => {
 		expect(actionBtn).toBeDefined();
 		expect(actionBtn?.disabled).toBe(true);
 	});
+
+	it("renders the objective-oriented prompt with session details", () => {
+		act(() => {
+			root?.render(
+				<ScreenConnect
+					projectName="Test App"
+					payload={samplePayload}
+					onAgentStarted={() => {}}
+				/>,
+			);
+		});
+
+		const rendered = container.textContent ?? "";
+		expect(rendered).toContain("Sinkronkan codebase repositori ini");
+		expect(rendered).toContain("proj_123");
+		expect(rendered).toContain("prdfy codebase sync --project-id proj_123");
+		// No robotic step scaffolding and no version gate in the prompt.
+		expect(rendered).not.toMatch(/Langkah \d/);
+		expect(rendered).not.toContain("2.0.0");
+	});
+
+	it("copies the new prompt including the credential", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal("navigator", {
+			...navigator,
+			clipboard: { writeText },
+		});
+
+		act(() => {
+			root?.render(
+				<ScreenConnect
+					projectName="Test App"
+					payload={samplePayload}
+					onAgentStarted={() => {}}
+				/>,
+			);
+		});
+
+		const copyBtn = [...container.querySelectorAll("button")].find((b) =>
+			/salin/i.test(b.textContent ?? ""),
+		);
+		await act(async () => {
+			copyBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const copied = String(writeText.mock.calls[0]?.[0] ?? "");
+		expect(copied).toContain("tok_123");
+		expect(copied).toContain("Sinkronkan codebase repositori ini");
+		expect(copied).toContain("prdfy codebase sync --project-id proj_123");
+	});
 });

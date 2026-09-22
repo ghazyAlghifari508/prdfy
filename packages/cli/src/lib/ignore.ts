@@ -6,7 +6,7 @@
  * by the repository scanner.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface IgnoreRules {
@@ -16,9 +16,38 @@ export interface IgnoreRules {
 	patterns: string[];
 	/** Raw file content (`""` when the file is absent). */
 	raw: string;
+	/** Negation lines that were dropped because user rules cannot lift built-ins. */
+	droppedNegations: string[];
 }
 
 const IGNORE_FILENAME = ".prdfyignore";
+
+/**
+ * Default `.prdfyignore` written on first sync. Every pattern is commented
+ * out: built-in exclusions already cover secrets, build output, and binaries,
+ * and an active pattern here would silently change which files get uploaded.
+ */
+export const PRDFY_IGNORE_TEMPLATE = `# .prdfyignore — exclusions untuk sync codebase PrdFy.
+#
+# File ini bersifat lokal. JANGAN commit ke repositori.
+#
+# PrdFy CLI sudah mengecualikan hal berikut secara otomatis, jadi tidak perlu
+# ditulis ulang di sini:
+#   - file rahasia      : .env*, *.pem, *.key, *.p12, *.pfx, sertifikat
+#   - dependensi & build: node_modules/, dist/, build/, coverage/, .git/
+#   - dump database     : *.sql, *.sqlite, *.db, *.dump
+#   - file binary       : gambar, audio, video, arsip, executable
+#
+# Tambahkan pola di bawah untuk mengecualikan path khusus repositori kamu.
+# Satu pola per baris. Mendukung *, **, ?, dan awalan direktori diakhiri "/".
+# Baris diawali "#" diabaikan. Pola negasi ("!...") diabaikan agar tidak
+# membatalkan perlindungan bawaan.
+#
+# Contoh:
+# internal/
+# scripts/seed-data/
+# *.log
+`;
 
 /** Directory names that are always excluded, at any depth. */
 const BUILT_IN_DIRECTORIES = new Set([
@@ -66,7 +95,8 @@ export type BuiltInExclusionReason =
 /**
  * Read `.prdfyignore` from the repository root without mutating the repo.
  * Missing file yields empty patterns. Negation rules (`!...`) are dropped:
- * user rules cannot lift built-in secret/unsafe-path protection.
+ * user rules cannot lift built-in secret/unsafe-path protection. Dropped
+ * negations are reported so the caller can warn instead of failing silently.
  */
 export async function readPrdfyIgnore(root: string): Promise<IgnoreRules> {
 	const filePath = join(root, IGNORE_FILENAME);
@@ -75,19 +105,56 @@ export async function readPrdfyIgnore(root: string): Promise<IgnoreRules> {
 		raw = await readFile(filePath, "utf-8");
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-			return { root, patterns: [], raw: "" };
+			return { root, patterns: [], raw: "", droppedNegations: [] };
 		}
 		throw err;
 	}
 	const patterns: string[] = [];
+	const droppedNegations: string[] = [];
 	for (const line of raw.split("\n")) {
 		const trimmed = line.trim();
 		if (trimmed === "" || trimmed.startsWith("#")) continue;
 		// Negations are inert: they must never re-include built-in exclusions.
-		if (trimmed.startsWith("!")) continue;
+		if (trimmed.startsWith("!")) {
+			droppedNegations.push(trimmed);
+			continue;
+		}
 		patterns.push(trimmed);
 	}
-	return { root, patterns, raw };
+	return { root, patterns, raw, droppedNegations };
+}
+
+/**
+ * Create `.prdfyignore` from the default template when it does not exist.
+ * Idempotent: an existing file is never read-modified or overwritten, so user
+ * rules always survive. Returns whether the file was created by this call.
+ * The file is local sync configuration; this module never invokes git, so it
+ * can never be committed or pushed automatically.
+ */
+export async function ensurePrdfyIgnore(
+	root: string,
+): Promise<{ created: boolean }> {
+	const filePath = join(root, IGNORE_FILENAME);
+	try {
+		await readFile(filePath, "utf-8");
+		return { created: false };
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+	}
+	// "wx" fails if the path appeared concurrently, so two runs cannot clobber
+	// each other and an existing file is never truncated.
+	try {
+		await writeFile(filePath, PRDFY_IGNORE_TEMPLATE, {
+			encoding: "utf-8",
+			flag: "wx",
+		});
+		return { created: true };
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException)?.code === "EEXIST") {
+			return { created: false };
+		}
+		throw err;
+	}
 }
 
 function globToRegExp(glob: string): RegExp {

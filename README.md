@@ -323,8 +323,8 @@ prdfy codebase sync --project-id <id> --sync-token <token>
 Available flags:
 - `--project-id <id>`: Required project UUID.
 - `--sync-token <token>`: Required project-scoped sync token (in-memory, never saved to global config).
-- `--root <path>`: Optional repository root (defaults to current working directory).
-- `--output <mode>`: Output format (`human` by default, or `json` for agent-to-agent piping).
+- `--root <path>`: Optional repository root. Detected automatically when omitted (nearest ancestor containing a `.git` entry), so running from a subdirectory still syncs the whole repository.
+- `--output <mode>`: Output format (`human` by default, or `json` for agent-to-agent piping). The resolved root is printed in `human` output only and is never added to the JSON payload.
 - `--api-url <url>`: Override API base URL (defaults to `http://localhost:3000`).
 
 ### 3. Exclusions & `.prdfyignore`
@@ -334,14 +334,23 @@ The CLI enforces **built-in exclusions** that can never be overridden by user co
 - Build outputs & dependencies: `node_modules/`, `dist/`, `build/`, `.git/`, `coverage/`
 - Local database dumps & binaries: `.sqlite`, `.db`, image/media binary files
 
-You can supplement these exclusions with a local `.prdfyignore` file in your repository root:
+`.prdfyignore` is created automatically on the first sync, so you never have to
+write it by hand. The generated template documents the built-in coverage above
+and ships with every pattern commented out — exclusions are already handled, and
+an active pattern in the seed file would silently change what gets uploaded.
+Only add repository-specific patterns:
+
 ```gitignore
 # Custom exclusions
 internal-tools/
 private-docs/
 fixtures/
 ```
-*Note: Negation patterns (`!pattern`) in `.prdfyignore` are ignored to prevent accidental leakage of protected paths.*
+
+The file is local sync configuration and is never committed or pushed
+automatically. It is also excluded from the upload itself.
+
+*Note: Negation patterns (`!pattern`) in `.prdfyignore` are inert to prevent accidental leakage of protected paths, and the CLI warns about each one it ignores.*
 
 ### 4. Privacy & Data Retention Policy
 

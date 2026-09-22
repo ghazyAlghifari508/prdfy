@@ -129,8 +129,59 @@ export function SyncStatus({
 	const isUploading = s === "uploading";
 	const isConnected = s !== "waiting_for_cli" && !isFailed && !isExpired;
 
+	// Three stages, each driven by a signal this client can actually observe.
+	// `scanning` and `filtering` are deliberately NOT shown: the CLI never
+	// reports them (the server walks them as bookkeeping), so a stage for them
+	// would be an invented sequence rather than a real status.
+	const uploadStarted =
+		isUploading ||
+		isAnalyzing ||
+		isReady ||
+		(status?.fileCount !== undefined && s !== "uploaded");
+	const uploadDone = isAnalyzing || isReady || status?.status === "uploaded";
+	const analysisDone = isReady;
+	const analysisFailed = status?.analysisStatus === "failed";
+
 	const showRetry = isFailed || isExpired;
-	const showAnalysisRetry = status?.analysisStatus === "failed";
+	const showAnalysisRetry = analysisFailed;
+
+	type StageState = "done" | "active" | "failed" | "pending";
+	const stageClass: Record<StageState, string> = {
+		done: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200",
+		active: "border-blue-500/25 bg-blue-500/10 text-blue-200",
+		failed: "border-crimson/30 bg-crimson/10 text-crimson",
+		pending: "border-graphite text-slate",
+	};
+	const StageIcon = ({ state }: { state: StageState }) =>
+		state === "done" ? (
+			<Check size={14} className="text-emerald-400 font-bold shrink-0" />
+		) : state === "active" ? (
+			<Loader2 size={14} className="text-blue-400 animate-spin shrink-0" />
+		) : state === "failed" ? (
+			<AlertCircle size={14} className="text-crimson shrink-0" />
+		) : (
+			<Circle size={14} className="text-slate shrink-0" />
+		);
+
+	const connectionStage: StageState = isExpired
+		? "failed"
+		: isConnected
+			? "done"
+			: "active";
+	const uploadStage: StageState = !isConnected
+		? "pending"
+		: uploadDone
+			? "done"
+			: uploadStarted
+				? "active"
+				: "pending";
+	const analysisStage: StageState = analysisFailed
+		? "failed"
+		: analysisDone
+			? "done"
+			: isConnected
+				? "active"
+				: "pending";
 
 	return (
 		<div className="w-full animate-enter flex flex-col gap-6">
@@ -144,8 +195,9 @@ export function SyncStatus({
 						Sync codebase
 					</h1>
 					<p className="mt-2 text-xs sm:text-sm text-fog max-w-xl leading-relaxed">
-						AI agent sedang menjalankan PrdFy CLI. Kamu bisa tetap melihat
-						terminal agent untuk detail proses.
+						PrdFy CLI menjalankan sync dari repositori lokal kamu. Perintahnya
+						berjalan di terminal agent — progress di bawah mengikuti status
+						server yang sebenarnya.
 					</p>
 				</div>
 				<span className="inline-flex items-center gap-2 rounded-full border border-iron bg-charcoal/80 px-3 py-1.5 text-xs text-fog backdrop-blur-md self-start sm:self-auto">
@@ -203,132 +255,31 @@ export function SyncStatus({
 
 				{/* Panel Body */}
 				<div className="p-5 sm:p-6 flex flex-col gap-5">
-					{/* Status List */}
+					{/* Status List — three stages, each backed by a real signal */}
 					<div className="flex flex-col gap-2.5">
-						{/* Item 1: Root repository */}
+						{/* Stage 1: CLI handshake (session left waiting_for_cli) */}
 						<div
-							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
-								isConnected || isReady || isUploading || isAnalyzing
-									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-									: s === "waiting_for_cli"
-										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
-										: "border-graphite text-fog"
-							}`}
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${stageClass[connectionStage]}`}
 						>
-							{isConnected || isReady || isUploading || isAnalyzing ? (
-								<Check
-									size={14}
-									className="text-emerald-400 font-bold shrink-0"
-								/>
-							) : (
-								<Loader2
-									size={14}
-									className="text-blue-400 animate-spin shrink-0"
-								/>
-							)}
+							<StageIcon state={connectionStage} />
 							<span className="font-medium">
-								{isConnected || isReady || isUploading || isAnalyzing
-									? "Repository root terdeteksi"
-									: "Menunggu koneksi CLI dari terminal lokal"}
+								{isConnected
+									? "CLI terhubung dan repository root terdeteksi"
+									: isExpired
+										? "Sesi kedaluwarsa sebelum CLI terhubung"
+										: "Menunggu CLI dari terminal lokal"}
 							</span>
 						</div>
 
-						{/* Item 2: Package manifest & framework */}
+						{/* Stage 2: snapshot upload (status uploading or later) */}
 						<div
-							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
-								status?.fileCount !== undefined ||
-								status?.excludedCount !== undefined ||
-								isReady
-									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-									: isConnected
-										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
-										: "border-graphite text-slate"
-							}`}
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${stageClass[uploadStage]}`}
 						>
-							{status?.fileCount !== undefined ||
-							status?.excludedCount !== undefined ||
-							isReady ? (
-								<Check
-									size={14}
-									className="text-emerald-400 font-bold shrink-0"
-								/>
-							) : isConnected ? (
-								<Loader2
-									size={14}
-									className="text-blue-400 animate-spin shrink-0"
-								/>
-							) : (
-								<Circle size={14} className="text-slate shrink-0" />
-							)}
+							<StageIcon state={uploadStage} />
 							<span className="font-medium">
-								Package manifest dan framework dibaca
-							</span>
-						</div>
-
-						{/* Item 3: Secrets & generated files */}
-						<div
-							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
-								status?.excludedCount !== undefined
-									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-									: isConnected
-										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
-										: "border-graphite text-slate"
-							}`}
-						>
-							{status?.excludedCount !== undefined ? (
-								<Check
-									size={14}
-									className="text-emerald-400 font-bold shrink-0"
-								/>
-							) : isConnected ? (
-								<Loader2
-									size={14}
-									className="text-blue-400 animate-spin shrink-0"
-								/>
-							) : (
-								<Circle size={14} className="text-slate shrink-0" />
-							)}
-							<span className="font-medium">
-								Secrets dan generated files dikecualikan
-							</span>
-							{status?.excludedCount !== undefined && (
-								<span className="ml-auto font-mono text-[11px] opacity-80">
-									{status.excludedCount} file
-								</span>
-							)}
-						</div>
-
-						{/* Item 4: Sending source context */}
-						<div
-							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
-								isReady ||
-								(
-									status?.fileCount !== undefined &&
-										status?.status !== "uploading"
-								)
-									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-									: isUploading
-										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
-										: "border-graphite text-slate"
-							}`}
-						>
-							{isReady ||
-							(status?.fileCount !== undefined &&
-								status?.status !== "uploading") ? (
-								<Check
-									size={14}
-									className="text-emerald-400 font-bold shrink-0"
-								/>
-							) : isUploading ? (
-								<Loader2
-									size={14}
-									className="text-blue-400 animate-spin shrink-0"
-								/>
-							) : (
-								<Circle size={14} className="text-slate shrink-0" />
-							)}
-							<span className="font-medium">
-								Mengirim source context yang relevan ke PrdFy
+								{uploadDone
+									? "Snapshot terkirim dan terverifikasi"
+									: "Mengirim snapshot source context"}
 							</span>
 							{status?.fileCount !== undefined && (
 								<span className="ml-auto font-mono text-[11px] opacity-80">
@@ -337,44 +288,28 @@ export function SyncStatus({
 							)}
 						</div>
 
-						{/* Item 5: Codebase analysis */}
+						{/* Stage 3: codebase analysis (analysisStatus) */}
 						<div
-							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${
-								isReady
-									? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-									: isAnalyzing
-										? "border-blue-500/25 bg-blue-500/10 text-blue-200"
-										: showAnalysisRetry
-											? "border-crimson/30 bg-crimson/10 text-crimson"
-											: "border-graphite text-slate"
-							}`}
+							className={`flex items-center gap-2.5 rounded-md border p-3 text-xs transition-colors ${stageClass[analysisStage]}`}
 						>
-							{isReady ? (
-								<Check
-									size={14}
-									className="text-emerald-400 font-bold shrink-0"
-								/>
-							) : isAnalyzing ? (
-								<Loader2
-									size={14}
-									className="text-blue-400 animate-spin shrink-0"
-								/>
-							) : showAnalysisRetry ? (
-								<AlertCircle size={14} className="text-crimson shrink-0" />
-							) : (
-								<Circle size={14} className="text-slate shrink-0" />
-							)}
+							<StageIcon state={analysisStage} />
 							<span className="font-medium">
-								{isReady
-									? "Menyusun codebase analysis (selesai)"
-									: isAnalyzing
-										? "Menyusun codebase analysis..."
-										: showAnalysisRetry
-											? "Menyusun codebase analysis gagal"
-											: "Menyusun codebase analysis"}
+								{analysisFailed
+									? "Analisis codebase gagal"
+									: analysisDone
+										? "Analisis codebase selesai"
+										: "Menyusun analisis codebase"}
 							</span>
 						</div>
 					</div>
+
+					{/* Exclusion count is reported only once the server has it */}
+					{status?.excludedCount !== undefined && (
+						<p className="font-mono text-[11px] text-fog">
+							{status.excludedCount} file dikecualikan otomatis (rahasia,
+							dependensi, build, binary)
+						</p>
+					)}
 
 					{/* Error Message if any */}
 					{status?.errorMessage && (

@@ -210,7 +210,12 @@ export function planManifestBatches(
 	return batches;
 }
 
-function compareVersions(a: string, b: string): number {
+/**
+ * Numeric semver comparison. Exported so the sync command's update notice and
+ * the handshake gate share one implementation instead of duplicating the
+ * version rules.
+ */
+export function compareCliVersions(a: string, b: string): number {
 	const parts = (v: string) => v.split(".").map((n) => Number(n) || 0);
 	const [aParts, bParts] = [parts(a), parts(b)];
 	for (let i = 0; i < Math.max(aParts.length, bParts.length); i += 1) {
@@ -263,7 +268,7 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 			cliVersion: CODEBASE_CLI_VERSION,
 		});
 		const minVersion = res.cliMinVersion ?? CODEBASE_CLI_MIN_VERSION;
-		if (compareVersions(CODEBASE_CLI_VERSION, minVersion) < 0) {
+		if (compareCliVersions(CODEBASE_CLI_VERSION, minVersion) < 0) {
 			throw new ApiError(
 				`prdfy CLI ${CODEBASE_CLI_VERSION} is below the required version ${minVersion}. Update with: npm i -g @ghazynabiel/prdfy`,
 				{ code: "CLI_UPDATE_REQUIRED", retryable: false },

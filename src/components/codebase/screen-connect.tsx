@@ -2,8 +2,7 @@
 
 import { Check, Copy, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { buildAgentPrompt } from "@/components/codebase/sync-agent-modal";
-import type { SyncPromptPayload } from "@/lib/codebase-sync";
+import { buildAgentPrompt, type SyncPromptPayload } from "@/lib/codebase-sync";
 
 interface ScreenConnectProps {
 	projectName: string;
@@ -46,7 +45,9 @@ export function ScreenConnect({
 			copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
 		} catch {
 			setCopied(false);
-			setCopyError("Gagal menyalin otomatis. Silakan salin teks secara manual.");
+			setCopyError(
+				"Gagal menyalin otomatis. Silakan salin teks secara manual.",
+			);
 			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
 			copyTimeoutRef.current = setTimeout(() => setCopyError(null), 4000);
 		}
