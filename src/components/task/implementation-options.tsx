@@ -126,9 +126,16 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
 
 ### 6. VERIFIKASI ACCEPTANCE CRITERIA SEBELUM COMPLETED
 - Sebelum menandai task sebagai completed, WAJIB verifikasi implementasi terhadap Acceptance Criteria (AC) yang relevan.
-- Baca AC via CLI: \`prdfy ac {projectId}\` atau lihat output \`prdfy task next {projectId}\` yang sudah menyertakan AC context.
-- Jika implementasi TIDAK memenuhi semua poin AC untuk fitur tersebut, DILARANG mengubah status ke completed.
+- Setiap task punya field \`covers\` berisi ID AC yang menjadi tanggung jawabnya. Baca daftar itu lewat \`prdfy task list {projectId}\` atau \`prdfy task next {projectId}\`.
+- WAJIB implementasikan SEMUA poin AC di dalam \`covers\`, bukan hanya happy path-nya. Termasuk state loading, empty, error, validasi, dan authorization yang tertulis di AC.
+- Jika implementasi TIDAK memenuhi semua poin AC tersebut, DILARANG mengubah status ke completed.
 - Perbaiki implementasi sampai memenuhi AC, baru tandai completed.
+
+### 7. JANGAN MENYEDERHANAKAN SCOPE
+- Setiap task dan subtask menggambarkan deliverable yang sudah dipisah berdasarkan responsibility (data model, service logic, API boundary, UI, validasi, authorization, async lifecycle, integrasi, error/recovery, state). JANGAN menggabungkannya kembali menjadi satu implementasi minimal.
+- JANGAN mengganti requirement dengan versi lebih sederhana agar cepat selesai. Jika satu bagian terasa berat, kerjakan bagian itu, bukan menghapusnya.
+- JANGAN menganggap task selesai hanya karena UI happy path muncul. Cek behavior, state, dan edge case di detail subtask.
+- Detail subtask adalah instruksi teknis. IKUTI persis, termasuk endpoint, aturan validasi, dan penanganan error yang tertulis.
 
 ## Instruksi Implementasi
 

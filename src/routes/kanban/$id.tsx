@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { useEffect } from "react";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
 import { db } from "@/db";
@@ -19,7 +19,13 @@ const loadKanban = createServerFn({ method: "GET" })
 			db
 				.select({ id: projects.id, name: projects.name, step: projects.step })
 				.from(projects)
-				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+				.where(
+					and(
+						eq(projects.id, id),
+						eq(projects.userId, user.id),
+						isNull(projects.deletedAt),
+					),
+				)
 				.limit(1),
 			getLatestPrdContent(id),
 			getLatestAcContent(id),

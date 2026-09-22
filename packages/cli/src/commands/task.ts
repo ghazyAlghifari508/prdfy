@@ -14,6 +14,7 @@ interface TaskResponse {
 	startedAt: string | null;
 	completedAt: string | null;
 	acContext: string | null;
+	covers: string[];
 	subtasks: Array<{
 		name: string;
 		description: string;
@@ -52,6 +53,11 @@ export async function taskListCommand(
 			console.log(
 				`  ${statusColor(t.status.padEnd(12))} ${chalk.white(t.name)} ${chalk.dim(`[${t.featureName}]`)} ${chalk.dim(`id: ${t.id.slice(0, 8)}...`)}`,
 			);
+			if (t.covers && t.covers.length > 0) {
+				console.log(
+					`  ${chalk.dim("             ")} ${chalk.cyan(`covers: ${t.covers.join(", ")}`)}`,
+				);
+			}
 			if (t.description) {
 				console.log(
 					`  ${chalk.dim("             ")} ${chalk.dim(t.description.slice(0, 80))}`,
@@ -113,6 +119,11 @@ export async function taskNextCommand(projectId: string) {
 		console.log(`  ${chalk.white("Nama:")}        ${task.name}`);
 		console.log(`  ${chalk.white("Fitur:")}       ${task.featureName}`);
 		console.log(`  ${chalk.white("Status:")}      ${chalk.gray(task.status)}`);
+		if (task.covers && task.covers.length > 0) {
+			console.log(
+				`  ${chalk.white("Covers:")}      ${chalk.cyan(task.covers.join(", "))}`,
+			);
+		}
 		if (task.description) {
 			console.log(`  ${chalk.white("Deskripsi:")}   ${task.description}`);
 		}

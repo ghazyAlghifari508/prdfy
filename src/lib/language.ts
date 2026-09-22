@@ -65,12 +65,12 @@ export async function getProjectLanguage(
 	try {
 		const { db } = await import("@/db");
 		const { projects } = await import("@/db/schema");
-		const { eq } = await import("drizzle-orm");
+		const { and, eq, isNull } = await import("drizzle-orm");
 
 		const [project] = await db
 			.select({ language: projects.language })
 			.from(projects)
-			.where(eq(projects.id, projectId))
+			.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 			.limit(1);
 
 		return normalizeLanguage(project?.language);

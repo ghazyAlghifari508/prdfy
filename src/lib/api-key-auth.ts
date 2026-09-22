@@ -3,7 +3,7 @@
  * api_keys. Schema: `key` (hash) col, `scopes` text[].
  */
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { apiKeys, projects } from "@/db/schema";
 
@@ -90,7 +90,15 @@ export async function verifyProjectOwnership(
 	const [row] = await db
 		.select({ id: projects.id })
 		.from(projects)
-		.where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+		.where(
+			and(
+				eq(projects.id, projectId),
+				eq(projects.userId, userId),
+				// A deleted project is not operable through the CLI/public API:
+				// its artifacts are purged, so the id must stop resolving.
+				isNull(projects.deletedAt),
+			),
+		)
 		.limit(1);
 	return Boolean(row);
 }

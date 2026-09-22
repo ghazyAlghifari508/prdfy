@@ -11,9 +11,16 @@
  * If feature-level grouping matters, add a `feature` text col to tasks and
  * group by it on read. Sufficient for export (JSON) today.
  */
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { acVersions, projects, tasks } from "@/db/schema";
+import {
+	type AcCoverageReport,
+	buildCoverageReport,
+	canonicalAcId,
+	extractAcIds,
+	extractReferencedAcIds,
+} from "@/lib/ac-coverage";
 import { advanceStep } from "@/lib/flow-progress";
 
 export interface TaskTree {
@@ -22,6 +29,8 @@ export interface TaskTree {
 		tasks: Array<{
 			name: string;
 			description: string;
+			/** Requirement ids this task delivers, e.g. ["AC-1.1", "AC-1.2"]. */
+			covers: string[];
 			subtasks: Array<{ name: string; description: string; details: string[] }>;
 		}>;
 	}>;
@@ -29,6 +38,16 @@ export interface TaskTree {
 
 const MAX_TASK_NAME_CHARS = 500;
 const MAX_TASK_DESC_CHARS = 5000;
+
+/**
+ * Legacy fallback: task trees generated before the `covers` field existed only
+ * carry prose references such as "(Cover AC-1.1, AC-1.2)" in the description.
+ * Reading them keeps already-persisted projects valid instead of reporting
+ * every legacy requirement as missing.
+ */
+function coversFromLegacyDescription(description: string): string[] {
+	return extractReferencedAcIds(description);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,10 +84,40 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 				)
 					return null;
 				if (!Array.isArray(task.subtasks)) return null;
+				// Coverage is structural when present. A legacy tree without the
+				// field falls back to prose references so it stays readable.
+				let covers: string[];
+				if (task.covers === undefined) {
+					covers = coversFromLegacyDescription(
+						typeof task.description === "string" ? task.description : "",
+					);
+				} else {
+					if (!Array.isArray(task.covers)) return null;
+					const collected: string[] = [];
+					const seen = new Set<string>();
+					for (const entry of task.covers) {
+						if (typeof entry !== "string") return null;
+						const trimmed = entry.trim();
+						if (!trimmed) continue;
+						if (trimmed.length > MAX_TASK_NAME_CHARS) return null;
+						// Accept both a bare id and a stray prose reference, but
+						// only keep tokens that really are AC identifiers.
+						const ids = extractReferencedAcIds(trimmed);
+						if (ids.length === 0) continue;
+						for (const id of ids) {
+							const canonical = canonicalAcId(id);
+							if (seen.has(canonical)) continue;
+							seen.add(canonical);
+							collected.push(canonical);
+						}
+					}
+					covers = collected;
+				}
 				const outTask: TaskTree["features"][number]["tasks"][number] = {
 					name: task.name.trim(),
 					description:
 						typeof task.description === "string" ? task.description : "",
+					covers,
 					subtasks: [],
 				};
 				for (const subtask of task.subtasks) {
@@ -109,6 +158,41 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 }
 
 /**
+ * Every requirement id declared by the tree, in tree order. Legacy tasks
+ * (persisted before `covers` existed) contribute their prose references so a
+ * stored tree is validated on the same terms as a freshly parsed one.
+ */
+export function collectDeclaredCovers(taskTree: TaskTree): string[] {
+	const out: string[] = [];
+	for (const feature of taskTree.features) {
+		for (const task of feature.tasks) {
+			if (task.covers.length > 0) {
+				out.push(...task.covers);
+				continue;
+			}
+			out.push(...coversFromLegacyDescription(task.description));
+		}
+	}
+	return out;
+}
+
+/**
+ * Verify that a generated tree delivers every requirement defined by the
+ * authoritative AC document. The model's claim is not trusted: coverage is
+ * read from the structured `covers` field and compared to the identifiers the
+ * AC document actually defines.
+ */
+export function evaluateTaskCoverage(
+	taskTree: TaskTree,
+	acMarkdown: string,
+): AcCoverageReport {
+	return buildCoverageReport({
+		declared: collectDeclaredCovers(taskTree),
+		defined: extractAcIds(acMarkdown),
+	});
+}
+
+/**
  * Save task tree. One `tasks` row per task (not per feature).
  * featureName preserves feature grouping. Each subtask gets status: "pending".
  */
@@ -132,6 +216,7 @@ export async function saveTaskTree(
 				description: task.description || null,
 				featureName: feature.name,
 				status: "pending",
+				covers: task.covers,
 				subtasks: task.subtasks.map((s) => ({
 					name: s.name,
 					description: s.description,
@@ -151,7 +236,7 @@ export async function saveTaskTree(
 			const [proj] = await tx
 				.select({ step: projects.step })
 				.from(projects)
-				.where(eq(projects.id, projectId))
+				.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 				.for("update")
 				.limit(1);
 			const updateData: Record<string, unknown> = {
@@ -184,6 +269,7 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 				title: tasks.title,
 				description: tasks.description,
 				featureName: tasks.featureName,
+				covers: tasks.covers,
 				subtasks: tasks.subtasks,
 			})
 			.from(tasks)
@@ -226,10 +312,22 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 						: [],
 				}));
 
+			// Coverage is structural when persisted; legacy rows without the
+			// column fall back to their prose references so export/CLI keep
+			// reporting the traceability that was actually generated.
+			const storedCovers = Array.isArray(row.covers)
+				? row.covers.filter((c): c is string => typeof c === "string")
+				: [];
+			const covers =
+				storedCovers.length > 0
+					? storedCovers.map(canonicalAcId)
+					: coversFromLegacyDescription(row.description || "");
+
 			// ponytail: feature guaranteed present via lazy-init above; push onto it
 			feature.tasks.push({
 				name: row.title,
 				description: row.description || "",
+				covers,
 				subtasks,
 			});
 		}

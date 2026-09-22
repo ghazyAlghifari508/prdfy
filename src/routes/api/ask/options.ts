@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { projects, prdVersions, subscriptions } from "@/db/schema";
+import { prdVersions, projects, subscriptions } from "@/db/schema";
 import {
 	askHandoffSchema,
 	buildCodebasePromptBlock,
@@ -10,10 +10,13 @@ import {
 	resolveActiveSnapshotId,
 	saveAskHandoff,
 } from "@/lib/codebase-generation-context";
-import { isTruncatedGeneration, shouldMarkQuestionStep } from "@/lib/flow-progress";
+import { MAX_PROMPT_LENGTH } from "@/lib/constants";
+import {
+	isTruncatedGeneration,
+	shouldMarkQuestionStep,
+} from "@/lib/flow-progress";
 import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
 import { ASK_OPTIONS_GENERATION_PROMPT } from "@/lib/prompts-ask";
-import { MAX_PROMPT_LENGTH } from "@/lib/constants";
 import { checkRateLimit } from "@/lib/rate-limit";
 import {
 	selectModels,
@@ -99,7 +102,13 @@ export const Route = createFileRoute("/api/ask/options")({
 						projectMode: projects.projectMode,
 					})
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });
@@ -150,8 +159,7 @@ export const Route = createFileRoute("/api/ask/options")({
 									.limit(1);
 								if (owned) activeSnapshotId = owned.id;
 							}
-							activeSnapshotId ??=
-								await resolveActiveSnapshotId(projectId);
+							activeSnapshotId ??= await resolveActiveSnapshotId(projectId);
 						}
 						await saveAskHandoff(user.id, {
 							...parsed.data,
@@ -299,7 +307,11 @@ export const Route = createFileRoute("/api/ask/options")({
 							.select({ step: projects.step })
 							.from(projects)
 							.where(
-								and(eq(projects.id, projectId), eq(projects.userId, user.id)),
+								and(
+									eq(projects.id, projectId),
+									eq(projects.userId, user.id),
+									isNull(projects.deletedAt),
+								),
 							)
 							.limit(1);
 						const [prdRow] = await db

@@ -26,11 +26,11 @@ Struktur dokumen tetap sama, tapi jumlah AC per fitur proporsional terhadap komp
 
 const TASK = `
 ## MODE KEDALAMAN: ADAPTIF
-Sesuaikan jumlah task, subtask, dan detail dengan KOMPLEKSITAS fitur dari AC:
+Sesuaikan jumlah task, subtask, dan detail dengan KOMPLEKSITAS requirement di PRD + AC:
 - Fitur simpel → sedikit task dan subtask, detail secukupnya.
 - Fitur menengah → task dan subtask proporsional, detail lengkap.
-- Fitur kompleks → banyak task dan subtask, detail mendalam.
-Struktur JSON tetap sama, tapi jumlah item di setiap level proporsional. JANGAN memaksakan banyak task untuk fitur simpel. JANGAN mengurangi task untuk fitur kompleks. Setiap subtask WAJIB punya field "details" (array langkah granular, minimum 1 item).`;
+- Fitur kompleks (banyak state, aturan bisnis, integrasi, async lifecycle) → banyak task dan subtask, detail mendalam.
+Jumlah task mengikuti jumlah deliverable yang benar-benar dibutuhkan, bukan target angka. JANGAN memaksakan banyak task untuk fitur simpel. JANGAN mengurangi task atau menggabungkan requirement berbeda hanya agar output lebih pendek. Setiap subtask WAJIB punya field "details" (array langkah granular, minimum 1 item).`;
 
 const TABLES: Record<DocKind, string> = { prd: PRD, ac: AC, task: TASK };
 
@@ -41,7 +41,9 @@ export function depthDirective(kind: DocKind): string {
 	// unsafe cast can still arrive here, and an undefined lookup would
 	// silently poison prompt construction downstream.
 	if (!VALID_KINDS.has(kind as string)) {
-		throw new Error(`Unknown document kind for depth directive: ${String(kind)}`);
+		throw new Error(
+			`Unknown document kind for depth directive: ${String(kind)}`,
+		);
 	}
 	return TABLES[kind];
 }

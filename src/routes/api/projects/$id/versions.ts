@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { prdVersions, projects } from "@/db/schema";
 import { requireUser } from "@/lib/session";
@@ -21,7 +21,13 @@ export const Route = createFileRoute("/api/projects/$id/versions")({
 				const [project] = await db
 					.select({ id: projects.id })
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });

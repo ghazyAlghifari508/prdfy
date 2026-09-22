@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { useEffect } from "react";
 import { TaskDetail } from "@/components/task/task-detail";
 import { db } from "@/db";
@@ -27,7 +27,13 @@ const loadTask = createServerFn({ method: "GET" })
 					step: projects.step,
 				})
 				.from(projects)
-				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+				.where(
+					and(
+						eq(projects.id, id),
+						eq(projects.userId, user.id),
+						isNull(projects.deletedAt),
+					),
+				)
 				.limit(1),
 			getLatestPrdContent(id),
 			getLatestAcContent(id),

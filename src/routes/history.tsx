@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { HistoryPage } from "@/components/history/history-page";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
@@ -32,7 +32,7 @@ const loadHistory = createServerFn({ method: "GET" }).handler(async () => {
 			description: projects.description,
 		})
 		.from(projects)
-		.where(eq(projects.userId, user.id))
+		.where(and(eq(projects.userId, user.id), isNull(projects.deletedAt)))
 		.orderBy(desc(projects.updatedAt));
 
 	// ponytail: preview is the AI-written project summary (projects.description,

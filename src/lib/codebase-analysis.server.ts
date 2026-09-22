@@ -21,7 +21,7 @@
 //    analyzing → uploaded so a fresh record can be requested. No credit is
 //    consumed either way.
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import {
 	codebaseAnalyses,
 	codebaseSnapshotFiles,
@@ -139,7 +139,7 @@ export async function requestCodebaseAnalysis(
 	const [project] = await db
 		.select({ name: projects.name, description: projects.description })
 		.from(projects)
-		.where(eq(projects.id, projectId))
+		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 		.limit(1);
 	const featurePrompt =
 		project?.description?.trim() || project?.name?.trim() || projectId;

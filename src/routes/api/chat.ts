@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import {
 	buildPrdMetrics,
 	type CreditQuote,
@@ -223,6 +223,7 @@ export const Route = createFileRoute("/api/chat")({
 							and(
 								eq(projects.id, projectIdToUse),
 								eq(projects.userId, user.id),
+								isNull(projects.deletedAt),
 							),
 						)
 						.limit(1);
@@ -599,9 +600,7 @@ export const Route = createFileRoute("/api/chat")({
 									createdConversationId = result.createdConversationId;
 									createdProjectId = result.createdProjectId;
 								} catch (error) {
-									if (
-										error instanceof ConversationProjectOwnershipError
-									) {
+									if (error instanceof ConversationProjectOwnershipError) {
 										await safeRelease("conversation ownership mismatch");
 										await safeError("Project not found or unauthorized");
 										return;

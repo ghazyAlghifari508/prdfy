@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	codebaseSnapshots,
@@ -116,7 +116,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/sync")({
 						projectMode: projects.projectMode,
 					})
 					.from(projects)
-					.where(eq(projects.id, projectId))
+					.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 					.limit(1);
 				if (!project || project.userId !== session.userId)
 					return Response.json(

@@ -141,6 +141,13 @@
       "when": 1789906519215,
       "tag": "0019_parched_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790061690396,
+      "tag": "0020_project_deletion_tombstone_and_task_coverage",
+      "breakpoints": true
     }
   ]
 }

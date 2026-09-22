@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { useEffect } from "react";
 import { AskFlow } from "@/app/ask/ask-flow";
 import { db } from "@/db";
@@ -39,7 +39,13 @@ const loadAsk = createServerFn({ method: "GET" })
 					projectMode: projects.projectMode,
 				})
 				.from(projects)
-				.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+				.where(
+					and(
+						eq(projects.id, id),
+						eq(projects.userId, user.id),
+						isNull(projects.deletedAt),
+					),
+				)
 				.limit(1),
 			db
 				.select({ id: prdVersions.id })
@@ -75,9 +81,7 @@ const loadAsk = createServerFn({ method: "GET" })
 			}
 		}
 
-		const { getAskHandoff } = await import(
-			"@/lib/codebase-generation-context"
-		);
+		const { getAskHandoff } = await import("@/lib/codebase-generation-context");
 		const loadedHandoff = await getAskHandoff(id, user.id);
 		let savedHandoff = loadedHandoff;
 		if (!savedHandoff) {

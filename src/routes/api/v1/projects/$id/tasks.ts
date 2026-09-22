@@ -69,6 +69,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 					startedAt: Date | null;
 					completedAt: Date | null;
 					dependencies: unknown;
+					covers: string[] | null;
 					subtasks: unknown;
 				}>;
 				let acMarkdown: string | null;
@@ -84,6 +85,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 							startedAt: tasks.startedAt,
 							completedAt: tasks.completedAt,
 							dependencies: tasks.dependencies,
+							covers: tasks.covers,
 							subtasks: tasks.subtasks,
 						})
 						.from(tasks)
@@ -112,6 +114,11 @@ export const Route = createFileRoute("/api/v1/projects/$id/tasks")({
 						description: t.description,
 						status: t.status ?? "pending",
 						featureName: t.featureName || "Umum",
+						// Requirement ids this task delivers. Legacy rows carry
+						// their references in the description only.
+						covers: Array.isArray(t.covers)
+							? t.covers.filter((c): c is string => typeof c === "string")
+							: [],
 						acContext: acMarkdown
 							? extractFeatureSection(acMarkdown, t.featureName || "Umum")
 							: null,

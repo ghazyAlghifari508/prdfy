@@ -28,7 +28,13 @@ async function getGuardedProject(userId: string, projectId: string) {
 	const [project] = await db
 		.select({ id: projects.id, projectMode: projects.projectMode })
 		.from(projects)
-		.where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+		.where(
+			and(
+				eq(projects.id, projectId),
+				eq(projects.userId, userId),
+				isNull(projects.deletedAt),
+			),
+		)
 		.limit(1);
 	return project ?? null;
 }

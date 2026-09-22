@@ -29,7 +29,7 @@ export function sanitizeModelOutput(content: string): string {
 	return text.length > 0 ? text : content;
 }
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { conversations, prdVersions, projects } from "@/db/schema";
 import { advanceStep } from "@/lib/flow-progress";
@@ -440,7 +440,9 @@ export async function savePrdVersion(
 		const [proj] = await db
 			.select({ id: projects.id })
 			.from(projects)
-			.where(eq(projects.id, idOrConversationId))
+			.where(
+				and(eq(projects.id, idOrConversationId), isNull(projects.deletedAt)),
+			)
 			.limit(1);
 		if (proj?.id) {
 			projectId = proj.id;
@@ -474,7 +476,7 @@ export async function savePrdVersion(
 		const [project] = await tx
 			.select({ step: projects.step })
 			.from(projects)
-			.where(eq(projects.id, projectId))
+			.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 			.for("update")
 			.limit(1);
 		if (!project) throw new Error("Project not found for PRD save");

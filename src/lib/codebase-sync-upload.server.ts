@@ -17,7 +17,7 @@
 // project binding + session binding + usability checks below ARE the
 // capability enforcement for this boundary.
 
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	codebaseSnapshots,
@@ -209,7 +209,7 @@ export async function guardSyncUpload(
 			projectMode: projects.projectMode,
 		})
 		.from(projects)
-		.where(eq(projects.id, projectId))
+		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 		.limit(1);
 	if (!project || project.userId !== session.userId)
 		return fail(401, "Invalid sync credential", "INVALID_SYNC_CREDENTIAL");

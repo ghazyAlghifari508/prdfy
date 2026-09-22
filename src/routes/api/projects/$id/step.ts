@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { advanceStep } from "@/lib/flow-progress";
@@ -43,7 +43,13 @@ export const Route = createFileRoute("/api/projects/$id/step")({
 					const [existing] = await tx
 						.select({ step: projects.step })
 						.from(projects)
-						.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+						.where(
+							and(
+								eq(projects.id, projectId),
+								eq(projects.userId, user.id),
+								isNull(projects.deletedAt),
+							),
+						)
 						.limit(1)
 						.for("update");
 					if (!existing) return null;

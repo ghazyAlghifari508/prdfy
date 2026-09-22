@@ -435,7 +435,7 @@ export async function getProjectGenerationContext(
 	const { db } = await import("@/db");
 	const { codebaseAnalyses, codebaseAskHandoffs, codebaseSnapshots, projects } =
 		await import("@/db/schema");
-	const { and, asc, desc, eq } = await import("drizzle-orm");
+	const { and, asc, desc, eq, isNull } = await import("drizzle-orm");
 
 	const [project] = await db
 		.select({
@@ -444,7 +444,7 @@ export async function getProjectGenerationContext(
 			description: projects.description,
 		})
 		.from(projects)
-		.where(eq(projects.id, projectId))
+		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 		.limit(1);
 	if (!project || project.projectMode !== "existing_codebase") return null;
 

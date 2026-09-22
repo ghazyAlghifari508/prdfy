@@ -2,7 +2,7 @@
  * AC versions - Drizzle DB ops. Mirrors prd-service.ts.
  * New schema: ac_versions(project_id, version, content, change_summary).
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { acVersions, projects } from "@/db/schema";
 import { advanceStep } from "@/lib/flow-progress";
@@ -39,7 +39,13 @@ export async function saveAcVersion(
 		const [project] = await tx
 			.select({ id: projects.id, step: projects.step })
 			.from(projects)
-			.where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+			.where(
+				and(
+					eq(projects.id, projectId),
+					eq(projects.userId, userId),
+					isNull(projects.deletedAt),
+				),
+			)
 			.for("update")
 			.limit(1);
 		if (!project) throw new AcProjectNotFoundError();

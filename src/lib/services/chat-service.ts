@@ -5,7 +5,7 @@
  * ponytail: projects has no `preferences` col → ensureConversation ignores the
  * preferences arg (mode derived from presence, but not persisted).
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { conversations, messages, projects } from "@/db/schema";
 
@@ -88,7 +88,11 @@ export async function ensureConversation(
 				.select({ id: projects.id })
 				.from(projects)
 				.where(
-					and(eq(projects.id, projectIdToUse), eq(projects.userId, userId)),
+					and(
+						eq(projects.id, projectIdToUse),
+						eq(projects.userId, userId),
+						isNull(projects.deletedAt),
+					),
 				)
 				.limit(1);
 			if (!owned) throw new ConversationProjectOwnershipError();

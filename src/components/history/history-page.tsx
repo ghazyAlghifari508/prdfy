@@ -93,10 +93,22 @@ export function HistoryPage({ items }: { items: HistoryItem[] }) {
 			const res = await fetch(`/api/projects/${deleteId}`, {
 				method: "DELETE",
 			});
-			// ponytail: 404 = row already gone (idempotent delete). Treat as success
+			// 404 = row already gone (idempotent delete). Treat as success
 			// so stale History cards (e.g. cross-tab delete) disappear cleanly.
-			if (!res.ok && res.status !== 404)
-				throw new Error("Gagal menghapus proyek");
+			if (!res.ok && res.status !== 404) {
+				// Surface the server's safe message when it provides one; a
+				// generic fallback must not hide the real failure reason.
+				const body = await res.json().catch(() => null);
+				const serverMessage =
+					body && typeof body.error === "string" ? body.error : null;
+				const code = body && typeof body.code === "string" ? body.code : null;
+				console.error("Delete project failed:", {
+					status: res.status,
+					code,
+					message: serverMessage,
+				});
+				throw new Error(serverMessage ?? "Gagal menghapus proyek");
+			}
 			showToast("Proyek dihapus.", "success");
 			closeDelete();
 			// Sync with server state (catches any drift, e.g. step changes).
@@ -104,7 +116,12 @@ export function HistoryPage({ items }: { items: HistoryItem[] }) {
 		} catch (err) {
 			console.error("Delete project failed:", err);
 			setLocalItems(snapshot);
-			showToast("Gagal menghapus proyek. Coba lagi.", "error");
+			showToast(
+				err instanceof Error
+					? err.message
+					: "Gagal menghapus proyek. Coba lagi.",
+				"error",
+			);
 		} finally {
 			setIsDeleting(false);
 		}
@@ -267,6 +284,7 @@ export function HistoryPage({ items }: { items: HistoryItem[] }) {
 						return (
 							<li
 								key={item.id}
+								data-project-id={item.id}
 								className="group flex items-center gap-4 rounded-xl border border-graphite bg-charcoal/60 p-4 transition-colors hover:border-fog/40 hover:bg-charcoal"
 							>
 								{link ? (

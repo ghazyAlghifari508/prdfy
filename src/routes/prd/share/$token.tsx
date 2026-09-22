@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { PrdViewer } from "@/components/prd/prd-viewer";
 import { Logo } from "@/components/ui/logo";
 import { db } from "@/db";
@@ -14,7 +14,7 @@ const loadSharedPrd = createServerFn({ method: "GET" })
 		const [project] = await db
 			.select({ id: projects.id, name: projects.name, userId: projects.userId })
 			.from(projects)
-			.where(eq(projects.shareToken, token))
+			.where(and(eq(projects.shareToken, token), isNull(projects.deletedAt)))
 			.limit(1);
 		if (!project) throw new Error("NOT_FOUND");
 

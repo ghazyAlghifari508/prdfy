@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
@@ -33,7 +33,13 @@ export const Route = createFileRoute("/api/projects/$id/last-route")({
 				const [existing] = await db
 					.select({ id: projects.id })
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!existing)
 					return Response.json({ error: "Project not found" }, { status: 404 });
@@ -41,7 +47,13 @@ export const Route = createFileRoute("/api/projects/$id/last-route")({
 				await db
 					.update(projects)
 					.set({ lastUrl: url, updatedAt: new Date() })
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)));
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					);
 				return Response.json({ success: true, url });
 			},
 		},

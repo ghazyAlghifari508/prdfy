@@ -312,11 +312,19 @@ export const projects = pgTable(
 		taskStatus: text("task_status").default("pending"),
 		shareToken: text("share_token"),
 		lastUrl: text("last_url"),
+		// User-facing deletion tombstone. The project row is retained because
+		// credit_operations and the append-only credit_ledger_entries reference
+		// it (accounting/audit retention), while every product artifact is
+		// purged. A non-null value means "deleted": the project is hidden from
+		// History and all normal project APIs and routes.
+		deletedAt: timestamp("deleted_at"),
 		createdAt: timestamp("created_at").defaultNow(),
 		updatedAt: timestamp("updated_at").defaultNow(),
 	},
 	(t) => [
 		index("projects_user_id_idx").on(t.userId),
+		// Active-project listing (History, admin, lookups) filters on both.
+		index("projects_user_id_deleted_at_idx").on(t.userId, t.deletedAt),
 		uniqueIndex("projects_user_id_id_unique").on(t.userId, t.id),
 	],
 );
@@ -430,6 +438,10 @@ export const tasks = pgTable(
 		priority: text("priority").default("medium"),
 		assignee: text("assignee"),
 		dependencies: jsonb("dependencies"),
+		// Requirement ids this task delivers, e.g. ["AC-1.1", "AC-1.2"].
+		// Nullable: rows generated before the coverage contract existed carry
+		// their references in prose only and are read via the legacy fallback.
+		covers: jsonb("covers").$type<string[]>(),
 		subtasks: jsonb("subtasks"),
 		position: jsonb("position"), // { x, y } for kanban
 		order: integer("order").default(0),

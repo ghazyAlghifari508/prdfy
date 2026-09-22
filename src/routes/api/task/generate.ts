@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import {
 	buildTaskMetrics,
 	formatInsufficientCreditsError,
@@ -13,22 +13,28 @@ import {
 import { CLAIM_POLL_MS, CLAIM_RETRY_MS } from "@/lib/constants";
 import { hasFullWorkflow } from "@/lib/credits";
 import { isTruncatedGeneration } from "@/lib/flow-progress";
-import { getLanguageDirective, normalizeLanguage } from "@/lib/language";
-import { TASK_GENERATION_PROMPT } from "@/lib/prompts-task";
+import { normalizeLanguage } from "@/lib/language";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { getLatestAcMarkdown } from "@/lib/services/ac-service";
 import {
 	selectModels,
 	tryStreamWithFallback,
 } from "@/lib/services/ai-orchestrator";
+import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { sanitizeErrorForClient } from "@/lib/services/error-sanitizer";
 import { extractJson } from "@/lib/services/json-extract";
 import {
 	getLatestPrdContent,
 	sanitizeModelOutput,
 } from "@/lib/services/prd-service";
+import {
+	buildTaskRepairUserMessage,
+	buildTaskSystemPrompt,
+	MAX_TASK_COVERAGE_REPAIR_ATTEMPTS,
+	repairTaskCoverage,
+	TASK_FIRST_PASS_USER_MESSAGE,
+} from "@/lib/services/task-generation";
 import { parseTaskJson, saveTaskTree } from "@/lib/services/task-service";
-import type { CreditOperationResult } from "@/lib/services/credit-service";
 import { requireUser } from "@/lib/session";
 
 export const Route = createFileRoute("/api/task/generate")({
@@ -115,7 +121,13 @@ export const Route = createFileRoute("/api/task/generate")({
 						projectMode: projects.projectMode,
 					})
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });
@@ -127,7 +139,16 @@ export const Route = createFileRoute("/api/task/generate")({
 						{ status: 404 },
 					);
 
-				const prdContent = (await getLatestPrdContent(projectId)) ?? acMarkdown;
+				// The PRD is generation context, not just a billing input: it
+				// carries the flows, data model, architecture, stack, and
+				// constraints that AC does not restate. Kept separate from the
+				// metrics fallback below so an absent PRD never causes the AC to
+				// be injected twice (once as "PRD", once as AC).
+				const latestPrd = await getLatestPrdContent(projectId);
+				const prdContext = latestPrd ?? "";
+				// Metrics measure the PRD when present; AC stands in as the
+				// source-size proxy when a legacy project has no PRD row.
+				const prdContent = latestPrd ?? acMarkdown;
 
 				let codebaseSnapshotId: string | undefined;
 				let codebaseAnalysisId: string | undefined;
@@ -348,6 +369,10 @@ export const Route = createFileRoute("/api/task/generate")({
 						let isReleased = false;
 						let isQuarantined = false;
 						let fullResponse = "";
+						// Composed once per stream: coverage repair reuses the
+						// exact same system prompt so the repair round answers
+						// under the same contract as the first pass.
+						let systemPrompt = "";
 
 						const safeRelease = async (reason: string) => {
 							if (isSettled || isReleased || !reservation) return;
@@ -389,6 +414,44 @@ export const Route = createFileRoute("/api/task/generate")({
 							} catch {}
 						};
 
+						/**
+						 * One extra model round used by coverage repair. Returns
+						 * the accumulated text, or "" when the request was
+						 * aborted (the caller then stops repairing).
+						 */
+						const requestRepair = async (
+							missing: string[],
+						): Promise<string> => {
+							if (request.signal.aborted) return "";
+							const repairMessages: Array<{
+								role: "system" | "user" | "assistant";
+								content: string;
+							}> = [
+								{ role: "system", content: systemPrompt },
+								{
+									role: "user",
+									content: TASK_FIRST_PASS_USER_MESSAGE,
+								},
+								{ role: "assistant", content: fullResponse },
+								{
+									role: "user",
+									content: buildTaskRepairUserMessage(missing),
+								},
+							];
+							const { generator, firstChunk } = await tryStreamWithFallback(
+								modelsToTry,
+								repairMessages,
+								request.signal,
+								64000,
+								enqueueThinking,
+							);
+							let repairText = firstChunk;
+							for await (const chunk of generator) {
+								repairText += chunk;
+							}
+							return repairText;
+						};
+
 						const safeDone = async (finishReason: string | undefined) => {
 							if (eventDone || eventErrored) return;
 							if (isTruncatedGeneration(fullResponse, finishReason)) {
@@ -399,16 +462,53 @@ export const Route = createFileRoute("/api/task/generate")({
 								return;
 							}
 							try {
-								const taskTree = parseTaskJson(
+								const firstPass = parseTaskJson(
 									extractJson(sanitizeModelOutput(fullResponse)),
 								);
-								if (!taskTree) {
+								if (!firstPass) {
 									await safeRelease("invalid task json");
 									await safeError(
 										"AI menghasilkan JSON tidak valid. Coba lagi.",
 									);
 									return;
 								}
+
+								// Coverage is verified server-side against the AC
+								// document itself, not trusted from model prose. A
+								// tree missing requirements is repaired with a
+								// bounded extra round before it can be saved.
+								const coverage = await repairTaskCoverage({
+									acMarkdown,
+									initialTree: firstPass,
+									requestRepair,
+									parse: (raw) =>
+										parseTaskJson(extractJson(sanitizeModelOutput(raw))),
+									maxAttempts: MAX_TASK_COVERAGE_REPAIR_ATTEMPTS,
+									isAborted: () => request.signal.aborted,
+									onRepair: (attempt, missing) => {
+										emit({
+											type: "thinking",
+											content: `Melengkapi requirement yang belum ter-cover (${missing.join(", ")}), percobaan ${attempt}.`,
+										});
+									},
+								});
+
+								if (request.signal.aborted) {
+									await safeRelease("client aborted during repair");
+									return;
+								}
+
+								if (!coverage.ok) {
+									await safeRelease("incomplete requirement coverage");
+									await safeError(
+										coverage.report.missing.length > 0
+											? `Task tree belum men-cover semua Acceptance Criteria (belum ter-cover: ${coverage.report.missing.join(", ")}). Tidak disimpan — coba generate ulang.`
+											: `Task tree merujuk Acceptance Criteria yang tidak ada (${coverage.report.unknown.join(", ")}). Tidak disimpan — coba generate ulang.`,
+									);
+									return;
+								}
+
+								const taskTree = coverage.tree;
 								const saveResult = await saveTaskTree(projectId, taskTree);
 								if (codebaseSnapshotId && saveResult.success) {
 									await linkGenerationContext(
@@ -534,8 +634,11 @@ export const Route = createFileRoute("/api/task/generate")({
 							try {
 								const { groundStack } = await import("@/lib/grounding");
 								const { raceWithAbort } = await import("@/lib/abort-utils");
+								// Ground on PRD + AC: the stack/architecture the
+								// implementation must follow lives in the PRD, so
+								// detecting it from AC alone under-grounds the model.
 								grounded = await raceWithAbort(
-									groundStack(acMarkdown),
+									groundStack(`${prdContext}\n\n${acMarkdown}`),
 									request.signal,
 								);
 							} catch (e) {
@@ -555,7 +658,13 @@ export const Route = createFileRoute("/api/task/generate")({
 								}
 							}
 							const projectLanguage = normalizeLanguage(project.language);
-							const systemPrompt = `${TASK_GENERATION_PROMPT}\n${getLanguageDirective(projectLanguage, "task")}\n${grounded}${codebaseBlock}\n\n--- ACCEPTANCE CRITERIA ---\n${acMarkdown}`;
+							systemPrompt = buildTaskSystemPrompt({
+								acMarkdown,
+								prdContent: prdContext,
+								grounded,
+								codebaseBlock,
+								language: projectLanguage,
+							});
 							const messages: Array<{
 								role: "system" | "user" | "assistant";
 								content: string;
@@ -563,7 +672,7 @@ export const Route = createFileRoute("/api/task/generate")({
 								{ role: "system", content: systemPrompt },
 								{
 									role: "user",
-									content: "Generate the task tree JSON based on the AC above.",
+									content: TASK_FIRST_PASS_USER_MESSAGE,
 								},
 							];
 

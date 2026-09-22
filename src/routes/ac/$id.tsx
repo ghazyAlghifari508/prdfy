@@ -1,6 +1,6 @@
 import { createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { useEffect } from "react";
 import { AcDetail } from "@/components/ac/ac-detail";
 import { db } from "@/db";
@@ -26,7 +26,13 @@ const loadAc = createServerFn({ method: "GET" })
 				step: projects.step,
 			})
 			.from(projects)
-			.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+			.where(
+				and(
+					eq(projects.id, id),
+					eq(projects.userId, user.id),
+					isNull(projects.deletedAt),
+				),
+			)
 			.limit(1);
 
 		if (!project) throw new Error("NOT_FOUND");

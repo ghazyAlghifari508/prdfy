@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 export const Route = createFileRoute("/api/export/pdf")({
 	server: {
@@ -13,9 +13,7 @@ export const Route = createFileRoute("/api/export/pdf")({
 				);
 				const { generatePdfBuffer } = await import("@/lib/services/export-pdf");
 				const { requireUser } = await import("@/lib/session");
-				const { MAX_EXPORT_CONTENT_CHARS } = await import(
-					"@/lib/constants"
-				);
+				const { MAX_EXPORT_CONTENT_CHARS } = await import("@/lib/constants");
 				const user = await requireUser(getRequestHeaders());
 				const rawBody = await request.json().catch(() => null);
 				const projectId =
@@ -30,7 +28,13 @@ export const Route = createFileRoute("/api/export/pdf")({
 				const [proj] = await db
 					.select({ id: projects.id, name: projects.name })
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!proj)
 					return Response.json({ error: "Not found" }, { status: 404 });

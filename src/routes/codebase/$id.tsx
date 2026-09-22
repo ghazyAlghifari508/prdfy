@@ -5,7 +5,7 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CodebaseReview } from "@/components/codebase/codebase-review";
 import { ScreenConnect } from "@/components/codebase/screen-connect";
@@ -48,7 +48,13 @@ const loadCodebase = createServerFn({ method: "GET" })
 				projectMode: projects.projectMode,
 			})
 			.from(projects)
-			.where(and(eq(projects.id, id), eq(projects.userId, user.id)))
+			.where(
+				and(
+					eq(projects.id, id),
+					eq(projects.userId, user.id),
+					isNull(projects.deletedAt),
+				),
+			)
 			.limit(1);
 
 		if (!project) throw new Error("NOT_FOUND");

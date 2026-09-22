@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { apiKeys, projects, tasks } from "@/db/schema";
 
@@ -77,7 +77,11 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 				// and oversized strings must never reach the query layer.
 				const isIdLike = (v: unknown): v is string =>
 					typeof v === "string" && v.length > 0 && v.length <= 128;
-				if (!isIdLike(projectId) || !isIdLike(taskId) || typeof status !== "string")
+				if (
+					!isIdLike(projectId) ||
+					!isIdLike(taskId) ||
+					typeof status !== "string"
+				)
 					return Response.json(
 						{ error: "Missing required fields (projectId, taskId, status)" },
 						{ status: 400 },
@@ -88,61 +92,63 @@ export const Route = createFileRoute("/api/kanban/update-status")({
 						{ status: 400 },
 					);
 
-			// Ownership check and status write run in one transaction on
-			// the locked project row so the authorization cannot go stale
-			// between the check and the update.
-			const updated = await db.transaction(async (tx) => {
-				const [project] = await tx
-					.select({ id: projects.id })
-					.from(projects)
-					.where(
-						and(eq(projects.id, projectId), eq(projects.userId, actingUserId!)),
-					)
-					.limit(1)
-					.for("update");
-				if (!project) return [];
+				// Ownership check and status write run in one transaction on
+				// the locked project row so the authorization cannot go stale
+				// between the check and the update.
+				const updated = await db.transaction(async (tx) => {
+					const [project] = await tx
+						.select({ id: projects.id })
+						.from(projects)
+						.where(
+							and(
+								eq(projects.id, projectId),
+								eq(projects.userId, actingUserId!),
+								isNull(projects.deletedAt),
+							),
+						)
+						.limit(1)
+						.for("update");
+					if (!project) return [];
 
-				// Re-bind the task inside the transaction: the project lock
-				// above cannot stop a concurrent move of the task row itself
-				// to another project between the check and this write.
-				const [bound] = await tx
-					.select({ id: tasks.id, projectId: tasks.projectId })
-					.from(tasks)
-					.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
-					.limit(1)
-					.for("update");
-				if (!bound) return [];
+					// Re-bind the task inside the transaction: the project lock
+					// above cannot stop a concurrent move of the task row itself
+					// to another project between the check and this write.
+					const [bound] = await tx
+						.select({ id: tasks.id, projectId: tasks.projectId })
+						.from(tasks)
+						.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
+						.limit(1)
+						.for("update");
+					if (!bound) return [];
 
-				// Lifecycle timestamps are rebuilt per target state so a
-				// backwards transition never leaves contradictory values
-				// (e.g. completedAt set while status is in_progress).
-				const updateData: Record<string, unknown> = {
-					status,
-					updatedAt: new Date(),
-					startedAt: status === "pending" ? null : undefined,
-					completedAt:
-						status === "completed" || status === "failed"
-							? new Date()
-							: null,
-				};
-				if (status === "in_progress") updateData.startedAt = new Date();
-				return tx
-					.update(tasks)
-					.set(updateData)
-					.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
-					.returning({
-						id: tasks.id,
-						status: tasks.status,
-						updatedAt: tasks.updatedAt,
-						startedAt: tasks.startedAt,
-						completedAt: tasks.completedAt,
-					});
-			});
-			if (!updated.length)
-				return Response.json(
-					{ error: "task not found in this project" },
-					{ status: 404 },
-				);
+					// Lifecycle timestamps are rebuilt per target state so a
+					// backwards transition never leaves contradictory values
+					// (e.g. completedAt set while status is in_progress).
+					const updateData: Record<string, unknown> = {
+						status,
+						updatedAt: new Date(),
+						startedAt: status === "pending" ? null : undefined,
+						completedAt:
+							status === "completed" || status === "failed" ? new Date() : null,
+					};
+					if (status === "in_progress") updateData.startedAt = new Date();
+					return tx
+						.update(tasks)
+						.set(updateData)
+						.where(and(eq(tasks.id, taskId), eq(tasks.projectId, projectId)))
+						.returning({
+							id: tasks.id,
+							status: tasks.status,
+							updatedAt: tasks.updatedAt,
+							startedAt: tasks.startedAt,
+							completedAt: tasks.completedAt,
+						});
+				});
+				if (!updated.length)
+					return Response.json(
+						{ error: "task not found in this project" },
+						{ status: 404 },
+					);
 
 				if (keyRecordId) {
 					db.update(apiKeys)

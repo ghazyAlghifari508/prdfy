@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import {
 	buildAcMetrics,
 	formatInsufficientCreditsError,
@@ -111,7 +111,13 @@ export const Route = createFileRoute("/api/ac/generate")({
 						projectMode: projects.projectMode,
 					})
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!project)
 					return Response.json({ error: "Project not found" }, { status: 404 });

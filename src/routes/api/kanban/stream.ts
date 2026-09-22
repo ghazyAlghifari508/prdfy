@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { KANBAN_SSE_INTERVAL_MS } from "@/lib/constants";
 import { requireUser } from "@/lib/session";
 
@@ -33,90 +33,100 @@ export const Route = createFileRoute("/api/kanban/stream")({
 				const [proj] = await db
 					.select({ id: projects.id })
 					.from(projects)
-					.where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+					.where(
+						and(
+							eq(projects.id, projectId),
+							eq(projects.userId, user.id),
+							isNull(projects.deletedAt),
+						),
+					)
 					.limit(1);
 				if (!proj) {
 					return Response.json({ error: "Not found" }, { status: 404 });
 				}
 
-			let stopped = false;
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const stop = (controller: ReadableStreamDefaultController) => {
-				stopped = true;
-				if (timer !== undefined) clearTimeout(timer);
-				try {
-					controller.close();
-				} catch {}
-			};
-			const stream = new ReadableStream<Uint8Array>({
-				async start(controller) {
-					const enc = new TextEncoder();
-					let consecutiveErrors = 0;
-					const MAX_CONSECUTIVE_ERRORS = 5;
+				let stopped = false;
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				const stop = (controller: ReadableStreamDefaultController) => {
+					stopped = true;
+					if (timer !== undefined) clearTimeout(timer);
+					try {
+						controller.close();
+					} catch {}
+				};
+				const stream = new ReadableStream<Uint8Array>({
+					async start(controller) {
+						const enc = new TextEncoder();
+						let consecutiveErrors = 0;
+						const MAX_CONSECUTIVE_ERRORS = 5;
 
-					const send = async () => {
-						if (stopped) return;
-						try {
-							// Re-validate ownership on every tick: the project
-							// may be deleted or reassigned while the stream
-							// is open. Close instead of serving stale tenants.
-							const [proj] = await db
-								.select({ id: projects.id })
-								.from(projects)
-								.where(
-									and(eq(projects.id, projectId), eq(projects.userId, user.id)),
-								)
-								.limit(1);
-							if (!proj) {
-								stop(controller);
-								return;
-							}
-							const { getKanbanData } = await import(
-								"@/lib/services/task-service"
-							);
-							const data = await getKanbanData(projectId);
+						const send = async () => {
 							if (stopped) return;
-							consecutiveErrors = 0;
-							controller.enqueue(
-								enc.encode(`data: ${JSON.stringify(data)}\n\n`),
-							);
-						} catch (e) {
-							consecutiveErrors++;
-							// Controller may be closed after abort; swallow.
-							// Log only when still open so we see real DB errors.
 							try {
-								console.error("kanban SSE send error:", e);
-							} catch {}
-							if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-								try {
-									controller.enqueue(
-										enc.encode(
-											`data: ${JSON.stringify({ error: "Gagal memuat pembaruan Kanban." })}\n\n`,
+								// Re-validate ownership on every tick: the project
+								// may be deleted or reassigned while the stream
+								// is open. Close instead of serving stale tenants.
+								const [proj] = await db
+									.select({ id: projects.id })
+									.from(projects)
+									.where(
+										and(
+											eq(projects.id, projectId),
+											eq(projects.userId, user.id),
+											isNull(projects.deletedAt),
 										),
-									);
+									)
+									.limit(1);
+								if (!proj) {
+									stop(controller);
+									return;
+								}
+								const { getKanbanData } = await import(
+									"@/lib/services/task-service"
+								);
+								const data = await getKanbanData(projectId);
+								if (stopped) return;
+								consecutiveErrors = 0;
+								controller.enqueue(
+									enc.encode(`data: ${JSON.stringify(data)}\n\n`),
+								);
+							} catch (e) {
+								consecutiveErrors++;
+								// Controller may be closed after abort; swallow.
+								// Log only when still open so we see real DB errors.
+								try {
+									console.error("kanban SSE send error:", e);
 								} catch {}
-								stop(controller);
-								return;
+								if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+									try {
+										controller.enqueue(
+											enc.encode(
+												`data: ${JSON.stringify({ error: "Gagal memuat pembaruan Kanban." })}\n\n`,
+											),
+										);
+									} catch {}
+									stop(controller);
+									return;
+								}
 							}
-						}
 
-						// Self-scheduling timeout avoids overlapping sends if getKanbanData
-						// takes longer than the interval under database load.
-						if (!stopped) {
-							timer = setTimeout(send, KANBAN_SSE_INTERVAL_MS);
-						}
-					};
+							// Self-scheduling timeout avoids overlapping sends if getKanbanData
+							// takes longer than the interval under database load.
+							if (!stopped) {
+								timer = setTimeout(send, KANBAN_SSE_INTERVAL_MS);
+							}
+						};
 
-					request.signal.addEventListener("abort", () => {
+						request.signal.addEventListener("abort", () => {
+							stop(controller);
+						});
+
+						await send();
+					},
+					cancel(controller) {
 						stop(controller);
-					});
-
-					await send();
-				},
-				cancel(controller) {
-					stop(controller);
-				},
-			});
+					},
+				});
 
 				return new Response(stream, {
 					headers: {

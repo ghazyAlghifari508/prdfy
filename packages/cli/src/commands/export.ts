@@ -94,6 +94,8 @@ export async function exportRulesCommand(
 			`## Strict Rules`,
 			`- ONLY implement features explicitly listed in Acceptance Criteria above`,
 			`- DO NOT add features, pages, endpoints, or roles not mentioned in AC`,
+			`- Every task declares the AC ids it delivers in its \`covers\` field. Implement ALL AC points listed there, not just the happy path (include loading, empty, error, validation, and authorization behavior).`,
+			`- DO NOT simplify a requirement to finish faster. A task is not complete just because the happy-path UI renders.`,
 			`- Follow the Tech Stack and folder structure exactly as specified`,
 			`- All tasks must be tracked via prdfy CLI commands`,
 			``,

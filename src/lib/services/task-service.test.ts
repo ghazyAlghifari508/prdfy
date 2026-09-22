@@ -29,6 +29,9 @@ describe("parseTaskJson", () => {
 						{
 							name: "Login",
 							description: "OAuth login",
+							// Legacy tree: coverage is recovered from the description,
+							// which carries no references here.
+							covers: [],
 							subtasks: [
 								{ name: "UI", description: "form", details: ["a", "b"] },
 								{ name: "Callback", description: "", details: [] },
