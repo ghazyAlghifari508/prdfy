@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { buildTaskRepairPrompt } from "@/lib/prompts-task";
 import {
 	buildTaskSystemPrompt,
 	MAX_TASK_COVERAGE_REPAIR_ATTEMPTS,
@@ -78,6 +79,35 @@ describe("buildTaskSystemPrompt", () => {
 		expect(prompt).toContain("Pages & Screens");
 		// No distribution or quota may be demanded.
 		expect(prompt).toMatch(/JANGAN memakai distribusi atau kuota/i);
+	});
+
+	it("keeps every level reachable instead of normalizing an all-high tree", () => {
+		// Regression: the prompt used to present "hanya high dan medium" as an
+		// acceptable example, which read as permission to skip `low` entirely.
+		// Every generated tree was landing on high/medium while the Kanban
+		// "Pendukung" label never appeared.
+		const prompt = buildTaskSystemPrompt({
+			acMarkdown: AC,
+			prdContent: "",
+			grounded: "",
+			codebaseBlock: "",
+			language: "id",
+		});
+		expect(prompt).not.toMatch(/hanya high dan medium/i);
+		// `low` must be described as a real, expected classification.
+		expect(prompt).toMatch(/"low"/);
+		// The prompt must tell the model that a tree with no `low` is a sign the
+		// classification was not performed, without demanding a quota.
+		expect(prompt).toMatch(/semua task high/i);
+		// Quota/distribution is still forbidden.
+		expect(prompt).toMatch(/JANGAN memakai distribusi atau kuota/i);
+	});
+
+	it("states the priority contract in the repair prompt too", () => {
+		const repair = buildTaskRepairPrompt(["AC-1.1"]);
+		expect(repair).toContain('"high"');
+		expect(repair).toContain('"medium"');
+		expect(repair).toContain('"low"');
 	});
 
 	it("still produces a usable prompt when the PRD is absent", () => {

@@ -38,11 +38,11 @@ FORMAT OUTPUT (JSON, tanpa penjelasan tambahan):
 === ATURAN PRIORITY (WAJIB, DIVALIDASI SERVER) ===
 4. Setiap task WAJIB punya field "priority" berisi salah satu dari: "high", "medium", "low". Tidak ada nilai lain. Field ini WAJIB ada di SETIAP task, termasuk task yang dibuat saat memperbaiki coverage.
 5. Priority ditentukan dari DAMPAK PRODUK/REQUIREMENT, bukan dari layer teknis. JANGAN menganggap frontend = low, backend = high, database = high, atau styling = low. Sebuah alur aksesibilitas yang kritikal bisa lebih penting daripada helper backend kecil.
-   - "high" — berada di critical product path; memblokir workflow utama; menyangkut core domain behavior; prerequisite utama banyak pekerjaan lain; data integrity penting; authorization/security penting; kegagalannya membuat core feature tidak dapat digunakan; critical external integration; critical state transition.
+   - "high" — kegagalannya membuat fitur inti TIDAK DAPAT DIGUNAKAN, atau menyangkut integritas data, authorization/security, serta critical state transition. Pakai "high" HANYA untuk backbone yang benar-benar memblokir. Kalau task ini tidak ada, apakah core feature benar-benar mati? Kalau tidak, JANGAN pilih "high".
    - "medium" — dibutuhkan agar fitur lengkap dan reliable; impact nyata pada product behavior; bukan critical backbone tertinggi; requirement penting untuk completeness; ada konsekuensi user-facing tetapi tidak memblokir seluruh core flow.
-   - "low" — supporting work; secondary capability; supporting state; in-scope polish yang memang required; non-critical supporting behavior; tidak memblokir core workflow tetapi tetap perlu dikerjakan.
-6. JANGAN memakai distribusi atau kuota. DILARANG: persentase per level, setiap fitur harus punya ketiga level, task pertama selalu high, task backend selalu high, task UI selalu low, minimal satu high per project. Klasifikasikan setiap task satu per satu sesuai dampaknya.
-7. Sebuah project boleh menghasilkan komposisi level apa pun yang memang sesuai requirement (misalnya hanya high dan medium). JANGAN mengarang level hanya demi variasi.
+   - "low" — supporting work; secondary capability; supporting state; in-scope polish yang memang required; non-critical supporting behavior; tidak memblokir core workflow tetapi tetap perlu dikerjakan. Contoh nyata: sinkronisasi judul tab, format tampilan tambahan, counter/statistik pendukung, preferensi kosmetik, helper non-kritis.
+6. Ketiga level memang dipakai. Jika setelah menilai satu per satu ternyata SEMUA task high, berarti klasifikasinya belum benar-benar dilakukan — hampir setiap project punya supporting work yang jujur masuk "low". Tandai "low" bila memang dampaknya rendah; JANGAN menaikkannya ke "medium" hanya agar terlihat penting.
+7. JANGAN memakai distribusi atau kuota. DILARANG: persentase per level, setiap fitur harus punya ketiga level, task pertama selalu high, task backend selalu high, task UI selalu low, minimal satu high per project, minimal satu low per project. Klasifikasikan setiap task satu per satu sesuai dampaknya.
 
 === ATURAN SURFACES / HALAMAN (TRACEABILITY KE PRD) ===
 8. PRD memuat daftar product surface di dalam section User Flow, sub-section "Pages & Screens". Itu adalah SATU-SATUNYA sumber daftar halaman/screen yang sah.
@@ -106,7 +106,7 @@ Buat task tree TAMBAHAN yang men-cover HANYA requirement di daftar tersebut.
 ATURAN:
 1. Output format JSON yang sama persis dengan sebelumnya: features → tasks (dengan priority, covers, surfaces) → subtasks → details.
 2. Setiap task WAJIB punya "covers" berisi HANYA ID dari daftar di atas.
-3. Setiap task WAJIB punya "priority" bernilai "high", "medium", atau "low", ditentukan dari dampak produk/requirement (bukan layer teknis, bukan distribusi/kuota).
+3. Setiap task WAJIB punya "priority" bernilai "high", "medium", atau "low", ditentukan dari dampak produk/requirement (bukan layer teknis, bukan distribusi/kuota). Pakai "high" hanya bila kegagalannya membuat fitur inti tidak dapat digunakan atau menyangkut integritas data/security; pakai "low" untuk supporting work yang memang tidak memblokir core workflow.
 4. Jika task menyentuh product surface yang terdaftar di PRD (section User Flow → Pages & Screens), isi "surfaces" dengan nama halaman yang SAMA PERSIS seperti di PRD. JANGAN mengarang halaman baru. Jika tidak menyentuh surface user-facing, isi [].
 5. JANGAN mengulang task yang sudah ada. JANGAN membuat task untuk requirement lain di luar daftar.
 6. Nama feature WAJIB sama dengan nama section AC yang memuat requirement tersebut, agar hasilnya bisa digabung tanpa duplikasi.

@@ -7,6 +7,7 @@ import {
 	hasScope,
 	verifyProjectOwnership,
 } from "@/lib/api-key-auth";
+import { storedTaskPriority } from "@/lib/task-priority";
 
 interface TaskCard {
 	id: string;
@@ -141,7 +142,9 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 						name: t.title,
 						description: t.description,
 						status,
-						priority: t.priority ?? "medium",
+						// Validated level with the documented legacy fallback: rows
+						// written before the priority contract read as medium.
+						priority: storedTaskPriority(t.priority),
 						subtaskCount: sub.length,
 						subtaskCompleted: sub.filter((s) => s.status === "completed")
 							.length,
