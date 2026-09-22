@@ -83,7 +83,7 @@ function SharedPrdPage() {
 					</span>
 				</div>
 			</div>
-			<PrdViewer content={content} projectName={projectName} />
+			<PrdViewer content={content} />
 		</div>
 	);
 }

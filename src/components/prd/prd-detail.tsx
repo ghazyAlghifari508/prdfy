@@ -324,12 +324,10 @@ export function PrdDetail({
 						)}
 						<PrdViewer
 							content={streamingForView ? streamingForView : currentContent}
-							projectName={projectName || ""}
 							plan={plan}
 							versions={mappedVersions}
 							currentVersion={selectedVersionNum}
 							onSelectVersion={handleVersionSelect}
-							projectId={projectId}
 							className="flex-1 overflow-hidden"
 						/>
 						{plan === "free" && latestVersion && (

@@ -8,7 +8,6 @@ import {
 	HOME_DRAFT_DEBOUNCE_MS,
 	MAX_PROMPT_LENGTH,
 	MIN_PROMPT_LENGTH,
-	PDF_STYLES,
 	RATE_LIMIT_WINDOW_MS,
 	RATE_LIMITS,
 } from "./constants";
@@ -54,12 +53,6 @@ describe("no-hardcode constants (Task 1)", () => {
 
 	it("has debounce limit", () => {
 		expect(HOME_DRAFT_DEBOUNCE_MS).toBe(300);
-	});
-
-	it("has PDF_STYLES", () => {
-		expect(PDF_STYLES.font).toBe("Inter");
-		expect(PDF_STYLES.headerSize).toBe(14);
-		expect(PDF_STYLES.bodySize).toBe(11);
 	});
 
 	it("has Task 9 codebase hardening limits (no magic literals)", () => {

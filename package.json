@@ -41,7 +41,6 @@
     "drizzle-kit": "^0.31.9",
     "drizzle-orm": "^0.45.1",
     "framer-motion": "^12.42.2",
-    "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.27.0",
     "mermaid": "^11.16.0",

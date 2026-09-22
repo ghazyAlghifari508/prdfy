@@ -26,7 +26,6 @@ const Mermaid = lazy(() =>
 
 import { usePanelResize } from "@/hooks/use-panel-resize";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/store";
 import type { Plan } from "@/types/database";
 import { VersionHistory } from "./version-history";
 
@@ -115,30 +114,24 @@ interface PrdVersion {
 
 interface PrdViewerProps {
 	content: string;
-	projectName: string;
 	className?: string;
 	plan?: Plan;
 	versions?: PrdVersion[];
 	currentVersion?: number;
 	onSelectVersion?: (content: string, version: number) => void;
-	projectId?: string;
 }
 
 export const PrdViewer = memo(function PrdViewer({
 	content,
-	projectName,
 	className,
 	plan = "free",
 	versions,
 	currentVersion,
 	onSelectVersion,
-	projectId,
 }: PrdViewerProps) {
 	const { leftWidth, onStartDragLeft, isDraggingLeft } = usePanelResize();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const [activeTab, setActiveTab] = useState<"preview" | "diff">("preview");
-	const [isExporting, setIsExporting] = useState(false);
-	const showToast = useUIStore((s) => s.showToast);
 
 	// Diff always compares the previous version against the current one —
 	// clicking the Diff tab shows the latest changes immediately. Version
@@ -238,34 +231,44 @@ export const PrdViewer = memo(function PrdViewer({
 
 			{/* Content area: single toolbar header + scrollable content */}
 			<div className="flex-1 flex flex-col min-w-0">
-				{/* Toolbar: tabs (left) · version history + export (right) */}
+				{/* Toolbar: segmented view switch (left) · version history (right) */}
 				<div className="shrink-0 flex items-center gap-2 border-b border-graphite bg-charcoal/20 px-4 py-2">
-					<button
-						type="button"
-						onClick={() => setActiveTab("preview")}
-						className={cn(
-							"rounded px-3 py-1 text-xs font-medium transition-colors",
-							activeTab === "preview"
-								? "bg-indigo text-white"
-								: "bg-white/5 text-fog hover:bg-white/10 hover:text-snow",
-						)}
+					<div
+						role="tablist"
+						aria-label="Tampilan PRD"
+						className="flex items-center gap-0.5 rounded-md bg-charcoal p-1 shadow-[var(--shadow-inset)]"
 					>
-						Pratinjau
-					</button>
-					{hasDiff && (
 						<button
 							type="button"
-							onClick={() => setActiveTab("diff")}
+							role="tab"
+							aria-selected={activeTab === "preview"}
+							onClick={() => setActiveTab("preview")}
 							className={cn(
-								"rounded px-3 py-1 text-xs font-medium transition-colors",
-								activeTab === "diff"
-									? "bg-indigo text-white"
-									: "bg-white/5 text-fog hover:bg-white/10 hover:text-snow",
+								"rounded px-3 py-1 font-inter text-xs font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+								activeTab === "preview"
+									? "border border-iron/50 bg-iron text-snow"
+									: "border border-transparent text-fog hover:text-snow",
 							)}
 						>
-							Diff
+							Pratinjau
 						</button>
-					)}
+						{hasDiff && (
+							<button
+								type="button"
+								role="tab"
+								aria-selected={activeTab === "diff"}
+								onClick={() => setActiveTab("diff")}
+								className={cn(
+									"rounded px-3 py-1 font-inter text-xs font-[510] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+									activeTab === "diff"
+										? "border border-iron/50 bg-iron text-snow"
+										: "border border-transparent text-fog hover:text-snow",
+								)}
+							>
+								Diff
+							</button>
+						)}
+					</div>
 					<div className="ml-auto flex items-center gap-2">
 						{versions && versions.length > 1 && (
 							<VersionHistory
@@ -274,47 +277,6 @@ export const PrdViewer = memo(function PrdViewer({
 								onSelectVersion={onSelectVersion || (() => {})}
 								plan={plan}
 							/>
-						)}
-						{projectId && (
-							<button
-								type="button"
-								disabled={isExporting}
-								onClick={async () => {
-									if (isExporting) return;
-									setIsExporting(true);
-									try {
-										const res = await fetch("/api/export/pdf", {
-											method: "POST",
-											headers: { "Content-Type": "application/json" },
-											body: JSON.stringify({ projectId }),
-										});
-										if (!res.ok) {
-											showToast("Gagal mengekspor PDF", "error");
-											return;
-										}
-										const blob = await res.blob();
-										const url = URL.createObjectURL(blob);
-										const safeName = (projectName || "project")
-											.replace(/[^a-zA-Z0-9_-]/g, "-")
-											.replace(/-+/g, "-")
-											.toLowerCase();
-										const a = document.createElement("a");
-										a.href = url;
-										a.download = `${safeName}.pdf`;
-										document.body.appendChild(a);
-										a.click();
-										a.remove();
-										setTimeout(() => URL.revokeObjectURL(url), 1000);
-									} catch {
-										showToast("Gagal mengekspor PDF", "error");
-									} finally {
-										setIsExporting(false);
-									}
-								}}
-								className="rounded bg-indigo px-3 py-1 text-xs font-medium text-white hover:bg-indigo/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-							>
-								{isExporting ? "Mengekspor..." : "Export PDF"}
-							</button>
 						)}
 					</div>
 				</div>

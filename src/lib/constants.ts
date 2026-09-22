@@ -55,10 +55,6 @@ export const MAX_CREDIT_AMOUNT = 10_000_000;
 export const MAX_RESUME_CONTENT_CHARS = 200_000;
 export const MAX_PREFERENCES_CHARS = 10_000;
 
-// Export bound: PDF generation is synchronous CPU work in the request path,
-// so oversized documents must be rejected before invoking the generator.
-export const MAX_EXPORT_CONTENT_CHARS = 500_000;
-
 // Pre-byte-retry for AI generation: if the upstream router drops/errors before
 // any text-delta leaves the server, retry once before failing the whole request.
 // Only safe because no client-visible delta has been emitted yet.
@@ -85,11 +81,6 @@ export const MIN_PROMPT_LENGTH = 20;
 export const MAX_PROMPT_LENGTH = 3000;
 export const HOME_DRAFT_DEBOUNCE_MS = 300;
 export const HISTORY_PAGE_SIZE = 12;
-export const PDF_STYLES = {
-	font: "Inter",
-	headerSize: 14,
-	bodySize: 11,
-} as const;
 
 export const KANBAN_SSE_INTERVAL_MS = 3_000;
 export const KANBAN_POLL_INTERVAL_MS = 10_000;
