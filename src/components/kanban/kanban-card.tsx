@@ -18,12 +18,21 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import type { TaskCard } from "@/hooks/use-kanban-polling";
+import { getTaskPriorityConfig } from "@/lib/kanban-utils";
+import { cn } from "@/lib/utils";
 
 interface KanbanCardProps {
 	card: TaskCard;
 	colorIndex: number;
 	highlighted?: boolean;
 }
+
+const STATUS_LABELS: Record<string, string> = {
+	pending: "Belum Mulai",
+	in_progress: "Dikerjakan",
+	completed: "Selesai",
+	failed: "Gagal",
+};
 
 const COLORS = [
 	"border-indigo/80 bg-indigo/5 text-indigo",
@@ -50,6 +59,7 @@ export function KanbanCard({
 
 	const idx = colorIndex % COLORS.length;
 	const _colorClass = BORDER_COLORS[idx];
+	const priorityConfig = getTaskPriorityConfig(card.priority);
 
 	const formatTime = (isoString: string | null) => {
 		if (!isoString) return "";
@@ -65,24 +75,30 @@ export function KanbanCard({
 
 	return (
 		<>
-			<div
-				role="button"
-				tabIndex={0}
+			<button
+				type="button"
 				onClick={() => setIsOpen(true)}
-				onKeyDown={(e) => {
-					if (e.key === "Enter" || e.key === " ") {
-						e.preventDefault();
-						setIsOpen(true);
-					}
-				}}
-				className={`group relative flex cursor-pointer flex-col rounded-lg border border-graphite bg-obsidian p-3 shadow-sm transition-all duration-200 hover:border-steel hover:shadow-md ${highlighted ? "ring-2 ring-amber animate-flash" : ""}`}
+				className={`group relative flex cursor-pointer flex-col rounded-lg border border-graphite bg-obsidian p-3 shadow-sm transition-all duration-200 hover:border-steel hover:shadow-md text-left w-full ${highlighted ? "ring-2 ring-amber animate-flash" : ""}`}
 			>
 				<div className="flex items-start justify-between gap-2">
-					<span className="font-inter text-sm font-[510] text-snow line-clamp-2">
+					<span className="font-inter text-sm font-[510] text-snow line-clamp-2 leading-snug">
 						{card.name}
 					</span>
-					<span className="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-medium text-fog uppercase">
-						{card.type}
+					<span
+						className={cn(
+							"inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wider shrink-0",
+							priorityConfig.badgeClassName,
+						)}
+						title={`Tingkat Kepentingan: ${priorityConfig.label}`}
+					>
+						<span
+							className={cn(
+								"h-1.5 w-1.5 rounded-full shrink-0",
+								priorityConfig.dotClassName,
+							)}
+							aria-hidden="true"
+						/>
+						{priorityConfig.label}
 					</span>
 				</div>
 
@@ -132,7 +148,7 @@ export function KanbanCard({
 							)}
 					</div>
 				)}
-			</div>
+			</button>
 
 			{/* Task Details Dialog */}
 			<Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -140,7 +156,7 @@ export function KanbanCard({
 					<DialogHeader className="shrink-0 pb-3 border-b border-graphite/40">
 						<div className="flex items-center gap-2 text-xs font-semibold text-indigo uppercase tracking-wider mb-1">
 							<Layers size={14} />
-							{card.type} Detail
+							Detail Task
 						</div>
 						<DialogTitle className="text-xl font-bold text-snow leading-snug">
 							{card.name}
@@ -152,25 +168,49 @@ export function KanbanCard({
 					</DialogHeader>
 
 					<div className="flex-1 min-h-0 overflow-y-auto pr-1.5 mt-4 space-y-4 custom-scrollbar">
-						{/* Status Section */}
-						<div className="flex items-center justify-between rounded-lg border border-graphite/40 bg-onyx/60 p-3">
-							<span className="text-xs text-fog font-medium">Status Task</span>
-							<span
-								className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold uppercase ${
-									card.status === "completed"
-										? "bg-emerald/15 text-emerald border border-emerald/30"
-										: card.status === "in_progress"
-											? "bg-indigo/15 text-indigo border border-indigo/30"
-											: card.status === "failed"
-												? "bg-crimson/15 text-crimson border border-crimson/30"
-												: "bg-steel/15 text-mist border border-steel/30"
-								}`}
-							>
-								{card.status === "completed" && <CheckCircle2 size={13} />}
-								{card.status === "in_progress" && <Play size={13} />}
-								{card.status === "failed" && <AlertTriangle size={13} />}
-								{card.status}
-							</span>
+						{/* Priority & Status Section */}
+						<div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+							<div className="flex items-center justify-between rounded-lg border border-graphite/40 bg-onyx/60 p-3">
+								<span className="text-xs text-fog font-medium">
+									Tingkat Kepentingan
+								</span>
+								<span
+									className={cn(
+										"inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider",
+										priorityConfig.badgeClassName,
+									)}
+								>
+									<span
+										className={cn(
+											"h-1.5 w-1.5 rounded-full shrink-0",
+											priorityConfig.dotClassName,
+										)}
+										aria-hidden="true"
+									/>
+									{priorityConfig.label}
+								</span>
+							</div>
+							<div className="flex items-center justify-between rounded-lg border border-graphite/40 bg-onyx/60 p-3">
+								<span className="text-xs text-fog font-medium">
+									Status Task
+								</span>
+								<span
+									className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold uppercase ${
+										card.status === "completed"
+											? "bg-emerald/15 text-emerald border border-emerald/30"
+											: card.status === "in_progress"
+												? "bg-indigo/15 text-indigo border border-indigo/30"
+												: card.status === "failed"
+													? "bg-crimson/15 text-crimson border border-crimson/30"
+													: "bg-steel/15 text-mist border border-steel/30"
+									}`}
+								>
+									{card.status === "completed" && <CheckCircle2 size={13} />}
+									{card.status === "in_progress" && <Play size={13} />}
+									{card.status === "failed" && <AlertTriangle size={13} />}
+									{STATUS_LABELS[card.status] ?? card.status}
+								</span>
+							</div>
 						</div>
 
 						{/* Description */}
@@ -199,10 +239,9 @@ export function KanbanCard({
 										</span>
 									</div>
 									<ul className="space-y-2 bg-onyx/60 p-3 rounded-lg border border-graphite/50 max-h-56 overflow-y-auto custom-scrollbar">
-										{card.subtasks.map((sub, idx) => (
-											// biome-ignore lint/suspicious/noArrayIndexKey: subtask names can duplicate; composite key with index tiebreaker
+										{card.subtasks.map((sub) => (
 											<li
-												key={`${sub.name}-${idx}`}
+												key={sub.name}
 												className="flex items-start gap-2.5 text-xs p-1.5 rounded hover:bg-white/5 transition-colors"
 											>
 												<div className="mt-0.5 shrink-0">

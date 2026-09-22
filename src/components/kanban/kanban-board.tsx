@@ -10,6 +10,8 @@ import {
 	Loader2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DocumentReviewModal } from "@/components/project/document-review-modal";
+import { ProjectDocumentsDrawer } from "@/components/project/project-documents-drawer";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -24,15 +26,30 @@ import {
 	extractPhases,
 	filterColumnsByPhase,
 } from "@/lib/kanban-utils";
+import { cn } from "@/lib/utils";
+import { useUIStore } from "@/store";
 import { KanbanBanner } from "./kanban-banner";
 import { KanbanColumn, type KanbanColumnHandle } from "./kanban-column";
 
 interface KanbanBoardProps {
 	projectId: string;
 	projectName: string;
+	latestPrdContent?: string | null;
+	latestAcContent?: string | null;
 }
 
-export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
+export function KanbanBoard({
+	projectId,
+	projectName,
+	latestPrdContent,
+	latestAcContent,
+}: KanbanBoardProps) {
+	const isProjectDrawerOpen = useUIStore((s) => s.isProjectDrawerOpen);
+	const setProjectDrawerOpen = useUIStore((s) => s.setProjectDrawerOpen);
+	const [activeReviewModal, setActiveReviewModal] = useState<
+		"prd" | "ac" | null
+	>(null);
+
 	const { data, isLoading, isError, staleness, refetch } = useKanbanTasks({
 		projectId,
 		intervalMs: 10000,
@@ -298,53 +315,76 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
 			<main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col min-h-0 overflow-hidden px-4 sm:px-6 lg:px-8">
 				{/* Toolbar: Phase Filter & Progress Bar */}
 				{hasProjectTasks && (
-					<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-4 pb-2 shrink-0">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-center pt-4 pb-3 shrink-0">
 						{/* Left: Phase Filter */}
-						<div className="flex items-center gap-2 flex-wrap">
+						<div className="flex items-center gap-2 shrink-0">
 							<span className="text-xs font-medium text-fog">Fase:</span>
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<button
 										type="button"
-										className="inline-flex items-center gap-2 rounded-md border border-graphite bg-obsidian/80 px-3 py-1.5 text-xs font-[510] text-snow hover:border-steel hover:bg-obsidian focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo transition-colors"
+										className="inline-flex items-center justify-between gap-2 rounded-md border border-graphite bg-charcoal px-3 py-1.5 text-xs font-medium text-snow hover:border-steel hover:bg-steel/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo transition-colors cursor-pointer"
 										aria-label="Filter berdasarkan fase project"
 									>
-										<span className="max-w-[200px] sm:max-w-[280px] truncate">
+										<span
+											className="max-w-[160px] sm:max-w-[200px] truncate"
+											title={selectedPhaseLabel}
+										>
 											{selectedPhaseLabel}
 										</span>
-										<ChevronDown size={14} className="text-fog shrink-0" />
+										<ChevronDown
+											size={13}
+											className="text-fog shrink-0"
+											aria-hidden="true"
+										/>
 									</button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent
 									align="start"
-									className="w-72 max-h-80 overflow-y-auto custom-scrollbar"
+									className="w-56 sm:w-64 max-h-72 overflow-y-auto custom-scrollbar p-1"
 								>
 									<DropdownMenuItem
 										onClick={() => setSelectedPhase(null)}
-										className="cursor-pointer"
+										className={cn(
+											"flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded cursor-pointer",
+											selectedPhase === null
+												? "bg-steel/15 text-snow font-semibold dark:bg-steel/25"
+												: "text-mist hover:text-snow hover:bg-steel/10",
+										)}
 									>
-										<div className="flex items-center justify-between w-full">
-											<span className="font-medium">Semua</span>
-											{selectedPhase === null && (
-												<Check size={14} className="text-indigo" />
-											)}
-										</div>
+										<span>Semua</span>
+										{selectedPhase === null && (
+											<Check size={13} className="text-snow shrink-0 ml-2" />
+										)}
 									</DropdownMenuItem>
-									{phases.length > 0 && <DropdownMenuSeparator />}
-									{phases.map((phase) => (
-										<DropdownMenuItem
-											key={phase.id}
-											onClick={() => setSelectedPhase(phase.id)}
-											className="cursor-pointer"
-										>
-											<div className="flex items-center justify-between w-full gap-2">
-												<span className="truncate">{phase.label}</span>
-												{selectedPhase === phase.id && (
-													<Check size={14} className="text-indigo shrink-0" />
+									{phases.length > 0 && (
+										<DropdownMenuSeparator className="my-1 bg-graphite" />
+									)}
+									{phases.map((phase) => {
+										const isSelected = selectedPhase === phase.id;
+										return (
+											<DropdownMenuItem
+												key={phase.id}
+												onClick={() => setSelectedPhase(phase.id)}
+												className={cn(
+													"flex items-center justify-between px-2.5 py-1.5 text-xs font-medium rounded cursor-pointer gap-2",
+													isSelected
+														? "bg-steel/15 text-snow font-semibold dark:bg-steel/25"
+														: "text-mist hover:text-snow hover:bg-steel/10",
 												)}
-											</div>
-										</DropdownMenuItem>
-									))}
+											>
+												<span className="truncate" title={phase.label}>
+													{phase.label}
+												</span>
+												{isSelected && (
+													<Check
+														size={13}
+														className="text-snow shrink-0 ml-2"
+													/>
+												)}
+											</DropdownMenuItem>
+										);
+									})}
 								</DropdownMenuContent>
 							</DropdownMenu>
 
@@ -352,32 +392,31 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
 								<button
 									type="button"
 									onClick={() => setSelectedPhase(null)}
-									className="text-xs text-fog hover:text-snow underline underline-offset-2 ml-1"
+									className="text-xs text-fog hover:text-snow underline underline-offset-2 ml-0.5 cursor-pointer"
 								>
 									Reset
 								</button>
 							)}
 						</div>
 
-						{/* Right: Progress info & bar */}
-						<div className="flex items-center gap-3 sm:min-w-[240px] sm:max-w-xs w-full sm:w-auto">
-							<div className="flex-1">
-								<div className="flex items-center justify-between mb-1">
-									<span className="text-xs font-medium text-mist">
-										Progress
-									</span>
-									<span className="text-xs text-fog font-mono">
-										{progress.done}/{progress.total} task selesai (
-										{progress.pct}%)
-									</span>
-								</div>
-								<div className="w-full h-2 rounded-full bg-steel/40 overflow-hidden">
-									<div
-										className="h-full rounded-full bg-indigo transition-all duration-500 ease-out"
-										style={{ width: `${progress.pct}%` }}
-									/>
-								</div>
+						{/* Right: Progress info & bar spanning remaining horizontal space */}
+						<div className="flex-1 flex items-center gap-3 sm:ml-4 min-w-0">
+							<div
+								className="flex-1 min-w-[100px] h-2 rounded-full bg-steel/30 dark:bg-steel/40 overflow-hidden"
+								role="progressbar"
+								aria-valuenow={progress.pct}
+								aria-valuemin={0}
+								aria-valuemax={100}
+								aria-label="Progress penyelesaian task"
+							>
+								<div
+									className="h-full rounded-full bg-indigo transition-all duration-500 ease-out"
+									style={{ width: `${progress.pct}%` }}
+								/>
 							</div>
+							<span className="shrink-0 text-xs text-fog font-mono tabular-nums whitespace-nowrap">
+								{progress.done}/{progress.total} task selesai ({progress.pct}%)
+							</span>
 						</div>
 					</div>
 				)}
@@ -475,6 +514,31 @@ export function KanbanBoard({ projectId, projectName }: KanbanBoardProps) {
 					)}
 				</section>
 			</main>
+
+			{/* Project Resources Drawer & Document Review Modal (matches Task page behavior) */}
+			<ProjectDocumentsDrawer
+				isOpen={isProjectDrawerOpen}
+				onClose={() => setProjectDrawerOpen(false)}
+				projectName={projectName}
+				hasPrd={Boolean(latestPrdContent)}
+				hasAc={Boolean(latestAcContent)}
+				onSelectDocument={(docType) => {
+					setProjectDrawerOpen(false);
+					setActiveReviewModal(docType);
+				}}
+			/>
+
+			<DocumentReviewModal
+				isOpen={activeReviewModal !== null}
+				onClose={() => setActiveReviewModal(null)}
+				type={activeReviewModal}
+				projectName={projectName}
+				content={
+					activeReviewModal === "prd"
+						? (latestPrdContent ?? null)
+						: (latestAcContent ?? null)
+				}
+			/>
 		</div>
 	);
 }

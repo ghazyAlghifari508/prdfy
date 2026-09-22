@@ -12,6 +12,7 @@ export interface TaskCard {
 	name: string;
 	description: string;
 	status: "pending" | "in_progress" | "completed" | "failed";
+	priority?: string | null;
 	subtaskCount?: number;
 	subtaskCompleted?: number;
 	subtasks?: Array<{ name: string; status: string }>;

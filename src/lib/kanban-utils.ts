@@ -5,6 +5,54 @@
 
 export type TaskCardStatus = "pending" | "in_progress" | "completed" | "failed";
 
+export type TaskPriorityLevel = "utama" | "penting" | "pendukung";
+
+export interface PriorityConfig {
+	label: "Utama" | "Penting" | "Pendukung";
+	level: TaskPriorityLevel;
+	badgeClassName: string;
+	dotClassName: string;
+}
+
+export function getTaskPriorityConfig(
+	priority?: string | null,
+): PriorityConfig {
+	const normalized = (priority || "").toLowerCase().trim();
+	if (
+		normalized === "high" ||
+		normalized === "utama" ||
+		normalized === "urgent"
+	) {
+		return {
+			label: "Utama",
+			level: "utama",
+			badgeClassName:
+				"border-amber-600/30 bg-amber-500/10 text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200",
+			dotClassName: "bg-amber-500",
+		};
+	}
+	if (
+		normalized === "low" ||
+		normalized === "pendukung" ||
+		normalized === "supporting"
+	) {
+		return {
+			label: "Pendukung",
+			level: "pendukung",
+			badgeClassName:
+				"border-graphite bg-charcoal/50 text-slate dark:border-graphite/80 dark:bg-obsidian/60 dark:text-fog",
+			dotClassName: "bg-slate",
+		};
+	}
+	return {
+		label: "Penting",
+		level: "penting",
+		badgeClassName:
+			"border-indigo-500/25 bg-indigo-500/10 text-indigo-700 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300",
+		dotClassName: "bg-indigo-500",
+	};
+}
+
 export interface TaskCard {
 	id: string;
 	type: "task" | "subtask";
@@ -13,6 +61,7 @@ export interface TaskCard {
 	name: string;
 	description: string;
 	status: TaskCardStatus;
+	priority?: string | null;
 	subtaskCount?: number;
 	subtaskCompleted?: number;
 	subtasks?: Array<{ id?: string; name: string; status: string }>;

@@ -73,16 +73,14 @@ export function parseTaskJson(jsonString: string): TaskTree | null {
 				};
 				for (const subtask of task.subtasks) {
 					if (!isRecord(subtask)) return null;
-					if (!isNonEmptyString(subtask.name, MAX_TASK_NAME_CHARS))
-						return null;
+					if (!isNonEmptyString(subtask.name, MAX_TASK_NAME_CHARS)) return null;
 					if (
 						subtask.description !== undefined &&
 						(typeof subtask.description !== "string" ||
 							subtask.description.length > MAX_TASK_DESC_CHARS)
 					)
 						return null;
-					const details =
-						subtask.details === undefined ? [] : subtask.details;
+					const details = subtask.details === undefined ? [] : subtask.details;
 					if (
 						!Array.isArray(details) ||
 						!details.every(
@@ -213,21 +211,20 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 
 			// Same normalization as getKanbanData: drop malformed subtask
 			// entries instead of trusting jsonb casts.
-			const subtasks = (
-				Array.isArray(row.subtasks) ? row.subtasks : []
-			).filter(
-				(s): s is Record<string, unknown> =>
-					s !== null &&
-					typeof s === "object" &&
-					typeof (s as Record<string, unknown>).name === "string",
-			).map((s) => ({
-				name: s.name as string,
-				description:
-					typeof s.description === "string" ? s.description : "",
-				details: Array.isArray(s.details)
-					? s.details.filter((d): d is string => typeof d === "string")
-					: [],
-			}));
+			const subtasks = (Array.isArray(row.subtasks) ? row.subtasks : [])
+				.filter(
+					(s): s is Record<string, unknown> =>
+						s !== null &&
+						typeof s === "object" &&
+						typeof (s as Record<string, unknown>).name === "string",
+				)
+				.map((s) => ({
+					name: s.name as string,
+					description: typeof s.description === "string" ? s.description : "",
+					details: Array.isArray(s.details)
+						? s.details.filter((d): d is string => typeof d === "string")
+						: [],
+				}));
 
 			// ponytail: feature guaranteed present via lazy-init above; push onto it
 			feature.tasks.push({
@@ -284,6 +281,7 @@ export async function getKanbanData(projectId: string): Promise<{
 			title: tasks.title,
 			description: tasks.description,
 			status: tasks.status,
+			priority: tasks.priority,
 			featureName: tasks.featureName,
 			dependencies: tasks.dependencies,
 			subtasks: tasks.subtasks,
@@ -314,6 +312,7 @@ export async function getKanbanData(projectId: string): Promise<{
 			name: string;
 			description: string;
 			status: "pending" | "in_progress" | "completed" | "failed";
+			priority?: string | null;
 			subtaskCount: number;
 			subtaskCompleted: number;
 			dependencies: string[];
@@ -355,9 +354,7 @@ export async function getKanbanData(projectId: string): Promise<{
 				typeof (s as Record<string, unknown>).name === "string",
 		);
 		const rawStatus = t.status ?? "pending";
-		const status: CardStatus = VALID_CARD_STATUSES.has(
-			rawStatus as CardStatus,
-		)
+		const status: CardStatus = VALID_CARD_STATUSES.has(rawStatus as CardStatus)
 			? (rawStatus as CardStatus)
 			: "pending";
 		const card = {
@@ -367,6 +364,7 @@ export async function getKanbanData(projectId: string): Promise<{
 			name: t.title,
 			description: t.description ?? "",
 			status,
+			priority: t.priority ?? "medium",
 			subtaskCount: validSubs.length,
 			subtaskCompleted: validSubs.filter((s) => s.status === "completed")
 				.length,
@@ -378,7 +376,8 @@ export async function getKanbanData(projectId: string): Promise<{
 			subtasks: validSubs.map((s) => ({
 				name: s.name as string,
 				status:
-					typeof s.status === "string" && VALID_CARD_STATUSES.has(s.status as CardStatus)
+					typeof s.status === "string" &&
+					VALID_CARD_STATUSES.has(s.status as CardStatus)
 						? (s.status as string)
 						: "pending",
 			})),

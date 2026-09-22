@@ -15,6 +15,7 @@ interface TaskCard {
 	name: string;
 	description: string | null;
 	status: "pending" | "in_progress" | "completed" | "failed";
+	priority?: string | null;
 	subtaskCount: number;
 	subtaskCompleted: number;
 	dependencies: string[];
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 					title: string;
 					description: string | null;
 					status: string | null;
+					priority: string | null;
 					featureName: string | null;
 					subtasks: unknown;
 					dependencies: unknown;
@@ -69,6 +71,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 								title: tasks.title,
 								description: tasks.description,
 								status: tasks.status,
+								priority: tasks.priority,
 								featureName: tasks.featureName,
 								subtasks: tasks.subtasks,
 								dependencies: tasks.dependencies,
@@ -138,6 +141,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/kanban")({
 						name: t.title,
 						description: t.description,
 						status,
+						priority: t.priority ?? "medium",
 						subtaskCount: sub.length,
 						subtaskCompleted: sub.filter((s) => s.status === "completed")
 							.length,

@@ -5,6 +5,7 @@ import {
 	detectAcChanged,
 	extractPhases,
 	filterColumnsByPhase,
+	getTaskPriorityConfig,
 	groupCardsByFeature,
 	groupCardsByStatus,
 	type TaskCard,
@@ -244,6 +245,48 @@ describe("kanban-utils", () => {
 			expect(progress.total).toBe(0);
 			expect(progress.done).toBe(0);
 			expect(progress.pct).toBe(0);
+		});
+	});
+
+	describe("getTaskPriorityConfig", () => {
+		it("maps high/utama priority to Utama with amber styling", () => {
+			const high = getTaskPriorityConfig("high");
+			expect(high.label).toBe("Utama");
+			expect(high.level).toBe("utama");
+			expect(high.badgeClassName).toContain("amber");
+
+			const utama = getTaskPriorityConfig("utama");
+			expect(utama.label).toBe("Utama");
+
+			const urgent = getTaskPriorityConfig("urgent");
+			expect(urgent.label).toBe("Utama");
+		});
+
+		it("maps low/pendukung priority to Pendukung with subtle styling", () => {
+			const low = getTaskPriorityConfig("low");
+			expect(low.label).toBe("Pendukung");
+			expect(low.level).toBe("pendukung");
+
+			const pendukung = getTaskPriorityConfig("pendukung");
+			expect(pendukung.label).toBe("Pendukung");
+
+			const supporting = getTaskPriorityConfig("supporting");
+			expect(supporting.label).toBe("Pendukung");
+		});
+
+		it("maps medium and legacy/null/undefined to Penting as safe default", () => {
+			const medium = getTaskPriorityConfig("medium");
+			expect(medium.label).toBe("Penting");
+			expect(medium.level).toBe("penting");
+
+			const empty = getTaskPriorityConfig(null);
+			expect(empty.label).toBe("Penting");
+
+			const undef = getTaskPriorityConfig(undefined);
+			expect(undef.label).toBe("Penting");
+
+			const unknown = getTaskPriorityConfig("custom_unknown_val");
+			expect(unknown.label).toBe("Penting");
 		});
 	});
 });
