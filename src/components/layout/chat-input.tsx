@@ -146,7 +146,7 @@ export function ChatInput({
 		}
 		if (trimmed.length > MAX_PROMPT_LENGTH) {
 			setPromptError(
-				`Deskripsi produkmu terlalu panjang (maksimal ${MAX_PROMPT_LENGTH.toLocaleString()} karakter).`,
+				`Deskripsi produkmu terlalu panjang (maksimal ${MAX_PROMPT_LENGTH.toLocaleString("id-ID")} karakter).`,
 			);
 			return;
 		}
@@ -463,8 +463,8 @@ export function ChatInput({
 												: "text-fog",
 										)}
 									>
-										{message.length.toLocaleString()}/
-										{MAX_PROMPT_LENGTH.toLocaleString()}
+										{message.length.toLocaleString("id-ID")}/
+										{MAX_PROMPT_LENGTH.toLocaleString("id-ID")}
 									</span>
 									<button
 										type="button"

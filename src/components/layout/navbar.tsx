@@ -50,17 +50,32 @@ export function Navbar() {
 		select: (matches) => {
 			for (let i = matches.length - 1; i >= 0; i--) {
 				const data = matches[i].loaderData as
-					| { step?: string | null; taskStatus?: string | null }
+					| {
+							step?: string | null;
+							taskStatus?: string | null;
+							acStatus?: string | null;
+							latestAcContent?: string | null;
+							hasAc?: boolean;
+					  }
 					| undefined;
 				if (
 					data &&
 					(typeof data.step === "string" ||
 						typeof data.taskStatus === "string" ||
+						typeof data.acStatus === "string" ||
+						typeof data.latestAcContent === "string" ||
+						typeof data.hasAc === "boolean" ||
 						data.step === null)
 				) {
 					return {
 						step: data.step ?? null,
 						taskStatus: data.taskStatus ?? null,
+						acStatus: data.acStatus ?? null,
+						hasAc: Boolean(
+							data.latestAcContent ||
+								data.hasAc ||
+								data.acStatus === "completed",
+						),
 					};
 				}
 			}
@@ -107,6 +122,17 @@ export function Navbar() {
 
 	const handleStepTask = async () => {
 		if (!projectId || isStepLoading) return;
+		if (
+			routeStep === "ac" &&
+			!projectNavData?.hasAc &&
+			projectNavData?.acStatus !== "completed"
+		) {
+			showToast(
+				"AC belum selesai digenerate. Tunggu hingga selesai.",
+				"error",
+			);
+			return;
+		}
 		setIsStepLoading(true);
 		try {
 			const res = await fetch(`/api/projects/${projectId}/step`, {
@@ -355,15 +381,28 @@ export function Navbar() {
 											isStepLoading ||
 											isGeneratingAC ||
 											isGeneratingPRD ||
-											hasStreamingPRDContent
+											hasStreamingPRDContent ||
+											(routeStep === "ac" &&
+												!projectNavData?.hasAc &&
+												projectNavData?.acStatus !== "completed")
 										}
 										className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98] disabled:opacity-40 disabled:bg-graphite/40 disabled:text-fog/50"
 									>
 										{isStepLoading ||
 										isGeneratingAC ||
 										isGeneratingPRD ||
-										hasStreamingPRDContent ? (
-											"Memuat..."
+										hasStreamingPRDContent ||
+										(routeStep === "ac" &&
+											!projectNavData?.hasAc &&
+											projectNavData?.acStatus !== "completed") ? (
+											isGeneratingAC ||
+											(routeStep === "ac" &&
+												!projectNavData?.hasAc &&
+												projectNavData?.acStatus !== "completed") ? (
+												"Menyusun AC..."
+											) : (
+												"Memuat..."
+											)
 										) : (
 											<>
 												<span>Generate Task</span>
