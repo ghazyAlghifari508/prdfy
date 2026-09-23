@@ -17,6 +17,15 @@ const loadAc = createServerFn({ method: "GET" })
 		const user = await requireUserServer();
 		const { plan } = await getUserPlanAndQuota();
 
+		const { hasFullWorkflow } = await import("@/lib/credits");
+		if (!hasFullWorkflow(plan)) {
+			throw redirect({
+				to: "/prd/$id",
+				params: { id },
+				search: { paywall: "ac" },
+			});
+		}
+
 		// Authorize project ownership FIRST before querying child PRD/AC version tables
 		const [project] = await db
 			.select({

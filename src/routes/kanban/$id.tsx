@@ -15,6 +15,16 @@ const loadKanban = createServerFn({ method: "GET" })
 	.validator((id: string) => id)
 	.handler(async ({ data: id }) => {
 		const user = await requireUserServer();
+		const { getUserPlanAndQuota } = await import("@/lib/session");
+		const { hasFullWorkflow } = await import("@/lib/credits");
+		const { plan } = await getUserPlanAndQuota();
+		if (!hasFullWorkflow(plan)) {
+			throw redirect({
+				to: "/prd/$id",
+				params: { id },
+				search: { paywall: "kanban" },
+			});
+		}
 		const [project, prdContent, acContent] = await Promise.all([
 			db
 				.select({ id: projects.id, name: projects.name, step: projects.step })

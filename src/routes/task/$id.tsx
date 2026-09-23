@@ -16,6 +16,16 @@ const loadTask = createServerFn({ method: "GET" })
 	.validator((id: string) => id)
 	.handler(async ({ data: id }) => {
 		const user = await requireUserServer();
+		const { getUserPlanAndQuota } = await import("@/lib/session");
+		const { hasFullWorkflow } = await import("@/lib/credits");
+		const { plan } = await getUserPlanAndQuota();
+		if (!hasFullWorkflow(plan)) {
+			throw redirect({
+				to: "/prd/$id",
+				params: { id },
+				search: { paywall: "task" },
+			});
+		}
 		const [project, prdContent, acContent, taskTree] = await Promise.all([
 			// ponytail: select only needed cols — name + taskStatus used downstream.
 			// Avoids pulling description/shareToken/lastUrl jsonb on every Task page load.
