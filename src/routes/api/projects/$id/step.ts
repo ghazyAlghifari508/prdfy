@@ -34,6 +34,21 @@ export const Route = createFileRoute("/api/projects/$id/step")({
 				if (!step || !ALLOWED_STEPS.has(step))
 					return Response.json({ error: "Invalid step" }, { status: 400 });
 
+				if (step === "ac" || step === "task") {
+					const { getUserPlanAndQuota } = await import("@/lib/session");
+					const { hasFullWorkflow } = await import("@/lib/credits");
+					const { plan } = await getUserPlanAndQuota();
+					if (!hasFullWorkflow(plan)) {
+						return Response.json(
+							{
+								error: "Tahap ini hanya tersedia di paket Pro dan Hengker.",
+								code: "UPGRADE_REQUIRED",
+							},
+							{ status: 403 },
+						);
+					}
+				}
+
 				// ponytail: step is monotonic - this endpoint fires on navigation intent
 				// (navbar "Generate AC"), so a user revisiting AC after Task must not
 				// rewind step and strand History on the AC page. No-op = still 200.
