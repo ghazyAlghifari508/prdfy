@@ -663,10 +663,11 @@ describe("codebase analysis credit lifecycle", () => {
 
 describe("requestCodebaseAnalysis atomic claim contract", () => {
 	it("claims session atomically using conditional uploaded status in a transaction", async () => {
-		const source = await readFile(
+		const raw = await readFile(
 			new URL("./codebase-analysis.server.ts", import.meta.url),
 			"utf8",
 		);
+		const source = raw.replace(/\r\n/g, "\n");
 		const claimIndex = source.indexOf("db.transaction(async (tx) => {");
 		const legacyClaimIndex = source.indexOf(
 			"const [updated] = await tx\n\t\t\t.update(codebaseSyncSessions)",
@@ -689,10 +690,11 @@ describe("requestCodebaseAnalysis atomic claim contract", () => {
 	});
 
 	it("keeps shared codebase sessions uploaded while feature analysis completes", async () => {
-		const source = await readFile(
+		const raw = await readFile(
 			new URL("./codebase-analysis.server.ts", import.meta.url),
 			"utf8",
 		);
+		const source = raw.replace(/\r\n/g, "\n");
 		const scopedClaimIndex = source.indexOf("if (scope.codebaseId) {");
 		const scopedReadyIndex = source.indexOf(
 			"if (!isCodebaseScoped) {\n\t\t\t\t// The snapshot stays `uploaded`",
