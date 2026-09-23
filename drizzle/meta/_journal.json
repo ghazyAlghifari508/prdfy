@@ -162,6 +162,13 @@
       "when": 1790095000000,
       "tag": "0022_payments_subscriptions_timestamptz",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790131136997,
+      "tag": "0023_greedy_punisher",
+      "breakpoints": true
     }
   ]
 }
