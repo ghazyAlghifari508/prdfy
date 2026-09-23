@@ -10,6 +10,7 @@ import {
 import {
 	ArrowRight,
 	CreditCard,
+	Lock,
 	LogOut,
 	Menu,
 	MessageSquare,
@@ -299,13 +300,17 @@ export function Navbar() {
 										<span>Chat</span>
 									</button>
 									{isFree ? (
-										<Link
-											to="/pricing"
+										<button
+											type="button"
+											onClick={() =>
+												useUIStore.getState().openPaywallModal("ac")
+											}
 											className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
 										>
+											<Lock size={12} className="text-amber-400" />
 											<span className="whitespace-nowrap">Upgrade ke Pro</span>
 											<ArrowRight size={12} />
-										</Link>
+										</button>
 									) : flowCta?.kind === "navigate" ? (
 										<button
 											type="button"
