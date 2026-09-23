@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 // Server-import exception: top-level `@/db`, schema, and `.server` imports
 // are correct here — server handlers only, no client component (neighboring
 // `/api/codebases` pattern). Never import this module from client code.
@@ -54,7 +54,16 @@ export const Route = createFileRoute("/api/codebases/")({
 									fileCount: codebaseSnapshots.fileCount,
 								})
 								.from(codebaseSnapshots)
-								.where(inArray(codebaseSnapshots.codebaseId, ids))
+								.innerJoin(
+									codebases,
+									eq(codebaseSnapshots.codebaseId, codebases.id),
+								)
+								.where(
+									and(
+										inArray(codebaseSnapshots.codebaseId, ids),
+										eq(codebases.userId, user.id),
+									),
+								)
 								.orderBy(desc(codebaseSnapshots.createdAt));
 
 				const latestByCodebase = new Map<

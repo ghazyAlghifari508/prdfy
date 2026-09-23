@@ -90,17 +90,21 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/status")({
 					let session = null;
 					if (requestedSessionId) {
 						const [row] = await db
-							.select()
+							.select({ session: codebaseSyncSessions })
 							.from(codebaseSyncSessions)
-							.where(eq(codebaseSyncSessions.id, requestedSessionId))
+							.innerJoin(
+								codebases,
+								eq(codebaseSyncSessions.codebaseId, codebases.id),
+							)
+							.where(
+								and(
+									eq(codebaseSyncSessions.id, requestedSessionId),
+									eq(codebases.id, codebaseId),
+									eq(codebases.userId, user.id),
+								),
+							)
 							.limit(1);
-						if (
-							row &&
-							row.userId === user.id &&
-							row.codebaseId === codebaseId
-						) {
-							session = row;
-						}
+						if (row) session = row.session;
 					} else {
 						const [row] = await db
 							.select()

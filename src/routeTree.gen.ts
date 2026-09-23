@@ -79,6 +79,10 @@ import { Route as ApiV1ProjectsIdPrdRouteImport } from './routes/api/v1/projects
 import { Route as ApiV1ProjectsIdTasksRouteImport } from './routes/api/v1/projects/$id/tasks'
 import { Route as ApiV1SubtasksIdStatusRouteImport } from './routes/api/v1/subtasks/$id/status'
 import { Route as ApiV1TasksIdStatusRouteImport } from './routes/api/v1/tasks/$id/status'
+import { Route as ApiV1CodebasesIdCodebaseCompleteRouteImport } from './routes/api/v1/codebases/$id/codebase/complete'
+import { Route as ApiV1CodebasesIdCodebaseFilesRouteImport } from './routes/api/v1/codebases/$id/codebase/files'
+import { Route as ApiV1CodebasesIdCodebaseManifestRouteImport } from './routes/api/v1/codebases/$id/codebase/manifest'
+import { Route as ApiV1CodebasesIdCodebaseSyncRouteImport } from './routes/api/v1/codebases/$id/codebase/sync'
 import { Route as ApiV1ProjectsIdCodebaseAnalysisRouteImport } from './routes/api/v1/projects/$id/codebase/analysis'
 import { Route as ApiV1ProjectsIdCodebaseCompleteRouteImport } from './routes/api/v1/projects/$id/codebase/complete'
 import { Route as ApiV1ProjectsIdCodebaseFilesRouteImport } from './routes/api/v1/projects/$id/codebase/files'
@@ -440,6 +444,30 @@ const ApiV1TasksIdStatusRoute = ApiV1TasksIdStatusRouteImport.update({
   path: '/api/v1/tasks/$id/status',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1CodebasesIdCodebaseCompleteRoute =
+  ApiV1CodebasesIdCodebaseCompleteRouteImport.update({
+    id: '/api/v1/codebases/$id/codebase/complete',
+    path: '/api/v1/codebases/$id/codebase/complete',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1CodebasesIdCodebaseFilesRoute =
+  ApiV1CodebasesIdCodebaseFilesRouteImport.update({
+    id: '/api/v1/codebases/$id/codebase/files',
+    path: '/api/v1/codebases/$id/codebase/files',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1CodebasesIdCodebaseManifestRoute =
+  ApiV1CodebasesIdCodebaseManifestRouteImport.update({
+    id: '/api/v1/codebases/$id/codebase/manifest',
+    path: '/api/v1/codebases/$id/codebase/manifest',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1CodebasesIdCodebaseSyncRoute =
+  ApiV1CodebasesIdCodebaseSyncRouteImport.update({
+    id: '/api/v1/codebases/$id/codebase/sync',
+    path: '/api/v1/codebases/$id/codebase/sync',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiV1ProjectsIdCodebaseAnalysisRoute =
   ApiV1ProjectsIdCodebaseAnalysisRouteImport.update({
     id: '/codebase/analysis',
@@ -542,6 +570,10 @@ export interface FileRoutesByFullPath {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/codebases/$id/codebase/complete': typeof ApiV1CodebasesIdCodebaseCompleteRoute
+  '/api/v1/codebases/$id/codebase/files': typeof ApiV1CodebasesIdCodebaseFilesRoute
+  '/api/v1/codebases/$id/codebase/manifest': typeof ApiV1CodebasesIdCodebaseManifestRoute
+  '/api/v1/codebases/$id/codebase/sync': typeof ApiV1CodebasesIdCodebaseSyncRoute
   '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
@@ -617,6 +649,10 @@ export interface FileRoutesByTo {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/codebases/$id/codebase/complete': typeof ApiV1CodebasesIdCodebaseCompleteRoute
+  '/api/v1/codebases/$id/codebase/files': typeof ApiV1CodebasesIdCodebaseFilesRoute
+  '/api/v1/codebases/$id/codebase/manifest': typeof ApiV1CodebasesIdCodebaseManifestRoute
+  '/api/v1/codebases/$id/codebase/sync': typeof ApiV1CodebasesIdCodebaseSyncRoute
   '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
@@ -695,6 +731,10 @@ export interface FileRoutesById {
   '/api/v1/projects/$id/tasks': typeof ApiV1ProjectsIdTasksRoute
   '/api/v1/subtasks/$id/status': typeof ApiV1SubtasksIdStatusRoute
   '/api/v1/tasks/$id/status': typeof ApiV1TasksIdStatusRoute
+  '/api/v1/codebases/$id/codebase/complete': typeof ApiV1CodebasesIdCodebaseCompleteRoute
+  '/api/v1/codebases/$id/codebase/files': typeof ApiV1CodebasesIdCodebaseFilesRoute
+  '/api/v1/codebases/$id/codebase/manifest': typeof ApiV1CodebasesIdCodebaseManifestRoute
+  '/api/v1/codebases/$id/codebase/sync': typeof ApiV1CodebasesIdCodebaseSyncRoute
   '/api/v1/projects/$id/codebase/analysis': typeof ApiV1ProjectsIdCodebaseAnalysisRoute
   '/api/v1/projects/$id/codebase/complete': typeof ApiV1ProjectsIdCodebaseCompleteRoute
   '/api/v1/projects/$id/codebase/files': typeof ApiV1ProjectsIdCodebaseFilesRoute
@@ -774,6 +814,10 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/codebases/$id/codebase/complete'
+    | '/api/v1/codebases/$id/codebase/files'
+    | '/api/v1/codebases/$id/codebase/manifest'
+    | '/api/v1/codebases/$id/codebase/sync'
     | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
@@ -849,6 +893,10 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/codebases/$id/codebase/complete'
+    | '/api/v1/codebases/$id/codebase/files'
+    | '/api/v1/codebases/$id/codebase/manifest'
+    | '/api/v1/codebases/$id/codebase/sync'
     | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
@@ -926,6 +974,10 @@ export interface FileRouteTypes {
     | '/api/v1/projects/$id/tasks'
     | '/api/v1/subtasks/$id/status'
     | '/api/v1/tasks/$id/status'
+    | '/api/v1/codebases/$id/codebase/complete'
+    | '/api/v1/codebases/$id/codebase/files'
+    | '/api/v1/codebases/$id/codebase/manifest'
+    | '/api/v1/codebases/$id/codebase/sync'
     | '/api/v1/projects/$id/codebase/analysis'
     | '/api/v1/projects/$id/codebase/complete'
     | '/api/v1/projects/$id/codebase/files'
@@ -984,6 +1036,10 @@ export interface RootRouteChildren {
   ApiSettingsApiKeysIndexRoute: typeof ApiSettingsApiKeysIndexRoute
   ApiV1SubtasksIdStatusRoute: typeof ApiV1SubtasksIdStatusRoute
   ApiV1TasksIdStatusRoute: typeof ApiV1TasksIdStatusRoute
+  ApiV1CodebasesIdCodebaseCompleteRoute: typeof ApiV1CodebasesIdCodebaseCompleteRoute
+  ApiV1CodebasesIdCodebaseFilesRoute: typeof ApiV1CodebasesIdCodebaseFilesRoute
+  ApiV1CodebasesIdCodebaseManifestRoute: typeof ApiV1CodebasesIdCodebaseManifestRoute
+  ApiV1CodebasesIdCodebaseSyncRoute: typeof ApiV1CodebasesIdCodebaseSyncRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1478,6 +1534,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1TasksIdStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/codebases/$id/codebase/complete': {
+      id: '/api/v1/codebases/$id/codebase/complete'
+      path: '/api/v1/codebases/$id/codebase/complete'
+      fullPath: '/api/v1/codebases/$id/codebase/complete'
+      preLoaderRoute: typeof ApiV1CodebasesIdCodebaseCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/codebases/$id/codebase/files': {
+      id: '/api/v1/codebases/$id/codebase/files'
+      path: '/api/v1/codebases/$id/codebase/files'
+      fullPath: '/api/v1/codebases/$id/codebase/files'
+      preLoaderRoute: typeof ApiV1CodebasesIdCodebaseFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/codebases/$id/codebase/manifest': {
+      id: '/api/v1/codebases/$id/codebase/manifest'
+      path: '/api/v1/codebases/$id/codebase/manifest'
+      fullPath: '/api/v1/codebases/$id/codebase/manifest'
+      preLoaderRoute: typeof ApiV1CodebasesIdCodebaseManifestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/codebases/$id/codebase/sync': {
+      id: '/api/v1/codebases/$id/codebase/sync'
+      path: '/api/v1/codebases/$id/codebase/sync'
+      fullPath: '/api/v1/codebases/$id/codebase/sync'
+      preLoaderRoute: typeof ApiV1CodebasesIdCodebaseSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/projects/$id/codebase/analysis': {
       id: '/api/v1/projects/$id/codebase/analysis'
       path: '/codebase/analysis'
@@ -1655,6 +1739,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSettingsApiKeysIndexRoute: ApiSettingsApiKeysIndexRoute,
   ApiV1SubtasksIdStatusRoute: ApiV1SubtasksIdStatusRoute,
   ApiV1TasksIdStatusRoute: ApiV1TasksIdStatusRoute,
+  ApiV1CodebasesIdCodebaseCompleteRoute: ApiV1CodebasesIdCodebaseCompleteRoute,
+  ApiV1CodebasesIdCodebaseFilesRoute: ApiV1CodebasesIdCodebaseFilesRoute,
+  ApiV1CodebasesIdCodebaseManifestRoute: ApiV1CodebasesIdCodebaseManifestRoute,
+  ApiV1CodebasesIdCodebaseSyncRoute: ApiV1CodebasesIdCodebaseSyncRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
