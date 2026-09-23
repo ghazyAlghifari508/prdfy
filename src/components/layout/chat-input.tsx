@@ -21,7 +21,7 @@ import { useUserPlan } from "@/hooks/use-user-plan";
 import { authClient } from "@/lib/auth-client";
 import {
 	getPendingSyncPayloadKey,
-	type SyncPromptPayload,
+	syncPromptPayloadSchema,
 } from "@/lib/codebase-sync";
 import {
 	HOME_DRAFT_DEBOUNCE_MS,
@@ -218,35 +218,44 @@ export function ChatInput({
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(requestBody),
 			});
-			const project = (await res.json().catch(() => ({}))) as {
-				id?: string;
-				error?: string;
-				projectMode?: string | null;
-				sync?: SyncPromptPayload;
-			};
-			if (!res.ok || !project.id) {
+			const body: unknown = await res.json().catch(() => null);
+			if (!res.ok || typeof body !== "object" || body === null) {
+				const message =
+					typeof body === "object" &&
+					body !== null &&
+					"error" in body &&
+					typeof body.error === "string"
+						? body.error
+						: "Gagal membuat proyek";
 				if (res.status === 403) {
-					setCreditsExhaustedMsg(
-						project.error ||
-							"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
-					);
+					setCreditsExhaustedMsg(message);
 					return;
 				}
-				throw new Error(project.error || "Gagal membuat proyek");
+				throw new Error(message);
 			}
+			if (!("id" in body) || typeof body.id !== "string")
+				throw new Error("Respons pembuatan proyek tidak valid");
+			const responseProjectMode =
+				"projectMode" in body && typeof body.projectMode === "string"
+					? body.projectMode
+					: null;
+			const syncPayload =
+				"sync" in body ? syncPromptPayloadSchema.safeParse(body.sync) : null;
 			clearHomeDraft();
 			// Existing-codebase enters the sync flow: stash the one-time sync
 			// payload for /codebases/$id (consumed once to open the agent
 			// modal). Greenfield keeps the exact /ask/$id navigation.
 			const target = decideHomePostCreationTarget({
-				id: project.id,
-				projectMode: project.projectMode ?? projectMode,
+				id: body.id,
+				projectMode: responseProjectMode ?? projectMode,
 			});
-			if (target.to === "/codebases" && project.sync && project.id) {
+			if (target.to === "/codebases") {
+				if (!syncPayload?.success)
+					throw new Error("Respons sync codebase tidak valid");
 				try {
 					sessionStorage.setItem(
-						getPendingSyncPayloadKey(project.id),
-						JSON.stringify(project.sync),
+						getPendingSyncPayloadKey(body.id),
+						JSON.stringify(syncPayload.data),
 					);
 				} catch {
 					// Storage blocked/full — the codebase page falls back to
@@ -254,7 +263,7 @@ export function ChatInput({
 				}
 			}
 			if (target.to === "/codebases") {
-				navigate({ to: "/codebases/$id", params: { id: project.id } });
+				navigate({ to: "/codebases/$id", params: { id: body.id } });
 			} else {
 				if (target.params) navigate({ to: target.to, params: target.params });
 			}

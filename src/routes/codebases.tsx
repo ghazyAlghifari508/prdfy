@@ -5,9 +5,7 @@ import {
 	useNavigate,
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { desc, eq, inArray } from "drizzle-orm";
 import { useState } from "react";
-import { codebaseSnapshots, codebases } from "@/db/schema";
 import {
 	getPendingSyncPayloadKey,
 	syncPromptPayloadSchema,
@@ -26,6 +24,8 @@ const loadCodebases = createServerFn({ method: "GET" }).handler(async () => {
 
 async function dbSelectCodebases(userId: string) {
 	const { db } = await import("@/db");
+	const { codebaseSnapshots, codebases } = await import("@/db/schema");
+	const { desc, eq, inArray } = await import("drizzle-orm");
 	const rows = await db
 		.select({
 			id: codebases.id,
@@ -59,12 +59,17 @@ async function dbSelectCodebases(userId: string) {
 		name: row.name,
 		createdAt: row.createdAt?.toISOString() ?? null,
 		latestSnapshot: latest.get(row.id)
-			? {
-					id: latest.get(row.id)?.id ?? "",
-					createdAt: latest.get(row.id)?.createdAt?.toISOString() ?? null,
-					commitSha: latest.get(row.id)?.commitSha ?? null,
-					fileCount: latest.get(row.id)?.fileCount ?? 0,
-				}
+			? (() => {
+					const snapshot = latest.get(row.id);
+					return snapshot
+						? {
+								id: snapshot.id,
+								createdAt: snapshot.createdAt?.toISOString() ?? null,
+								commitSha: snapshot.commitSha ?? null,
+								fileCount: snapshot.fileCount ?? 0,
+							}
+						: null;
+				})()
 			: null,
 	}));
 }
@@ -81,6 +86,7 @@ export const Route = createFileRoute("/codebases")({
 	},
 	head: () => ({ meta: [{ title: "Codebase | PrdFy" }] }),
 	component: CodebasesPage,
+	pendingComponent: CodebasesPending,
 	errorComponent: ({ reset }) => (
 		<main className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-12 sm:px-6">
 			<div
@@ -102,6 +108,33 @@ export const Route = createFileRoute("/codebases")({
 		</main>
 	),
 });
+
+function CodebasesPending() {
+	return (
+		<main
+			className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-14"
+			aria-busy="true"
+		>
+			<header className="border-b border-graphite pb-6">
+				<div className="h-3 w-36 animate-pulse rounded bg-graphite" />
+				<div className="mt-3 h-10 w-48 animate-pulse rounded bg-graphite" />
+				<div className="mt-3 h-4 max-w-xl animate-pulse rounded bg-graphite" />
+			</header>
+			<div className="overflow-hidden rounded-xl border border-graphite bg-charcoal">
+				<div className="h-12 border-b border-graphite bg-graphite/30" />
+				<div className="space-y-1 p-5">
+					{["one", "two", "three"].map((row) => (
+						<div
+							key={row}
+							className="h-14 animate-pulse rounded bg-graphite/40"
+						/>
+					))}
+				</div>
+			</div>
+			<p className="text-sm text-fog">Memuat daftar codebase...</p>
+		</main>
+	);
+}
 
 function CodebasesPage() {
 	const { codebases: items } = Route.useLoaderData();
@@ -135,14 +168,16 @@ function CodebasesPage() {
 				setError("Codebase gagal dibuat. Coba lagi.");
 				return;
 			}
-			if ("sync" in body) {
-				const sync = syncPromptPayloadSchema.safeParse(body.sync);
-				if (sync.success)
-					sessionStorage.setItem(
-						getPendingSyncPayloadKey(body.id),
-						JSON.stringify(sync.data),
-					);
+			const sync =
+				"sync" in body ? syncPromptPayloadSchema.safeParse(body.sync) : null;
+			if (!sync?.success) {
+				setError("Codebase dibuat, tetapi instruksi sync tidak valid.");
+				return;
 			}
+			sessionStorage.setItem(
+				getPendingSyncPayloadKey(body.id),
+				JSON.stringify(sync.data),
+			);
 			await navigate({ to: "/codebases/$id", params: { id: body.id } });
 		} catch {
 			setError("Server tidak dapat dihubungi.");

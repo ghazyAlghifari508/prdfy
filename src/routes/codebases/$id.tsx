@@ -1,6 +1,5 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { and, desc, eq, isNull } from "drizzle-orm";
 import {
 	type FormEvent,
 	useCallback,
@@ -11,7 +10,6 @@ import {
 import { CodebaseReview } from "@/components/codebase/codebase-review";
 import { ScreenConnect } from "@/components/codebase/screen-connect";
 import { SyncStatus } from "@/components/codebase/sync-status";
-import { projects } from "@/db/schema";
 import {
 	type AnalysisResponse,
 	safeParseCodebaseAnalysis,
@@ -39,6 +37,8 @@ const loadCodebase = createServerFn({ method: "GET" })
 		const user = await requireUserServer();
 		const { db } = await import("@/db");
 		const { codebases, codebaseAnalyses } = await import("@/db/schema");
+		const { projects } = await import("@/db/schema");
+		const { and, desc, eq, isNull } = await import("drizzle-orm");
 		const [codebase] = await db
 			.select({ id: codebases.id, name: codebases.name })
 			.from(codebases)
@@ -62,7 +62,12 @@ const loadCodebase = createServerFn({ method: "GET" })
 			const [row] = await db
 				.select()
 				.from(codebaseAnalyses)
-				.where(eq(codebaseAnalyses.projectId, feature.id))
+				.where(
+					and(
+						eq(codebaseAnalyses.projectId, feature.id),
+						eq(codebaseAnalyses.status, "ready"),
+					),
+				)
 				.orderBy(desc(codebaseAnalyses.createdAt))
 				.limit(1);
 			if (row) {
@@ -162,10 +167,19 @@ function CodebaseDetailPage() {
 			const parsed = syncStatusResponseSchema.safeParse(
 				await response.json().catch(() => null),
 			);
-			if (!response.ok || !parsed.success) return;
+			if (!response.ok || !parsed.success) {
+				setError(
+					response.ok
+						? "Status sync tidak valid. Coba muat ulang."
+						: "Status sync tidak dapat dibaca. Coba lagi.",
+				);
+				return;
+			}
 			setStatus(parsed.data);
 			if (parsed.data.snapshotId)
 				setScreen((current) => (current === 1 ? 2 : current));
+		} catch {
+			setError("Server tidak dapat dihubungi. Coba lagi.");
 		} finally {
 			inFlight.current = false;
 		}
@@ -266,9 +280,7 @@ function CodebaseDetailPage() {
 	};
 
 	const snapshotReady = Boolean(
-		status?.snapshotId &&
-			(SNAPSHOT_CONTEXT_STATUSES.includes(status.status) ||
-				status.status === "analyzing"),
+		status?.snapshotId && SNAPSHOT_CONTEXT_STATUSES.includes(status.status),
 	);
 	const submitFeature = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();

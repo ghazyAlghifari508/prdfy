@@ -206,12 +206,12 @@ export function SyncStatus({
 					<span
 						className={`h-1.5 w-1.5 rounded-full ${
 							isReady
-								? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+								? "bg-emerald-400"
 								: isConnected
-									? "bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]"
+									? "bg-blue-400"
 									: isFailed || isExpired
-										? "bg-crimson shadow-[0_0_8px_rgba(235,87,87,0.8)]"
-										: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"
+										? "bg-crimson"
+										: "bg-amber-400"
 						}`}
 					/>
 					{isReady
@@ -227,7 +227,7 @@ export function SyncStatus({
 			</div>
 
 			{/* Main Status Panel */}
-			<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden">
+			<div className="rounded-xl border border-graphite bg-charcoal/90 overflow-hidden">
 				{/* Panel Head */}
 				<div className="flex items-center justify-between border-b border-graphite p-5 sm:p-6">
 					<div>
