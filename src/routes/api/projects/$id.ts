@@ -6,10 +6,6 @@ import {
 	codebaseAnalyses,
 	codebaseAskHandoffs,
 	codebaseGenerationContexts,
-	codebaseSnapshotFiles,
-	codebaseSnapshots,
-	codebaseSyncIdempotencyKeys,
-	codebaseSyncSessions,
 	conversations,
 	messages,
 	prdVersions,
@@ -19,21 +15,43 @@ import {
 import { deletionTimestamp } from "@/lib/project-deletion";
 import { requireUser } from "@/lib/session";
 
-// Every project-owned sync table, in FK-safe delete order: ask handoffs
-// carry no FK deps (snapshot binding is advisory text) so they go first,
-// then generation contexts reference snapshots + analyses,
-// analyses/idempotency/files reference snapshots/sessions, and snapshots
-// reference sessions. Sessions go last. Unit-tested in
-// ./-project-mode.test.ts — keep the order and the transaction below in sync.
+// Tables owned by the FEATURE (the project). Codebase-owned artifacts —
+// codebase_sync_sessions, codebase_snapshots, codebase_snapshot_files,
+// codebase_sync_idempotency_keys — are deliberately NOT here: they belong to
+// the repository and every other feature depends on them. Deleting one feature
+// must not destroy the codebase's sync history.
 export const PROJECT_SYNC_CHILD_TABLES = [
 	"codebase_ask_handoffs",
 	"codebase_generation_contexts",
 	"codebase_analyses",
-	"codebase_sync_idempotency_keys",
-	"codebase_snapshot_files",
-	"codebase_snapshots",
-	"codebase_sync_sessions",
 ] as const;
+
+export async function purgeProjectArtifacts(
+	tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+	projectId: string,
+) {
+	const convRows = await tx
+		.select({ id: conversations.id })
+		.from(conversations)
+		.where(eq(conversations.projectId, projectId));
+	const convIds = convRows.map((c) => c.id);
+	if (convIds.length > 0) {
+		await tx.delete(messages).where(inArray(messages.conversationId, convIds));
+	}
+	await tx.delete(conversations).where(eq(conversations.projectId, projectId));
+	await tx.delete(prdVersions).where(eq(prdVersions.projectId, projectId));
+	await tx.delete(acVersions).where(eq(acVersions.projectId, projectId));
+	await tx.delete(tasks).where(eq(tasks.projectId, projectId));
+	await tx
+		.delete(codebaseAskHandoffs)
+		.where(eq(codebaseAskHandoffs.projectId, projectId));
+	await tx
+		.delete(codebaseGenerationContexts)
+		.where(eq(codebaseGenerationContexts.projectId, projectId));
+	await tx
+		.delete(codebaseAnalyses)
+		.where(eq(codebaseAnalyses.projectId, projectId));
+}
 
 export const Route = createFileRoute("/api/projects/$id")({
 	server: {
@@ -81,74 +99,7 @@ export const Route = createFileRoute("/api/projects/$id")({
 						// re-purging (and without touching accounting).
 						if (ownProject.deletedAt) return { kind: "already" as const };
 
-						const convRows = await tx
-							.select({ id: conversations.id })
-							.from(conversations)
-							.where(eq(conversations.projectId, projectId));
-						const convIds = convRows.map((c) => c.id);
-						if (convIds.length > 0) {
-							await tx
-								.delete(messages)
-								.where(inArray(messages.conversationId, convIds));
-						}
-						await tx
-							.delete(conversations)
-							.where(eq(conversations.projectId, projectId));
-						await tx
-							.delete(prdVersions)
-							.where(eq(prdVersions.projectId, projectId));
-						await tx
-							.delete(acVersions)
-							.where(eq(acVersions.projectId, projectId));
-						await tx.delete(tasks).where(eq(tasks.projectId, projectId));
-						// Existing-codebase sync records, in PROJECT_SYNC_CHILD_TABLES
-						// order (FK-safe: handoffs → contexts → analyses →
-						// idempotency → files → snapshots → sessions). Raw filtered
-						// source lives in codebase_snapshot_files for the project
-						// lifetime, so project deletion is its retention boundary —
-						// everything goes.
-						await tx
-							.delete(codebaseAskHandoffs)
-							.where(eq(codebaseAskHandoffs.projectId, projectId));
-						await tx
-							.delete(codebaseGenerationContexts)
-							.where(eq(codebaseGenerationContexts.projectId, projectId));
-						await tx
-							.delete(codebaseAnalyses)
-							.where(eq(codebaseAnalyses.projectId, projectId));
-						const snapshotRows = await tx
-							.select({ id: codebaseSnapshots.id })
-							.from(codebaseSnapshots)
-							.where(eq(codebaseSnapshots.projectId, projectId));
-						const snapshotIds = snapshotRows.map((s) => s.id);
-						const sessionRows = await tx
-							.select({ id: codebaseSyncSessions.id })
-							.from(codebaseSyncSessions)
-							.where(eq(codebaseSyncSessions.projectId, projectId));
-						const sessionIds = sessionRows.map((s) => s.id);
-						if (snapshotIds.length > 0) {
-							await tx
-								.delete(codebaseSnapshotFiles)
-								.where(inArray(codebaseSnapshotFiles.snapshotId, snapshotIds));
-							await tx
-								.delete(codebaseSyncIdempotencyKeys)
-								.where(
-									inArray(codebaseSyncIdempotencyKeys.snapshotId, snapshotIds),
-								);
-						}
-						if (sessionIds.length > 0) {
-							await tx
-								.delete(codebaseSyncIdempotencyKeys)
-								.where(
-									inArray(codebaseSyncIdempotencyKeys.sessionId, sessionIds),
-								);
-						}
-						await tx
-							.delete(codebaseSnapshots)
-							.where(eq(codebaseSnapshots.projectId, projectId));
-						await tx
-							.delete(codebaseSyncSessions)
-							.where(eq(codebaseSyncSessions.projectId, projectId));
+						await purgeProjectArtifacts(tx, projectId);
 
 						// Clear share access: the token must not keep resolving to
 						// purged content.

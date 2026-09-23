@@ -11,7 +11,7 @@ import { useLastRoute } from "@/lib/use-last-route";
 
 // Ask entry decision for existing-codebase projects (unit-tested in
 // ./-ask-entry.test.ts): without a ready analysis the generic Ask flow would
-// run without codebase context, so those projects are routed to /codebase/$id
+// run without codebase context, so those projects are routed to /codebases/$id
 // until analysis is ready. Greenfield and unknown modes always enter.
 export function decideAskEntry(
 	projectMode: string | null | undefined,
@@ -37,6 +37,7 @@ const loadAsk = createServerFn({ method: "GET" })
 					name: projects.name,
 					step: projects.step,
 					projectMode: projects.projectMode,
+					codebaseId: projects.codebaseId,
 				})
 				.from(projects)
 				.where(
@@ -102,6 +103,7 @@ const loadAsk = createServerFn({ method: "GET" })
 			projectName: project.name,
 			step: (project as { step?: string | null }).step ?? null,
 			projectMode: project.projectMode,
+			codebaseId: project.codebaseId ?? null,
 			hasReadyAnalysis,
 			readyAnalysis,
 			savedHandoff,
@@ -117,7 +119,13 @@ export const Route = createFileRoute("/ask/$id")({
 				decideAskEntry(data.projectMode, data.hasReadyAnalysis) ===
 				"redirect-codebase"
 			) {
-				throw redirect({ to: "/codebase/$id", params: { id: params.id } });
+				if (data.codebaseId) {
+					throw redirect({
+						to: "/codebases/$id",
+						params: { id: data.codebaseId },
+					});
+				}
+				throw redirect({ to: "/codebases" });
 			}
 			return data;
 		} catch (e) {

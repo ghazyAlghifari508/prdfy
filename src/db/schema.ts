@@ -755,9 +755,10 @@ export const codebaseGenerationContexts = pgTable(
 );
 
 // Ask handoff: authoritative server-side copy of the Ask answers/compiled
-// prompt for existing-codebase projects (one row per project, upserted on
-// submit). sessionStorage keeps UI continuity; this row survives refresh and
-// multi-device access. Greenfield projects never write here.
+// prompt for projects (one row per project, upserted on submit). Both
+// project modes (greenfield and existing_codebase) write here.
+// sessionStorage keeps UI continuity; this row survives refresh and
+// multi-device access.
 export const codebaseAskHandoffs = pgTable("codebase_ask_handoffs", {
 	projectId: text("project_id")
 		.primaryKey()
