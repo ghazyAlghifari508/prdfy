@@ -109,6 +109,7 @@ export const Route = createFileRoute("/api/projects/$id")({
 								deletedAt: deletionTimestamp(),
 								shareToken: null,
 								lastUrl: null,
+								codebaseId: null,
 								updatedAt: deletionTimestamp(),
 							})
 							.where(

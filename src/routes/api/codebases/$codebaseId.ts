@@ -108,6 +108,19 @@ export const Route = createFileRoute("/api/codebases/$codebaseId")({
 								);
 						}
 
+						// Unlink any remaining projects (including previously tombstoned
+						// ones) so the codebase deletion cascade does not attempt to
+						// destroy retained accounting rows.
+						await tx
+							.update(projects)
+							.set({ codebaseId: null })
+							.where(
+								and(
+									eq(projects.codebaseId, codebaseId),
+									eq(projects.userId, user.id),
+								),
+							);
+
 						// Delete the codebase row. Sessions, snapshots, files, idempotency
 						// keys, and analyses cascade via the FKs added in Task 1.
 						await tx
