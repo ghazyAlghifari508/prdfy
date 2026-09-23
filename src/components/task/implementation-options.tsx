@@ -25,6 +25,14 @@ interface ImplementationOptionsProps {
 	projectId: string;
 	projectName: string;
 	hasContent: boolean; // true if PRD or tasks exist
+	/** True when at least one task is not in `pending`. */
+	hasUnfinishedProgress?: boolean;
+}
+
+// The handoff flow offers a progress reset, but only as a confirmation: copying
+// a fresh API key must never silently discard work the user already finished.
+export function shouldConfirmReset(hasUnfinishedProgress: boolean): boolean {
+	return hasUnfinishedProgress;
 }
 
 const AI_AGENT_PROMPT_TEMPLATE = `Kamu adalah PrdFy Coding Agent.
@@ -187,6 +195,7 @@ export function ImplementationOptions({
 	projectId,
 	projectName,
 	hasContent,
+	hasUnfinishedProgress,
 }: ImplementationOptionsProps) {
 	const showToast = useUIStore((s) => s.showToast);
 
@@ -194,6 +203,8 @@ export function ImplementationOptions({
 	const [isLoading, setIsLoading] = useState(false);
 	const [showPromptModal, setShowPromptModal] = useState(false);
 	const [promptText, setPromptText] = useState("");
+	const [resetDialogOpen, setResetDialogOpen] = useState(false);
+	const [isResetting, setIsResetting] = useState(false);
 
 	// Restore choice from sessionStorage on mount (per-project)
 	useEffect(() => {
@@ -282,7 +293,7 @@ export function ImplementationOptions({
 		}
 	}, [projectId, showToast, setAndPersistChoice]);
 
-	const handlePromptAi = useCallback(async () => {
+	const buildPromptAndOpen = useCallback(async () => {
 		setIsLoading(true);
 		try {
 			const [data, autoKeyData] = await Promise.all([
@@ -310,6 +321,49 @@ export function ImplementationOptions({
 			setIsLoading(false);
 		}
 	}, [fetchContent, projectName, showToast, projectId]);
+
+	const handlePromptAi = useCallback(async () => {
+		if (shouldConfirmReset(hasUnfinishedProgress ?? false)) {
+			setResetDialogOpen(true);
+			return;
+		}
+		await buildPromptAndOpen();
+	}, [hasUnfinishedProgress, buildPromptAndOpen]);
+
+	const handleConfirmReset = useCallback(async () => {
+		setIsResetting(true);
+		try {
+			const res = await fetch(
+				`/api/projects/${encodeURIComponent(projectId)}/reset-progress`,
+				{ method: "POST" },
+			);
+			const json = (await res.json().catch(() => null)) as unknown;
+			if (!res.ok) {
+				const message =
+					json && typeof json === "object" && "error" in json
+						? String((json as { error: unknown }).error)
+						: "Gagal mereset progress.";
+				showToast(message, "error");
+				return;
+			}
+			const tasksReset =
+				json && typeof json === "object" && "tasksReset" in json
+					? Number((json as { tasksReset: unknown }).tasksReset)
+					: 0;
+			showToast(
+				tasksReset > 0
+					? `${tasksReset} task dikembalikan ke pending.`
+					: "Tidak ada progress yang perlu direset.",
+				"success",
+			);
+			setResetDialogOpen(false);
+			await buildPromptAndOpen();
+		} catch {
+			showToast("Gagal menghubungi server.", "error");
+		} finally {
+			setIsResetting(false);
+		}
+	}, [projectId, showToast, buildPromptAndOpen]);
 
 	const handleCopyPrompt = useCallback(async () => {
 		try {
@@ -410,6 +464,38 @@ export function ImplementationOptions({
 						>
 							<Copy size={14} />
 							Copy & Tutup
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>Reset progress sebelum handoff?</DialogTitle>
+						<DialogDescription>
+							Beberapa task sudah dikerjakan. Reset status ke{" "}
+							<strong>pending</strong> supaya agent mengerjakan semuanya dari
+							awal. Task, PRD, dan AC tidak diubah, dan tidak ada kredit yang
+							terpakai.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="ghost"
+							onClick={() => {
+								setResetDialogOpen(false);
+								void buildPromptAndOpen();
+							}}
+							disabled={isResetting}
+						>
+							Tanpa reset
+						</Button>
+						<Button
+							onClick={() => void handleConfirmReset()}
+							disabled={isResetting}
+						>
+							{isResetting ? "Mereset..." : "Reset lalu lanjut"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
