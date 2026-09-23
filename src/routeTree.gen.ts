@@ -63,6 +63,7 @@ import { Route as ApiUserPlanRouteImport } from './routes/api/user/plan'
 import { Route as PrdShareTokenRouteImport } from './routes/prd/share/$token'
 import { Route as ApiCodebaseProjectIdSessionRouteImport } from './routes/api/codebase/$projectId/session'
 import { Route as ApiCodebaseProjectIdStatusRouteImport } from './routes/api/codebase/$projectId/status'
+import { Route as ApiCodebasesCodebaseIdFeaturesRouteImport } from './routes/api/codebases/$codebaseId/features'
 import { Route as ApiCodebasesCodebaseIdSessionRouteImport } from './routes/api/codebases/$codebaseId/session'
 import { Route as ApiCodebasesCodebaseIdStatusRouteImport } from './routes/api/codebases/$codebaseId/status'
 import { Route as ApiProjectsIdLastRouteRouteImport } from './routes/api/projects/$id/last-route'
@@ -361,6 +362,12 @@ const ApiCodebaseProjectIdStatusRoute =
     path: '/api/codebase/$projectId/status',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiCodebasesCodebaseIdFeaturesRoute =
+  ApiCodebasesCodebaseIdFeaturesRouteImport.update({
+    id: '/api/codebases/$codebaseId/features',
+    path: '/api/codebases/$codebaseId/features',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiCodebasesCodebaseIdSessionRoute =
   ApiCodebasesCodebaseIdSessionRouteImport.update({
     id: '/api/codebases/$codebaseId/session',
@@ -554,6 +561,7 @@ export interface FileRoutesByFullPath {
   '/api/projects/': typeof ApiProjectsIndexRoute
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
+  '/api/codebases/$codebaseId/features': typeof ApiCodebasesCodebaseIdFeaturesRoute
   '/api/codebases/$codebaseId/session': typeof ApiCodebasesCodebaseIdSessionRoute
   '/api/codebases/$codebaseId/status': typeof ApiCodebasesCodebaseIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
@@ -633,6 +641,7 @@ export interface FileRoutesByTo {
   '/api/projects': typeof ApiProjectsIndexRoute
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
+  '/api/codebases/$codebaseId/features': typeof ApiCodebasesCodebaseIdFeaturesRoute
   '/api/codebases/$codebaseId/session': typeof ApiCodebasesCodebaseIdSessionRoute
   '/api/codebases/$codebaseId/status': typeof ApiCodebasesCodebaseIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
@@ -715,6 +724,7 @@ export interface FileRoutesById {
   '/api/projects/': typeof ApiProjectsIndexRoute
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
+  '/api/codebases/$codebaseId/features': typeof ApiCodebasesCodebaseIdFeaturesRoute
   '/api/codebases/$codebaseId/session': typeof ApiCodebasesCodebaseIdSessionRoute
   '/api/codebases/$codebaseId/status': typeof ApiCodebasesCodebaseIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
@@ -798,6 +808,7 @@ export interface FileRouteTypes {
     | '/api/projects/'
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
+    | '/api/codebases/$codebaseId/features'
     | '/api/codebases/$codebaseId/session'
     | '/api/codebases/$codebaseId/status'
     | '/api/projects/$id/last-route'
@@ -877,6 +888,7 @@ export interface FileRouteTypes {
     | '/api/projects'
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
+    | '/api/codebases/$codebaseId/features'
     | '/api/codebases/$codebaseId/session'
     | '/api/codebases/$codebaseId/status'
     | '/api/projects/$id/last-route'
@@ -958,6 +970,7 @@ export interface FileRouteTypes {
     | '/api/projects/'
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
+    | '/api/codebases/$codebaseId/features'
     | '/api/codebases/$codebaseId/session'
     | '/api/codebases/$codebaseId/status'
     | '/api/projects/$id/last-route'
@@ -1028,6 +1041,7 @@ export interface RootRouteChildren {
   ApiProjectsIndexRoute: typeof ApiProjectsIndexRoute
   ApiCodebaseProjectIdSessionRoute: typeof ApiCodebaseProjectIdSessionRoute
   ApiCodebaseProjectIdStatusRoute: typeof ApiCodebaseProjectIdStatusRoute
+  ApiCodebasesCodebaseIdFeaturesRoute: typeof ApiCodebasesCodebaseIdFeaturesRoute
   ApiCodebasesCodebaseIdSessionRoute: typeof ApiCodebasesCodebaseIdSessionRoute
   ApiCodebasesCodebaseIdStatusRoute: typeof ApiCodebasesCodebaseIdStatusRoute
   ApiSettingsApiKeysIdRoute: typeof ApiSettingsApiKeysIdRoute
@@ -1422,6 +1436,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCodebaseProjectIdStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/codebases/$codebaseId/features': {
+      id: '/api/codebases/$codebaseId/features'
+      path: '/api/codebases/$codebaseId/features'
+      fullPath: '/api/codebases/$codebaseId/features'
+      preLoaderRoute: typeof ApiCodebasesCodebaseIdFeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/codebases/$codebaseId/session': {
       id: '/api/codebases/$codebaseId/session'
       path: '/api/codebases/$codebaseId/session'
@@ -1731,6 +1752,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiProjectsIndexRoute: ApiProjectsIndexRoute,
   ApiCodebaseProjectIdSessionRoute: ApiCodebaseProjectIdSessionRoute,
   ApiCodebaseProjectIdStatusRoute: ApiCodebaseProjectIdStatusRoute,
+  ApiCodebasesCodebaseIdFeaturesRoute: ApiCodebasesCodebaseIdFeaturesRoute,
   ApiCodebasesCodebaseIdSessionRoute: ApiCodebasesCodebaseIdSessionRoute,
   ApiCodebasesCodebaseIdStatusRoute: ApiCodebasesCodebaseIdStatusRoute,
   ApiSettingsApiKeysIdRoute: ApiSettingsApiKeysIdRoute,

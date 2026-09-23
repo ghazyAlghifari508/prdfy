@@ -24,11 +24,13 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import {
 	codebaseAnalyses,
+	codebaseAskHandoffs,
 	codebaseSnapshotFiles,
 	codebaseSnapshots,
 	codebaseSyncSessions,
 	projects,
 } from "@/db/schema";
+import { resolveAnalysisFeaturePrompt } from "@/routes/api/codebases/$codebaseId/features";
 import {
 	type AnalysisSourceFile,
 	buildAnalysisUserPrompt,
@@ -137,12 +139,27 @@ export async function requestCodebaseAnalysis(
 	}
 
 	const [project] = await db
-		.select({ name: projects.name, description: projects.description })
+		.select({ name: projects.name })
 		.from(projects)
 		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 		.limit(1);
-	const featurePrompt =
-		project?.description?.trim() || project?.name?.trim() || projectId;
+	const [handoff] = await db
+		.select({ state: codebaseAskHandoffs.state })
+		.from(codebaseAskHandoffs)
+		.where(eq(codebaseAskHandoffs.projectId, projectId))
+		.limit(1);
+	const handoffPrompt =
+		handoff?.state &&
+		typeof handoff.state === "object" &&
+		"prompt" in handoff.state &&
+		typeof handoff.state.prompt === "string"
+			? handoff.state.prompt
+			: null;
+	const featurePrompt = resolveAnalysisFeaturePrompt({
+		handoffPrompt,
+		projectName: project?.name?.trim() || "",
+		projectId,
+	});
 
 	// Fresh record per attempt: terminal rows are never mutated.
 	const analysisId = crypto.randomUUID();
