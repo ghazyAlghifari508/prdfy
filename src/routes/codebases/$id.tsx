@@ -31,6 +31,26 @@ export function decideCodebaseDetailEntry(
 	return codebaseId?.trim() ? "allow" : "deny";
 }
 
+type CodebaseSessionStartAction = "initial" | "retry";
+
+export function getCodebaseSessionRequestBody(
+	action: CodebaseSessionStartAction,
+): { action?: "retry" } {
+	return action === "retry" ? { action: "retry" } : {};
+}
+
+export function canRenderCodebaseReview(
+	analysis: Pick<AnalysisResponse, "snapshotId" | "output"> | null,
+	status: Pick<SyncStatusResponse, "status" | "snapshotId"> | null,
+): boolean {
+	return Boolean(
+		analysis?.output &&
+			status?.snapshotId &&
+			SNAPSHOT_CONTEXT_STATUSES.includes(status.status) &&
+			analysis.snapshotId === status.snapshotId,
+	);
+}
+
 const loadCodebase = createServerFn({ method: "GET" })
 	.validator((id: string) => id)
 	.handler(async ({ data: id }) => {
@@ -142,12 +162,8 @@ function CodebaseDetailPage() {
 	const navigate = useNavigate();
 	const [payload, setPayload] = useState<SyncPromptPayload | null>(null);
 	const [status, setStatus] = useState<SyncStatusResponse | null>(null);
-	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(
-		initialAnalysis,
-	);
-	const [screen, setScreen] = useState<1 | 2 | 3>(
-		initialAnalysis?.output ? 3 : 1,
-	);
+	const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+	const [screen, setScreen] = useState<1 | 2 | 3>(1);
 	const [prompt, setPrompt] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [isStarting, setIsStarting] = useState(false);
@@ -218,12 +234,23 @@ function CodebaseDetailPage() {
 				return;
 			}
 			setStatus(parsed.data);
-			setAnalysis((current) =>
-				current &&
+			const hasUsableSnapshot = Boolean(
 				parsed.data.snapshotId &&
-				current.snapshotId !== parsed.data.snapshotId
+					SNAPSHOT_CONTEXT_STATUSES.includes(parsed.data.status),
+			);
+			const matchingInitialAnalysis =
+				hasUsableSnapshot &&
+				initialAnalysis?.output &&
+				parsed.data.snapshotId === initialAnalysis.snapshotId
+					? initialAnalysis
+					: null;
+			setAnalysis((current) =>
+				!hasUsableSnapshot ||
+				(current &&
+					parsed.data.snapshotId &&
+					current.snapshotId !== parsed.data.snapshotId)
 					? null
-					: current,
+					: (current ?? matchingInitialAnalysis),
 			);
 			if (
 				feature?.id &&
@@ -236,19 +263,26 @@ function CodebaseDetailPage() {
 				void triggerAnalysis(parsed.data.snapshotId);
 			}
 			setScreen((current) =>
-				parsed.data.snapshotId &&
-				SNAPSHOT_CONTEXT_STATUSES.includes(parsed.data.status)
-					? current === 1
-						? 2
-						: current
-					: 2,
+				matchingInitialAnalysis
+					? 3
+					: hasUsableSnapshot
+						? current === 1
+							? 2
+							: current
+						: 2,
 			);
 		} catch {
 			setError("Server tidak dapat dihubungi. Coba lagi.");
 		} finally {
 			inFlight.current = false;
 		}
-	}, [codebase.id, feature?.id, status?.sessionId, triggerAnalysis]);
+	}, [
+		codebase.id,
+		feature?.id,
+		status?.sessionId,
+		triggerAnalysis,
+		initialAnalysis,
+	]);
 
 	useEffect(() => {
 		try {
@@ -272,7 +306,9 @@ function CodebaseDetailPage() {
 		return () => clearInterval(interval);
 	}, [readStatus]);
 
-	const startSession = async () => {
+	const startSession = async (
+		action: CodebaseSessionStartAction = "initial",
+	) => {
 		setIsStarting(true);
 		setError(null);
 		try {
@@ -281,11 +317,7 @@ function CodebaseDetailPage() {
 				{
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(
-						status?.status === "failed" || status?.status === "expired"
-							? { action: "retry" }
-							: {},
-					),
+					body: JSON.stringify(getCodebaseSessionRequestBody(action)),
 				},
 			);
 			const parsed = syncPromptPayloadSchema.safeParse(
@@ -373,11 +405,11 @@ function CodebaseDetailPage() {
 								status?.status === "failed" ||
 								status?.status === "expired"
 							) {
-								void startSession();
+								void startSession("retry");
 							} else if (status) {
 								void readStatus();
 							} else {
-								void startSession();
+								void startSession("initial");
 							}
 						}}
 						className="min-h-11 rounded-md border border-crimson/50 px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
@@ -393,6 +425,7 @@ function CodebaseDetailPage() {
 				<button
 					type="button"
 					onClick={() => setScreen(1)}
+					aria-current={screen === 1 ? "step" : undefined}
 					className="min-h-11 rounded-md border border-graphite px-3 text-xs text-fog hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
 				>
 					01 Hubungkan
@@ -401,14 +434,16 @@ function CodebaseDetailPage() {
 					type="button"
 					disabled={!status?.snapshotId}
 					onClick={() => setScreen(2)}
+					aria-current={screen === 2 ? "step" : undefined}
 					className="min-h-11 rounded-md border border-graphite px-3 text-xs text-fog disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
 				>
 					02 Sync
 				</button>
 				<button
 					type="button"
-					disabled={!analysis?.output}
+					disabled={!canRenderCodebaseReview(analysis, status)}
 					onClick={() => setScreen(3)}
+					aria-current={screen === 3 ? "step" : undefined}
 					className="min-h-11 rounded-md border border-graphite px-3 text-xs text-fog disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
 				>
 					03 Review
@@ -429,7 +464,7 @@ function CodebaseDetailPage() {
 					status={status}
 					statusPath={`/api/codebases/${encodeURIComponent(codebase.id)}/status`}
 					onStatus={setStatus}
-					onRetrySync={() => void startSession()}
+					onRetrySync={() => void startSession("retry")}
 					onRetryAnalysis={
 						feature && status?.snapshotId
 							? () => {
@@ -438,13 +473,17 @@ function CodebaseDetailPage() {
 								}
 							: undefined
 					}
-					onViewReview={analysis?.output ? () => setScreen(3) : undefined}
+					onViewReview={
+						canRenderCodebaseReview(analysis, status)
+							? () => setScreen(3)
+							: undefined
+					}
 				/>
 			)}
 			{screen === 3 &&
 				analysis?.output &&
-				status?.snapshotId &&
-				analysis.snapshotId === status.snapshotId && (
+				canRenderCodebaseReview(analysis, status) &&
+				status?.snapshotId && (
 					<CodebaseReview
 						analysis={analysis.output}
 						snapshotId={status.snapshotId}
@@ -453,7 +492,7 @@ function CodebaseDetailPage() {
 						excludedCount={status.excludedCount}
 						isWorking={isWorking}
 						errorMessage={error}
-						onRetrySync={() => void startSession()}
+						onRetrySync={() => void startSession("retry")}
 						onRetryAnalysis={
 							feature && status?.snapshotId
 								? () => {

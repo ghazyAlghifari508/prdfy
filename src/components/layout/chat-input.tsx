@@ -51,12 +51,16 @@ export const HOME_PROJECT_MODE_OPTIONS = [
 
 export type HomeProjectMode = (typeof HOME_PROJECT_MODE_OPTIONS)[number]["id"];
 
+type HomePostCreationTarget =
+	| { to: "/ask/$id"; params: { id: string } }
+	| { to: "/codebases" };
+
 // Post-creation routing: existing-codebase enters the codebase flow, everything
 // else (including legacy responses without a mode) keeps the /ask/$id route.
 export function decideHomePostCreationTarget(project: {
 	id: string;
 	projectMode?: string | null;
-}): { to: "/ask/$id" | "/codebases"; params?: { id: string } } {
+}): HomePostCreationTarget {
 	if (project.projectMode === "existing_codebase") {
 		return { to: "/codebases" };
 	}
@@ -263,7 +267,7 @@ export function ChatInput({
 				}
 			}
 			if (target.to === "/codebases") {
-				navigate({ to: "/codebases/$id", params: { id: body.id } });
+				navigate({ to: target.to });
 			} else {
 				if (target.params) navigate({ to: target.to, params: target.params });
 			}

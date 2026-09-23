@@ -36,7 +36,9 @@ describe("decideHomePostCreationTarget", () => {
 				id: "proj-1",
 				projectMode: "existing_codebase",
 			}),
-		).toEqual({ to: "/codebases" });
+		).toEqual({
+			to: "/codebases",
+		});
 	});
 
 	it("keeps legacy responses without mode on the greenfield route", () => {

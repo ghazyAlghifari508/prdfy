@@ -180,10 +180,15 @@ function CodebasesPage() {
 				setError("Codebase dibuat, tetapi instruksi sync tidak valid.");
 				return;
 			}
-			sessionStorage.setItem(
-				getPendingSyncPayloadKey(body.id),
-				JSON.stringify(sync.data),
-			);
+			try {
+				sessionStorage.setItem(
+					getPendingSyncPayloadKey(body.id),
+					JSON.stringify(sync.data),
+				);
+			} catch {
+				// The server already created the codebase; detail status can recover
+				// the session without turning this into a server failure.
+			}
 			await navigate({ to: "/codebases/$id", params: { id: body.id } });
 		} catch {
 			setError("Server tidak dapat dihubungi.");
