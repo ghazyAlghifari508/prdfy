@@ -5,7 +5,7 @@ import type {
 } from "./codebase-analysis";
 import { safeParseCodebaseAnalysis } from "./codebase-analysis";
 import type { SnapshotContext } from "./codebase-sync";
-import { manifestEntrySchema, selectActiveSnapshot } from "./codebase-sync";
+import { manifestEntrySchema } from "./codebase-sync";
 import {
 	CODEBASE_ASK_HANDOFF_MAX_ANSWERS,
 	CODEBASE_ASK_HANDOFF_MAX_OPTIONS,
@@ -214,6 +214,25 @@ export function selectReadyAnalysis<T extends ReadyAnalysisCandidate>(
 	analyses: readonly T[],
 ): T | null {
 	const ready = [...analyses]
+		.filter((analysis) => analysis.status === "ready")
+		.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+	return ready[0] ?? null;
+}
+
+export interface SelectableAnalysis {
+	id: string;
+	status: string;
+	createdAt: string;
+}
+
+/** The newest analysis that actually succeeded. A project may accumulate failed
+ *  attempts before one succeeds, so "newest ready" is required rather than "any
+ *  ready" — otherwise a retry after a failure would keep resolving to the older
+ *  successful record. */
+export function selectNewestReadyAnalysis<T extends SelectableAnalysis>(
+	analyses: readonly T[],
+): T | null {
+	const ready = analyses
 		.filter((analysis) => analysis.status === "ready")
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 	return ready[0] ?? null;
@@ -435,7 +454,7 @@ export async function getProjectGenerationContext(
 	const { db } = await import("@/db");
 	const { codebaseAnalyses, codebaseAskHandoffs, codebaseSnapshots, projects } =
 		await import("@/db/schema");
-	const { and, asc, desc, eq, isNull } = await import("drizzle-orm");
+	const { and, desc, eq, isNull } = await import("drizzle-orm");
 
 	const [project] = await db
 		.select({
@@ -448,7 +467,34 @@ export async function getProjectGenerationContext(
 		.limit(1);
 	if (!project || project.projectMode !== "existing_codebase") return null;
 
-	const snapshotRows = await db
+	const analysisRows = await db
+		.select({
+			id: codebaseAnalyses.id,
+			status: codebaseAnalyses.status,
+			output: codebaseAnalyses.output,
+			snapshotId: codebaseAnalyses.snapshotId,
+			createdAt: codebaseAnalyses.createdAt,
+		})
+		.from(codebaseAnalyses)
+		.where(eq(codebaseAnalyses.projectId, projectId))
+		.orderBy(desc(codebaseAnalyses.createdAt));
+	const readyAnalysis = selectNewestReadyAnalysis(
+		analysisRows.map((row) => ({
+			id: row.id,
+			status: row.status,
+			createdAt: row.createdAt?.toISOString() ?? "",
+		})),
+	);
+	if (!readyAnalysis) return null;
+	const readyRow = analysisRows.find((row) => row.id === readyAnalysis.id);
+	if (!readyRow) return null;
+	const parsed = safeParseCodebaseAnalysis(readyRow.output);
+	if (!parsed.success) return null;
+
+	// The snapshot is the one this feature's analysis was written against — not
+	// the codebase's newest. A re-sync must not rewrite an existing feature's
+	// context.
+	const [activeRow] = await db
 		.select({
 			id: codebaseSnapshots.id,
 			status: codebaseSnapshots.status,
@@ -460,50 +506,9 @@ export async function getProjectGenerationContext(
 			createdAt: codebaseSnapshots.createdAt,
 		})
 		.from(codebaseSnapshots)
-		.where(
-			and(
-				eq(codebaseSnapshots.projectId, projectId),
-				eq(codebaseSnapshots.status, "ready"),
-			),
-		)
-		.orderBy(asc(codebaseSnapshots.createdAt));
-	const active = selectActiveSnapshot(
-		snapshotRows.map((row) => ({
-			id: row.id,
-			status: row.status,
-			createdAt: row.createdAt?.toISOString() ?? "",
-		})),
-	);
-	if (!active) return null;
-	const activeRow = snapshotRows.find((row) => row.id === active.id);
+		.where(eq(codebaseSnapshots.id, readyRow.snapshotId))
+		.limit(1);
 	if (!activeRow) return null;
-
-	const analysisRows = await db
-		.select({
-			id: codebaseAnalyses.id,
-			status: codebaseAnalyses.status,
-			output: codebaseAnalyses.output,
-			createdAt: codebaseAnalyses.createdAt,
-		})
-		.from(codebaseAnalyses)
-		.where(
-			and(
-				eq(codebaseAnalyses.projectId, projectId),
-				eq(codebaseAnalyses.snapshotId, activeRow.id),
-			),
-		)
-		.orderBy(desc(codebaseAnalyses.createdAt));
-	const readyAnalysis = selectReadyAnalysis(
-		analysisRows.map((row) => ({
-			id: row.id,
-			status: row.status,
-			createdAt: row.createdAt?.toISOString() ?? "",
-		})),
-	);
-	if (!readyAnalysis) return null;
-	const readyRow = analysisRows.find((row) => row.id === readyAnalysis.id);
-	const parsed = safeParseCodebaseAnalysis(readyRow?.output);
-	if (!parsed.success) return null;
 
 	// Relevant paths come from the validated manifest only — never invented.
 	let relevantPaths: string[] = [];
@@ -562,40 +567,37 @@ export async function getProjectGenerationContext(
 	});
 }
 
-/** Resolve the currently active ready snapshot id for handoff
- *  traceability (Task 9 write-through). Returns null when no snapshot is
+/** Resolve the snapshot of the project's newest ready analysis for handoff
+ *  traceability (Task 9 write-through). Returns null when no analysis is
  *  ready, but preserves database failures so callers never silently lose
- *  snapshot identity. Generation still resolves
- *  the active snapshot at call time (first-ready default, see
- *  selectActiveSnapshot); the stamped id is advisory traceability only. */
+ *  snapshot identity. Generation resolves the same way at call time (see
+ *  getProjectGenerationContext); the stamped id is advisory traceability
+ *  only. */
 export async function resolveActiveSnapshotId(
 	projectId: string,
 ): Promise<string | null> {
 	const { db } = await import("@/db");
-	const { codebaseSnapshots } = await import("@/db/schema");
-	const { and, asc, eq } = await import("drizzle-orm");
+	const { codebaseAnalyses } = await import("@/db/schema");
+	const { desc, eq } = await import("drizzle-orm");
 	const rows = await db
 		.select({
-			id: codebaseSnapshots.id,
-			status: codebaseSnapshots.status,
-			createdAt: codebaseSnapshots.createdAt,
+			id: codebaseAnalyses.id,
+			status: codebaseAnalyses.status,
+			snapshotId: codebaseAnalyses.snapshotId,
+			createdAt: codebaseAnalyses.createdAt,
 		})
-		.from(codebaseSnapshots)
-		.where(
-			and(
-				eq(codebaseSnapshots.projectId, projectId),
-				eq(codebaseSnapshots.status, "ready"),
-			),
-		)
-		.orderBy(asc(codebaseSnapshots.createdAt));
-	const active = selectActiveSnapshot(
+		.from(codebaseAnalyses)
+		.where(eq(codebaseAnalyses.projectId, projectId))
+		.orderBy(desc(codebaseAnalyses.createdAt));
+	const newest = selectNewestReadyAnalysis(
 		rows.map((row) => ({
 			id: row.id,
 			status: row.status,
 			createdAt: row.createdAt?.toISOString() ?? "",
 		})),
 	);
-	return active?.id ?? null;
+	if (!newest) return null;
+	return rows.find((row) => row.id === newest.id)?.snapshotId ?? null;
 }
 
 /** Persist the snapshot-identity link after a successful generation.

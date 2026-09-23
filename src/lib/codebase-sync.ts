@@ -229,17 +229,22 @@ export const snapshotContextSchema = z.object({
 export type SnapshotContext = z.infer<typeof snapshotContextSchema>;
 
 // === Generation-context selection ===
-// The first successful snapshot becomes the active generation context. A
-// later snapshot never silently rewrites output; new generation requests use
-// the latest user-selected ready snapshot when one is chosen.
+// The codebase page asks "which snapshot is newest" — a re-sync must be visible
+// immediately, so newest wins. Generation does NOT use this function: each
+// feature resolves through its own newest ready analysis
+// (`selectNewestReadyAnalysis`), which permanently binds a feature to the
+// codebase state it was planned against and stops a later re-sync from
+// retroactively changing an existing feature's context.
 //
-// First-ready default + selection follow-up (Task 9): per-snapshot selection
-// UI does not exist in MVP, so `selectedId` is currently always unset and
-// the earliest ready snapshot wins deterministically. The Ask handoff stores
-// an advisory `snapshotId` (write-through at submit) for traceability, but
-// generation resolves via this function at call time and ignores it — when
-// selection UI lands, it must pass the chosen id here AND stop ignoring the
-// handoff stamp.
+// `selectedId` remains an override for a future explicit snapshot picker.
+
+// Snapshots a feature may be planned against: `uploaded` is the terminal state
+// written by completion, `ready` is retained for rows created before the
+// codebase model existed.
+export const SNAPSHOT_CONTEXT_STATUSES: readonly string[] = [
+	"uploaded",
+	"ready",
+] as const;
 
 export interface SelectableSnapshot {
 	id: string;
@@ -251,15 +256,15 @@ export function selectActiveSnapshot<T extends SelectableSnapshot>(
 	snapshots: readonly T[],
 	selectedId?: string,
 ): T | null {
-	const ready = [...snapshots]
-		.filter((snapshot) => snapshot.status === "ready")
-		.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-	if (ready.length === 0) return null;
+	const usable = [...snapshots]
+		.filter((snapshot) => SNAPSHOT_CONTEXT_STATUSES.includes(snapshot.status))
+		.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+	if (usable.length === 0) return null;
 	if (selectedId) {
-		const selected = ready.find((snapshot) => snapshot.id === selectedId);
+		const selected = usable.find((snapshot) => snapshot.id === selectedId);
 		if (selected) return selected;
 	}
-	return ready[0];
+	return usable[0];
 }
 
 // === Sync capability scope (Task 4) ===
