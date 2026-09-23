@@ -14,9 +14,9 @@
 //    /api/chat and /api/ask/options) generates strict JSON over the bounded
 //    snapshot context. Output is validated with the Task 1 Zod schema before
 //    persistence; uncertainty stays labeled, paths are never invented.
-// 4. Success: analysis → ready, snapshot → ready, session → ready. Only
-//    `ready` snapshots become generation context (failed snapshots are never
-//    exposed as ready context).
+// 4. Success: analysis → ready, session → ready. The snapshot stays
+//    `uploaded`: it is a repository artifact shared by every feature, so
+//    its state must not depend on one feature's analysis.
 // 5. Failure: analysis → failed with a fixed safe message, session rolls back
 //    analyzing → uploaded so a fresh record can be requested. No credit is
 //    consumed either way.
@@ -242,16 +242,15 @@ export async function requestCodebaseAnalysis(
 		const raw = await generate(messages);
 		const analysis = parseAnalysisOutput(raw, { projectId, snapshotId });
 
-		assertSyncTransition("analyzing", "ready");
 		await db.transaction(async (tx) => {
 			await tx
 				.update(codebaseAnalyses)
 				.set({ status: "ready", output: analysis, updatedAt: new Date() })
 				.where(eq(codebaseAnalyses.id, analysisId));
-			await tx
-				.update(codebaseSnapshots)
-				.set({ status: "ready" })
-				.where(eq(codebaseSnapshots.id, snapshot.id));
+			// The snapshot stays `uploaded`: it is a repository artifact
+			// shared by every feature, so its state must not depend on one
+			// feature's analysis. `ready` remains valid for historical rows.
+			assertSyncTransition("analyzing", "ready");
 			await tx
 				.update(codebaseSyncSessions)
 				.set({ status: "ready", updatedAt: new Date() })

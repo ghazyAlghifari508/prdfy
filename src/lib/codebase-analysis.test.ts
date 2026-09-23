@@ -622,3 +622,29 @@ describe("requestCodebaseAnalysis atomic claim contract", () => {
 		expect(generateIndex).toBeGreaterThan(insertAnalysisIndex);
 	});
 });
+
+describe("decideAnalysisRequest with an already-analyzed uploaded snapshot", () => {
+	it("reuses a ready analysis on an uploaded snapshot", () => {
+		expect(
+			decideAnalysisRequest({ id: "s1", status: "uploaded" }, [
+				{ id: "a1", status: "ready" },
+			]),
+		).toEqual({ action: "reuse", analysisId: "a1" });
+	});
+
+	it("creates a new record when only failed attempts exist", () => {
+		expect(
+			decideAnalysisRequest({ id: "s1", status: "uploaded" }, [
+				{ id: "a1", status: "failed" },
+			]),
+		).toEqual({ action: "create" });
+	});
+
+	it("rejects a snapshot that is not uploaded", () => {
+		const decision = decideAnalysisRequest(
+			{ id: "s1", status: "uploading" },
+			[],
+		);
+		expect(decision.action).toBe("reject");
+	});
+});
