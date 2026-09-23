@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useUIStore } from "@/store";
-import { KanbanBoard } from "./kanban-board";
+import { canResetProgress, KanbanBoard } from "./kanban-board";
 
 declare global {
 	var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -224,5 +224,60 @@ describe("KanbanBoard", () => {
 		act(() => {
 			useUIStore.getState().setProjectDrawerOpen(false);
 		});
+	});
+});
+
+describe("canResetProgress", () => {
+	it("is false when there are no columns", () => {
+		expect(canResetProgress(null)).toBe(false);
+	});
+
+	it("is false when every card is pending", () => {
+		expect(
+			canResetProgress({
+				pending: [{ id: "t1" }],
+				in_progress: [],
+				completed: [],
+				failed: [],
+			}),
+		).toBe(false);
+	});
+
+	it("is true when any card left the pending column", () => {
+		expect(
+			canResetProgress({
+				pending: [],
+				in_progress: [{ id: "t1" }],
+				completed: [],
+				failed: [],
+			}),
+		).toBe(true);
+		expect(
+			canResetProgress({
+				pending: [],
+				in_progress: [],
+				completed: [{ id: "t1" }],
+				failed: [],
+			}),
+		).toBe(true);
+		expect(
+			canResetProgress({
+				pending: [],
+				in_progress: [],
+				completed: [],
+				failed: [{ id: "t1" }],
+			}),
+		).toBe(true);
+	});
+
+	it("is false for an empty board", () => {
+		expect(
+			canResetProgress({
+				pending: [],
+				in_progress: [],
+				completed: [],
+				failed: [],
+			}),
+		).toBe(false);
 	});
 });

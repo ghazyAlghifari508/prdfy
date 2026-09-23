@@ -9,11 +9,20 @@ import {
 	Info,
 	KanbanSquare,
 	Loader2,
+	RotateCcw,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DocumentReviewModal } from "@/components/project/document-review-modal";
 import { ProjectDocumentsDrawer } from "@/components/project/project-documents-drawer";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -30,6 +39,18 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store";
 import { KanbanColumn, type KanbanColumnHandle } from "./kanban-column";
 
+// Whether a progress reset would change anything. Mirrors the server's
+// `needsProgressReset` for the UI's disabled state: a board with everything
+// still pending has no work to clear, so the action is hidden rather than
+// offering a no-op button.
+export function canResetProgress(
+	columns: Record<string, Array<{ id: string }>> | null,
+): boolean {
+	if (!columns) return false;
+	const nonPending = ["in_progress", "completed", "failed"] as const;
+	return nonPending.some((status) => (columns[status]?.length ?? 0) > 0);
+}
+
 interface KanbanBoardProps {
 	projectId: string;
 	projectName: string;
@@ -45,9 +66,12 @@ export function KanbanBoard({
 }: KanbanBoardProps) {
 	const isProjectDrawerOpen = useUIStore((s) => s.isProjectDrawerOpen);
 	const setProjectDrawerOpen = useUIStore((s) => s.setProjectDrawerOpen);
+	const showToast = useUIStore((s) => s.showToast);
 	const [activeReviewModal, setActiveReviewModal] = useState<
 		"prd" | "ac" | null
 	>(null);
+	const [resetDialogOpen, setResetDialogOpen] = useState(false);
+	const [isResetting, setIsResetting] = useState(false);
 
 	const { data, isLoading, isError, staleness, refetch } = useKanbanTasks({
 		projectId,
@@ -186,6 +210,41 @@ export function KanbanBoard({
 		}
 	};
 
+	const handleResetProgress = async () => {
+		setIsResetting(true);
+		try {
+			const res = await fetch(
+				`/api/projects/${encodeURIComponent(projectId)}/reset-progress`,
+				{ method: "POST" },
+			);
+			const json = (await res.json().catch(() => null)) as unknown;
+			if (!res.ok) {
+				const message =
+					json && typeof json === "object" && "error" in json
+						? String((json as { error: unknown }).error)
+						: "Gagal mereset progress.";
+				showToast(message, "error");
+				return;
+			}
+			const tasksReset =
+				json && typeof json === "object" && "tasksReset" in json
+					? Number((json as { tasksReset: unknown }).tasksReset)
+					: 0;
+			showToast(
+				tasksReset > 0
+					? `${tasksReset} task dikembalikan ke pending.`
+					: "Tidak ada progress yang perlu direset.",
+				"success",
+			);
+			setResetDialogOpen(false);
+			refetch();
+		} catch {
+			showToast("Gagal menghubungi server.", "error");
+		} finally {
+			setIsResetting(false);
+		}
+	};
+
 	if (isLoading && !data) {
 		return (
 			<div className="flex h-dvh w-full flex-col bg-onyx text-snow overflow-hidden">
@@ -318,6 +377,18 @@ export function KanbanBoard({
 							<span className="text-[10px] text-fog/60 font-mono hidden md:inline">
 								Update: {new Date(lastUpdateAt).toLocaleTimeString()}
 							</span>
+						)}
+						{canResetProgress(columns ?? null) && (
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setResetDialogOpen(true)}
+								disabled={isResetting}
+								className="gap-1.5"
+							>
+								<RotateCcw size={14} />
+								{isResetting ? "Mereset..." : "Reset Progress"}
+							</Button>
 						)}
 						<Link
 							to="/task/$id"
@@ -571,6 +642,34 @@ export function KanbanBoard({
 						: (latestAcContent ?? null)
 				}
 			/>
+
+			<Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>Reset progress task?</DialogTitle>
+						<DialogDescription>
+							Status semua task dikembalikan ke <strong>pending</strong> supaya
+							agent bisa mengerjakannya dari awal. Task, PRD, dan AC tidak
+							diubah, dan tidak ada kredit yang terpakai.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="ghost"
+							onClick={() => setResetDialogOpen(false)}
+							disabled={isResetting}
+						>
+							Batal
+						</Button>
+						<Button
+							onClick={() => void handleResetProgress()}
+							disabled={isResetting}
+						>
+							{isResetting ? "Mereset..." : "Reset Progress"}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }
