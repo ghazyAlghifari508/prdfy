@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import {
 	ArrowRight,
+	CreditCard,
 	LogOut,
 	Menu,
 	MessageSquare,
@@ -18,6 +19,8 @@ import {
 	X,
 } from "lucide-react";
 import { useState, useTransition } from "react";
+import { TopUpModal } from "@/components/billing/top-up-modal";
+import { canShowNavbarTopUp } from "@/components/layout/navbar-topup-helper";
 import { Logo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useUserPlan } from "@/hooks/use-user-plan";
@@ -35,6 +38,7 @@ export function Navbar() {
 	const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 	const [isStepLoading, setIsStepLoading] = useState(false);
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+	const [isTopUpOpen, setIsTopUpOpen] = useState(false);
 	const isGeneratingPRD = useChatStore((s) => s.isGeneratingPRD);
 	const hasStreamingPRDContent = useChatStore((s) => !!s.streamingPRDContent);
 	const isGeneratingAC = useChatStore((s) => s.isGeneratingAC);
@@ -83,8 +87,8 @@ export function Navbar() {
 		},
 	});
 	const flowCta = getFlowStepCta(routeStep, projectNavData?.step);
-	const { data: userPlanData } = useUserPlan();
-	const plan = userPlanData?.plan ?? "free";
+	const { data: planData } = useUserPlan();
+	const plan = planData?.plan ?? "free";
 	const isFree = plan === "free";
 	// FlowStepNav pages = PRD/AC/Task/Kanban (workspace)
 	const isFlowStepRoute =
@@ -237,16 +241,6 @@ export function Navbar() {
 								}`}
 							>
 								History
-							</Link>
-							<Link
-								to="/codebases"
-								className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-									pathname.startsWith("/codebases")
-										? "bg-white/10 text-snow"
-										: "text-fog hover:bg-white/5 hover:text-snow"
-								}`}
-							>
-								Codebase
 							</Link>
 						</div>
 					)}
@@ -425,6 +419,21 @@ export function Navbar() {
 					<div className="hidden md:flex items-center gap-2">
 						{!isFlowStepRoute && (
 							<>
+								{canShowNavbarTopUp({
+									user,
+									plan: planData?.plan,
+									topUpEligible: planData?.topUpEligible,
+								}) && (
+									<button
+										type="button"
+										onClick={() => setIsTopUpOpen(true)}
+										aria-label="Isi ulang kredit"
+										className="flex h-8 items-center gap-1.5 rounded-md border border-graphite bg-transparent px-2.5 font-inter text-xs font-[510] text-fog transition-colors hover:border-fog/50 hover:bg-white/5 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fog/40"
+									>
+										<CreditCard size={13} aria-hidden />
+										<span>Top Up</span>
+									</button>
+								)}
 								<ThemeToggle />
 								{isLoading ? (
 									<div className="ml-1 flex items-center gap-2 sm:gap-3">
@@ -519,7 +528,24 @@ export function Navbar() {
 				<div className="md:hidden border-t border-graphite bg-obsidian px-6 py-4 space-y-3 animate-in slide-in-from-top-2 duration-200">
 					<div className="flex items-center justify-between">
 						<span className="text-sm font-[510] text-fog">Tampilan</span>
-						<ThemeToggle />
+						<div className="flex items-center gap-2">
+							{canShowNavbarTopUp({
+								user,
+								plan: planData?.plan,
+								topUpEligible: planData?.topUpEligible,
+							}) && (
+								<button
+									type="button"
+									onClick={() => setIsTopUpOpen(true)}
+									aria-label="Isi ulang kredit"
+									className="flex h-8 items-center gap-1.5 rounded-md border border-graphite bg-transparent px-2.5 font-inter text-xs font-[510] text-fog transition-colors hover:border-fog/50 hover:bg-white/5 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fog/40"
+								>
+									<CreditCard size={13} aria-hidden />
+									<span>Top Up</span>
+								</button>
+							)}
+							<ThemeToggle />
+						</div>
 					</div>
 					<Link
 						to="/"
@@ -543,13 +569,6 @@ export function Navbar() {
 						History
 					</Link>
 					<Link
-						to="/codebases"
-						className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-[510] text-snow hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
-						onClick={() => setIsMobileMenuOpen(false)}
-					>
-						Codebase
-					</Link>
-					<Link
 						to="/faq"
 						className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-[510] text-snow hover:bg-white/5"
 						onClick={() => setIsMobileMenuOpen(false)}
@@ -565,6 +584,8 @@ export function Navbar() {
 					</Link>
 				</div>
 			)}
+
+			<TopUpModal open={isTopUpOpen} onOpenChange={setIsTopUpOpen} />
 		</nav>
 	);
 }

@@ -190,6 +190,13 @@
       "when": 1790154140731,
       "tag": "0026_jazzy_klaw",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1790172000000,
+      "tag": "0027_drop_project_id_not_null",
+      "breakpoints": true
     }
   ]
 }

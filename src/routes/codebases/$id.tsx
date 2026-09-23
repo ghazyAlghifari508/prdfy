@@ -282,15 +282,12 @@ function CodebaseDetailPage() {
 				analysisAttemptedFor.current = parsed.data.snapshotId;
 				void triggerAnalysis(parsed.data.snapshotId);
 			}
-			setScreen((current) =>
-				matchingInitialAnalysis
-					? 3
-					: hasUsableSnapshot
-						? current === 1
-							? 2
-							: current
-						: 2,
-			);
+			setScreen((current) => {
+				if (matchingInitialAnalysis) return 3;
+				if (hasUsableSnapshot) return current === 1 ? 2 : current;
+				if (current === 1 && parsed.data.status !== "waiting_for_cli") return 2;
+				return current;
+			});
 		} catch {
 			setError("Server tidak dapat dihubungi. Coba lagi.");
 		} finally {

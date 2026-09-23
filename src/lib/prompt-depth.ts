@@ -25,12 +25,13 @@ Sesuaikan kedalaman dan jumlah AC dengan KOMPLEKSITAS PRD:
 Struktur dokumen tetap sama, tapi jumlah AC per fitur proporsional terhadap kompleksitas fitur tersebut. JANGAN memaksakan banyak AC untuk fitur yang simpel. JANGAN mengurangi AC untuk fitur yang kompleks.`;
 
 const TASK = `
-## MODE KEDALAMAN: ADAPTIF
+## MODE KEDALAMAN: ADAPTIF & DETAIL LENGKAP
 Sesuaikan jumlah task, subtask, dan detail dengan KOMPLEKSITAS requirement di PRD + AC:
-- Fitur simpel → sedikit task dan subtask, detail secukupnya.
-- Fitur menengah → task dan subtask proporsional, detail lengkap.
-- Fitur kompleks (banyak state, aturan bisnis, integrasi, async lifecycle) → banyak task dan subtask, detail mendalam.
-Jumlah task mengikuti jumlah deliverable yang benar-benar dibutuhkan, bukan target angka. JANGAN memaksakan banyak task untuk fitur simpel. JANGAN mengurangi task atau menggabungkan requirement berbeda hanya agar output lebih pendek. Setiap subtask WAJIB punya field "details" (array langkah granular, minimum 1 item).`;
+- Wajib menyertakan Fase 0 (Inisialisasi & Fondasi Infrastruktur) sebelum masuk ke fitur fungsional.
+- Setiap fitur pada AC wajib dipecah ke dalam 5-layer teknis (Data/Storage, Domain/Service Logic, API Contract, Dedicated Screen Layout, UI States & Interaction).
+- Fitur simpel → sedikit task per layer tapi tetap modular, detail secukupnya.
+- Fitur kompleks (banyak state, aturan bisnis, integrasi, async lifecycle) → banyak task dan subtask, detail mendalam per sub-komponen.
+Jumlah task mengikuti jumlah deliverable yang benar-benar dibutuhkan, bukan target angka. JANGAN memaksakan banyak task kosong untuk fitur simpel. JANGAN mengurangi task atau menggabungkan requirement berbeda hanya agar output lebih pendek. Setiap subtask WAJIB punya field "details" (array langkah granular, minimum 1 item).`;
 
 const TABLES: Record<DocKind, string> = { prd: PRD, ac: AC, task: TASK };
 

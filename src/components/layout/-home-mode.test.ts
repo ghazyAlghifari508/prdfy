@@ -30,14 +30,15 @@ describe("decideHomePostCreationTarget", () => {
 		).toEqual({ to: "/ask/$id", params: { id: "proj-1" } });
 	});
 
-	it("routes existing-codebase creation to /codebases", () => {
+	it("routes existing-codebase creation to /codebases/$id", () => {
 		expect(
 			decideHomePostCreationTarget({
 				id: "proj-1",
 				projectMode: "existing_codebase",
 			}),
 		).toEqual({
-			to: "/codebases",
+			to: "/codebases/$id",
+			params: { id: "proj-1" },
 		});
 	});
 

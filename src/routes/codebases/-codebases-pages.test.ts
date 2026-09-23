@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CodebaseAnalysis } from "@/lib/codebase-analysis";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
-import { selectLatestCodebaseSnapshots } from "../codebases";
+import { selectLatestCodebaseSnapshots } from "../codebases/index";
 import {
 	canRenderCodebaseReview,
 	decideCodebaseDetailEntry,

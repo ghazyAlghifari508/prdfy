@@ -22,3 +22,15 @@ describe("depthDirective", () => {
 		expect(prd).not.toMatch(/MAKSIMAL|EXHAUSTIVE/);
 	});
 });
+
+describe("depthDirective('task')", () => {
+	it("mandates deep, uncompressed structural decomposition without skipping layers", () => {
+		const directive = depthDirective("task");
+		expect(directive).toContain("KOMPLEKSITAS");
+		expect(directive).toContain(
+			"JANGAN mengurangi task atau menggabungkan requirement berbeda",
+		);
+		expect(directive).toContain("5-layer");
+		expect(directive).toContain("Fase 0");
+	});
+});

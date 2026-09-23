@@ -87,11 +87,7 @@ export function CodebaseReview({
 						mengoreksi hasil deteksi yang tidak sesuai.
 					</p>
 				</div>
-				<span className="inline-flex items-center gap-2 rounded-lg border border-graphite bg-charcoal px-3 py-1.5 text-xs text-fog self-start sm:self-auto">
-					<span
-						className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"
-						aria-hidden="true"
-					/>
+				<span className="inline-flex items-center gap-1.5 rounded-md border border-graphite bg-charcoal px-2.5 py-1 text-xs font-[510] text-fog self-start sm:self-auto">
 					Sync selesai
 				</span>
 			</div>

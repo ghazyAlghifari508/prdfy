@@ -53,16 +53,16 @@ export type HomeProjectMode = (typeof HOME_PROJECT_MODE_OPTIONS)[number]["id"];
 
 type HomePostCreationTarget =
 	| { to: "/ask/$id"; params: { id: string } }
-	| { to: "/codebases" };
+	| { to: "/codebases/$id"; params: { id: string } };
 
-// Post-creation routing: existing-codebase enters the codebase flow, everything
-// else (including legacy responses without a mode) keeps the /ask/$id route.
+// Post-creation routing: existing-codebase enters its sync connect screen,
+// everything else (including legacy responses without a mode) keeps the /ask/$id route.
 export function decideHomePostCreationTarget(project: {
 	id: string;
 	projectMode?: string | null;
 }): HomePostCreationTarget {
 	if (project.projectMode === "existing_codebase") {
-		return { to: "/codebases" };
+		return { to: "/codebases/$id", params: { id: project.id } };
 	}
 	return { to: "/ask/$id", params: { id: project.id } };
 }
@@ -253,7 +253,7 @@ export function ChatInput({
 				id: body.id,
 				projectMode: responseProjectMode ?? projectMode,
 			});
-			if (target.to === "/codebases") {
+			if (target.to === "/codebases/$id") {
 				if (!syncPayload?.success)
 					throw new Error("Respons sync codebase tidak valid");
 				try {
@@ -266,11 +266,7 @@ export function ChatInput({
 					// manual "Mulai sync", so creation still succeeds.
 				}
 			}
-			if (target.to === "/codebases") {
-				navigate({ to: target.to });
-			} else {
-				if (target.params) navigate({ to: target.to, params: target.params });
-			}
+			navigate({ to: target.to, params: target.params });
 		} catch (err) {
 			console.error("Create project error:", err);
 			setPromptError("Gagal membuat proyek. Coba lagi.");

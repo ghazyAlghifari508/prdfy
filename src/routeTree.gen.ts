@@ -31,6 +31,7 @@ import { Route as ApiFeedbackRouteImport } from './routes/api/feedback'
 import { Route as ApiReportErrorRouteImport } from './routes/api/report-error'
 import { Route as AskIdRouteImport } from './routes/ask/$id'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
+import { Route as CodebasesIndexRouteImport } from './routes/codebases/index'
 import { Route as CodebasesIdRouteImport } from './routes/codebases/$id'
 import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-query'
 import { Route as KanbanIdRouteImport } from './routes/kanban/$id'
@@ -199,6 +200,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
+} as any)
+const CodebasesIndexRoute = CodebasesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CodebasesRoute,
 } as any)
 const CodebasesIdRoute = CodebasesIdRouteImport.update({
   id: '/$id',
@@ -538,6 +544,7 @@ export interface FileRoutesByFullPath {
   '/settings/profile': typeof SettingsProfileRoute
   '/task/$id': typeof TaskIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/codebases/': typeof CodebasesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/ac/generate': typeof ApiAcGenerateRoute
   '/api/ac/save': typeof ApiAcSaveRoute
@@ -589,7 +596,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/codebases': typeof CodebasesRouteWithChildren
   '/faq': typeof FaqRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
@@ -618,6 +624,7 @@ export interface FileRoutesByTo {
   '/settings/profile': typeof SettingsProfileRoute
   '/task/$id': typeof TaskIdRoute
   '/admin': typeof AdminIndexRoute
+  '/codebases': typeof CodebasesIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/api/ac/generate': typeof ApiAcGenerateRoute
   '/api/ac/save': typeof ApiAcSaveRoute
@@ -701,6 +708,7 @@ export interface FileRoutesById {
   '/settings/profile': typeof SettingsProfileRoute
   '/task/$id': typeof TaskIdRoute
   '/admin/': typeof AdminIndexRoute
+  '/codebases/': typeof CodebasesIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/api/ac/generate': typeof ApiAcGenerateRoute
   '/api/ac/save': typeof ApiAcSaveRoute
@@ -785,6 +793,7 @@ export interface FileRouteTypes {
     | '/settings/profile'
     | '/task/$id'
     | '/admin/'
+    | '/codebases/'
     | '/settings/'
     | '/api/ac/generate'
     | '/api/ac/save'
@@ -836,7 +845,6 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
-    | '/codebases'
     | '/faq'
     | '/history'
     | '/login'
@@ -865,6 +873,7 @@ export interface FileRouteTypes {
     | '/settings/profile'
     | '/task/$id'
     | '/admin'
+    | '/codebases'
     | '/settings'
     | '/api/ac/generate'
     | '/api/ac/save'
@@ -947,6 +956,7 @@ export interface FileRouteTypes {
     | '/settings/profile'
     | '/task/$id'
     | '/admin/'
+    | '/codebases/'
     | '/settings/'
     | '/api/ac/generate'
     | '/api/ac/save'
@@ -1205,6 +1215,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth/callback'
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/codebases/': {
+      id: '/codebases/'
+      path: '/'
+      fullPath: '/codebases/'
+      preLoaderRoute: typeof CodebasesIndexRouteImport
+      parentRoute: typeof CodebasesRoute
     }
     '/codebases/$id': {
       id: '/codebases/$id'
@@ -1635,10 +1652,12 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface CodebasesRouteChildren {
   CodebasesIdRoute: typeof CodebasesIdRoute
+  CodebasesIndexRoute: typeof CodebasesIndexRoute
 }
 
 const CodebasesRouteChildren: CodebasesRouteChildren = {
   CodebasesIdRoute: CodebasesIdRoute,
+  CodebasesIndexRoute: CodebasesIndexRoute,
 }
 
 const CodebasesRouteWithChildren = CodebasesRoute._addFileChildren(
