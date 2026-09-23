@@ -176,8 +176,14 @@ function CodebaseDetailPage() {
 				return;
 			}
 			setStatus(parsed.data);
-			if (parsed.data.snapshotId)
-				setScreen((current) => (current === 1 ? 2 : current));
+			setScreen((current) =>
+				parsed.data.snapshotId &&
+				SNAPSHOT_CONTEXT_STATUSES.includes(parsed.data.status)
+					? current === 1
+						? 2
+						: current
+					: 2,
+			);
 		} catch {
 			setError("Server tidak dapat dihubungi. Coba lagi.");
 		} finally {

@@ -105,6 +105,7 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/features")({
 							inArray(codebaseSnapshots.status, [...SNAPSHOT_CONTEXT_STATUSES]),
 						),
 					)
+					.orderBy(desc(codebaseSnapshots.createdAt))
 					.limit(1);
 				if (!snapshot) {
 					return Response.json(

@@ -70,8 +70,11 @@ export function SyncStatus({
 				if (cancelled) return;
 				if (!res.ok) {
 					const message =
-						json && typeof json === "object" && "error" in json
-							? String((json as { error: unknown }).error)
+						typeof json === "object" &&
+						json !== null &&
+						"error" in json &&
+						typeof json.error === "string"
+							? json.error
 							: "Gagal membaca status sync.";
 					setError(message);
 					onStatusRef.current?.(null);
