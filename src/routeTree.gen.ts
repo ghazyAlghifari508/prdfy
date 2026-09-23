@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as CodebasesRouteImport } from './routes/codebases'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as LoginRouteImport } from './routes/login'
@@ -31,6 +32,7 @@ import { Route as ApiReportErrorRouteImport } from './routes/api/report-error'
 import { Route as AskIdRouteImport } from './routes/ask/$id'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as CodebaseIdRouteImport } from './routes/codebase/$id'
+import { Route as CodebasesIdRouteImport } from './routes/codebases/$id'
 import { Route as DemoTanstackQueryRouteImport } from './routes/demo/tanstack-query'
 import { Route as KanbanIdRouteImport } from './routes/kanban/$id'
 import { Route as PrdIdRouteImport } from './routes/prd/$id'
@@ -103,6 +105,11 @@ const AboutRoute = AboutRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CodebasesRoute = CodebasesRouteImport.update({
+  id: '/codebases',
+  path: '/codebases',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FaqRoute = FaqRouteImport.update({
@@ -199,6 +206,11 @@ const CodebaseIdRoute = CodebaseIdRouteImport.update({
   id: '/codebase/$id',
   path: '/codebase/$id',
   getParentRoute: () => rootRouteImport,
+} as any)
+const CodebasesIdRoute = CodebasesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => CodebasesRoute,
 } as any)
 const DemoTanstackQueryRoute = DemoTanstackQueryRouteImport.update({
   id: '/demo/tanstack-query',
@@ -510,6 +522,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/admin': typeof AdminRouteWithChildren
+  '/codebases': typeof CodebasesRouteWithChildren
   '/faq': typeof FaqRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
@@ -528,6 +541,7 @@ export interface FileRoutesByFullPath {
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/codebase/$id': typeof CodebaseIdRoute
+  '/codebases/$id': typeof CodebasesIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -591,6 +605,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/codebases': typeof CodebasesRouteWithChildren
   '/faq': typeof FaqRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
@@ -608,6 +623,7 @@ export interface FileRoutesByTo {
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/codebase/$id': typeof CodebaseIdRoute
+  '/codebases/$id': typeof CodebasesIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -673,6 +689,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/admin': typeof AdminRouteWithChildren
+  '/codebases': typeof CodebasesRouteWithChildren
   '/faq': typeof FaqRoute
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
@@ -691,6 +708,7 @@ export interface FileRoutesById {
   '/ask/$id': typeof AskIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/codebase/$id': typeof CodebaseIdRoute
+  '/codebases/$id': typeof CodebasesIdRoute
   '/demo/tanstack-query': typeof DemoTanstackQueryRoute
   '/kanban/$id': typeof KanbanIdRoute
   '/prd/$id': typeof PrdIdRoute
@@ -757,6 +775,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/admin'
+    | '/codebases'
     | '/faq'
     | '/history'
     | '/login'
@@ -775,6 +794,7 @@ export interface FileRouteTypes {
     | '/ask/$id'
     | '/auth/callback'
     | '/codebase/$id'
+    | '/codebases/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -838,6 +858,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/about'
+    | '/codebases'
     | '/faq'
     | '/history'
     | '/login'
@@ -855,6 +876,7 @@ export interface FileRouteTypes {
     | '/ask/$id'
     | '/auth/callback'
     | '/codebase/$id'
+    | '/codebases/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -919,6 +941,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/admin'
+    | '/codebases'
     | '/faq'
     | '/history'
     | '/login'
@@ -937,6 +960,7 @@ export interface FileRouteTypes {
     | '/ask/$id'
     | '/auth/callback'
     | '/codebase/$id'
+    | '/codebases/$id'
     | '/demo/tanstack-query'
     | '/kanban/$id'
     | '/prd/$id'
@@ -1002,6 +1026,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   AdminRoute: typeof AdminRouteWithChildren
+  CodebasesRoute: typeof CodebasesRouteWithChildren
   FaqRoute: typeof FaqRoute
   HistoryRoute: typeof HistoryRoute
   LoginRoute: typeof LoginRoute
@@ -1077,6 +1102,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/codebases': {
+      id: '/codebases'
+      path: '/codebases'
+      fullPath: '/codebases'
+      preLoaderRoute: typeof CodebasesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/faq': {
@@ -1211,6 +1243,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/codebase/$id'
       preLoaderRoute: typeof CodebaseIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/codebases/$id': {
+      id: '/codebases/$id'
+      path: '/$id'
+      fullPath: '/codebases/$id'
+      preLoaderRoute: typeof CodebasesIdRouteImport
+      parentRoute: typeof CodebasesRoute
     }
     '/demo/tanstack-query': {
       id: '/demo/tanstack-query'
@@ -1639,6 +1678,18 @@ const AdminRouteChildren: AdminRouteChildren = {
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
+interface CodebasesRouteChildren {
+  CodebasesIdRoute: typeof CodebasesIdRoute
+}
+
+const CodebasesRouteChildren: CodebasesRouteChildren = {
+  CodebasesIdRoute: CodebasesIdRoute,
+}
+
+const CodebasesRouteWithChildren = CodebasesRoute._addFileChildren(
+  CodebasesRouteChildren,
+)
+
 interface SettingsRouteChildren {
   SettingsAccountRoute: typeof SettingsAccountRoute
   SettingsApiKeysRoute: typeof SettingsApiKeysRoute
@@ -1713,6 +1764,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   AdminRoute: AdminRouteWithChildren,
+  CodebasesRoute: CodebasesRouteWithChildren,
   FaqRoute: FaqRoute,
   HistoryRoute: HistoryRoute,
   LoginRoute: LoginRoute,

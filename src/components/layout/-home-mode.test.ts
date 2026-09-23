@@ -30,13 +30,13 @@ describe("decideHomePostCreationTarget", () => {
 		).toEqual({ to: "/ask/$id", params: { id: "proj-1" } });
 	});
 
-	it("routes existing-codebase creation to /codebase/$id", () => {
+	it("routes existing-codebase creation to /codebases", () => {
 		expect(
 			decideHomePostCreationTarget({
 				id: "proj-1",
 				projectMode: "existing_codebase",
 			}),
-		).toEqual({ to: "/codebase/$id", params: { id: "proj-1" } });
+		).toEqual({ to: "/codebases" });
 	});
 
 	it("keeps legacy responses without mode on the greenfield route", () => {

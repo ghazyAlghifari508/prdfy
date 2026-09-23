@@ -121,13 +121,14 @@ describe("isTruncatedGeneration", () => {
 describe("isValidHistoryUrl", () => {
 	const id = "fca689ff-e194-45eb-b6fa-0188cc327759";
 
-	it("accepts valid project-internal URLs that belong to this project", () => {
-		expect(isValidHistoryUrl(`/codebase/${id}`, id)).toBe(true);
+	it("accepts valid project-internal URLs and the codebase list", () => {
+		expect(isValidHistoryUrl("/codebases", id)).toBe(true);
 		expect(isValidHistoryUrl(`/prd/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/ac/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/task/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/ask/${id}`, id)).toBe(true);
 		expect(isValidHistoryUrl(`/kanban/${id}`, id)).toBe(true);
+		expect(isValidHistoryUrl(`/codebase/${id}`, id)).toBe(false);
 	});
 
 	it("rejects URLs whose project ID does not match", () => {

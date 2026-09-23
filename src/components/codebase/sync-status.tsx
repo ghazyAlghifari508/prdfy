@@ -11,6 +11,7 @@ import { CODEBASE_SYNC_POLL_INTERVAL_MS } from "@/lib/constants";
 
 interface SyncStatusProps {
 	projectId: string;
+	statusPath?: string;
 	sessionId?: string;
 	projectName?: string;
 	status?: SyncStatusResponse | null;
@@ -24,6 +25,7 @@ interface SyncStatusProps {
 
 export function SyncStatus({
 	projectId,
+	statusPath,
 	sessionId,
 	projectName = "Project",
 	status: propStatus,
@@ -61,9 +63,9 @@ export function SyncStatus({
 				const query = sessionId
 					? `?sessionId=${encodeURIComponent(sessionId)}`
 					: "";
-				const res = await fetch(
-					`/api/codebase/${encodeURIComponent(projectId)}/status${query}`,
-				);
+				const path =
+					statusPath ?? `/api/codebase/${encodeURIComponent(projectId)}/status`;
+				const res = await fetch(`${path}${query}`);
 				const json = (await res.json().catch(() => null)) as unknown;
 				if (cancelled) return;
 				if (!res.ok) {
@@ -109,7 +111,7 @@ export function SyncStatus({
 				timeoutRef.current = null;
 			}
 		};
-	}, [projectId, sessionId, pollIntervalMs, pollInternally]);
+	}, [projectId, statusPath, sessionId, pollIntervalMs, pollInternally]);
 
 	const s = status?.status ?? "waiting_for_cli";
 	const isFailed = s === "failed";
