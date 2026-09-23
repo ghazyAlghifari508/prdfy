@@ -300,8 +300,14 @@ export const CODEBASE_SYNC_RATE_LIMIT_ACTION = "api_call" as const;
 
 export interface SyncSessionLike {
 	id: string;
-	projectId: string;
+	// Legacy project linkage; null for codebase-scoped sessions created
+	// after the project_id columns became nullable (ownership flows via
+	// codebaseId). Usability never reads this field.
+	projectId: string | null;
 	userId: string;
+	// Codebase owner key for sessions minted under /api/codebases.
+	// Absent on legacy project-bound rows and in unit fixtures.
+	codebaseId?: string | null;
 	status: string;
 	expiresAt: Date | string;
 	consumedAt?: Date | string | null;
@@ -416,7 +422,12 @@ export interface SyncSessionMetadata {
 // Browser reads (session GET, status polling) expose metadata only — never
 // the credential hash or a raw credential after initial creation.
 export function toSessionMetadata(
-	session: SyncSessionLike & {
+	session: Omit<SyncSessionLike, "projectId"> & {
+		// Metadata always carries a concrete owner id: the project id for
+		// legacy routes, the codebase id for /api/codebases routes (the
+		// SyncPromptPayload.projectId name is kept, value is the codebase
+		// id). Callers spread the row and supply the known id explicitly.
+		projectId: string;
 		credentialHash?: string;
 		createdAt?: Date | string | null;
 	},

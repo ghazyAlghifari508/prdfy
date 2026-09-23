@@ -2,15 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, gt, isNull, notInArray, sql } from "drizzle-orm";
 // Server-import exception: top-level `@/db`, schema, and `.server` imports
 // are correct here — server handlers only, no client component (neighboring
-// `/api/codebase` pattern). Never import this module from client code.
+// `/api/codebases` pattern). Never import this module from client code.
 import { db } from "@/db";
-import { codebaseSyncSessions, projects, subscriptions } from "@/db/schema";
+import { codebaseSyncSessions, codebases, subscriptions } from "@/db/schema";
 import {
 	buildSyncCommand,
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
 	CODEBASE_SYNC_TERMINAL_STATUSES,
 	getSessionUsability,
-	isSyncCapableProject,
 	type SyncPromptPayload,
 	shouldCreateSyncSession,
 	toSessionMetadata,
@@ -24,19 +23,15 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
-async function getGuardedProject(userId: string, projectId: string) {
-	const [project] = await db
-		.select({ id: projects.id, projectMode: projects.projectMode })
-		.from(projects)
-		.where(
-			and(
-				eq(projects.id, projectId),
-				eq(projects.userId, userId),
-				isNull(projects.deletedAt),
-			),
-		)
+export const CODEBASE_SESSION_ROUTE_PATH = "/api/codebases/$codebaseId/session";
+
+async function getGuardedCodebase(userId: string, codebaseId: string) {
+	const [codebase] = await db
+		.select({ id: codebases.id, name: codebases.name })
+		.from(codebases)
+		.where(and(eq(codebases.id, codebaseId), eq(codebases.userId, userId)))
 		.limit(1);
-	return project ?? null;
+	return codebase ?? null;
 }
 
 async function resolvePlan(userId: string): Promise<Plan> {
@@ -52,7 +47,7 @@ async function resolvePlan(userId: string): Promise<Plan> {
 	) as Plan;
 }
 
-export const Route = createFileRoute("/api/codebase/$projectId/session")({
+export const Route = createFileRoute("/api/codebases/$codebaseId/session")({
 	server: {
 		handlers: {
 			// Browser read: latest session metadata for refresh recovery.
@@ -62,7 +57,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				params,
 			}: {
 				request: Request;
-				params: { projectId: string };
+				params: { codebaseId: string };
 			}) => {
 				let user: { id: string };
 				try {
@@ -70,7 +65,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				} catch {
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
-				const { projectId } = params;
+				const { codebaseId } = params;
 
 				const plan = await resolvePlan(user.id);
 				const rateCheck = await checkRateLimit(
@@ -84,19 +79,11 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ status: 429 },
 					);
 
-				const project = await getGuardedProject(user.id, projectId);
-				if (!project)
+				const codebase = await getGuardedCodebase(user.id, codebaseId);
+				if (!codebase)
 					return Response.json(
-						{ error: "Project tidak ditemukan" },
+						{ error: "Codebase tidak ditemukan" },
 						{ status: 404 },
-					);
-				if (!isSyncCapableProject(project))
-					return Response.json(
-						{
-							error: "Project ini bukan project existing-codebase",
-							code: "PROJECT_MODE_MISMATCH",
-						},
-						{ status: 400 },
 					);
 
 				const [session] = await db
@@ -104,7 +91,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					.from(codebaseSyncSessions)
 					.where(
 						and(
-							eq(codebaseSyncSessions.projectId, projectId),
+							eq(codebaseSyncSessions.codebaseId, codebaseId),
 							eq(codebaseSyncSessions.userId, user.id),
 						),
 					)
@@ -117,20 +104,29 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					);
 
 				// Lazy expiry so refresh recovery reports the terminal state.
-				const usability = getSessionUsability(session);
+				const usability = getSessionUsability({
+					...session,
+					projectId: codebaseId,
+				});
 				if (!usability.usable && usability.code === "SYNC_SESSION_EXPIRED") {
 					await db
 						.update(codebaseSyncSessions)
 						.set({ status: "expired", updatedAt: new Date() })
 						.where(eq(codebaseSyncSessions.id, session.id));
 					return Response.json(
-						toSessionMetadata({ ...session, projectId, status: "expired" }),
+						toSessionMetadata({
+							...session,
+							projectId: codebaseId,
+							status: "expired",
+						}),
 					);
 				}
-				return Response.json(toSessionMetadata({ ...session, projectId }));
+				return Response.json(
+					toSessionMetadata({ ...session, projectId: codebaseId }),
+				);
 			},
 
-			// Browser create/retry: mints one project-scoped credential and
+			// Browser create/retry: mints one codebase-scoped credential and
 			// returns the SyncPromptPayload ONCE with the raw credential.
 			// POST {} creates; POST { action: "retry" } revokes the usable
 			// credential and mints a replacement (terminal rows are never
@@ -140,7 +136,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				params,
 			}: {
 				request: Request;
-				params: { projectId: string };
+				params: { codebaseId: string };
 			}) => {
 				let user: { id: string };
 				try {
@@ -148,7 +144,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				} catch {
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
-				const { projectId } = params;
+				const { codebaseId } = params;
 
 				const plan = await resolvePlan(user.id);
 				const rateCheck = await checkRateLimit(
@@ -162,19 +158,11 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ status: 429 },
 					);
 
-				const project = await getGuardedProject(user.id, projectId);
-				if (!project)
+				const codebase = await getGuardedCodebase(user.id, codebaseId);
+				if (!codebase)
 					return Response.json(
-						{ error: "Project tidak ditemukan" },
+						{ error: "Codebase tidak ditemukan" },
 						{ status: 404 },
-					);
-				if (!isSyncCapableProject(project))
-					return Response.json(
-						{
-							error: "Project ini bukan project existing-codebase",
-							code: "PROJECT_MODE_MISMATCH",
-						},
-						{ status: 400 },
 					);
 
 				const body = (await request.json().catch(() => ({}))) as {
@@ -187,18 +175,18 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					Date.now() + CODEBASE_SYNC_SESSION_EXPIRY_MS,
 				);
 				const result = await db.transaction(async (tx) => {
-					// Serialize session minting per project. Without this lock, two
+					// Serialize session minting per codebase. Without this lock, two
 					// concurrent POSTs can both observe no active row and mint two
 					// usable credentials. The lock lasts only for this transaction.
 					await tx.execute(
-						sql`select pg_advisory_xact_lock(hashtext(${projectId}))`,
+						sql`select pg_advisory_xact_lock(hashtext(${codebaseId}))`,
 					);
 					const existing = await tx
 						.select()
 						.from(codebaseSyncSessions)
 						.where(
 							and(
-								eq(codebaseSyncSessions.projectId, projectId),
+								eq(codebaseSyncSessions.codebaseId, codebaseId),
 								eq(codebaseSyncSessions.userId, user.id),
 							),
 						)
@@ -209,7 +197,8 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						for (const row of existing) {
 							if (
 								!["uploaded", "analyzing", "ready"].includes(row.status) &&
-								getSessionUsability(row, now).usable
+								getSessionUsability({ ...row, projectId: codebaseId }, now)
+									.usable
 							) {
 								await tx
 									.update(codebaseSyncSessions)
@@ -221,11 +210,15 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 									.where(eq(codebaseSyncSessions.id, row.id));
 							}
 						}
-					} else if (!shouldCreateSyncSession(existing)) {
+					} else if (
+						!shouldCreateSyncSession(
+							existing.map((row) => ({ ...row, projectId: codebaseId })),
+						)
+					) {
 						const active = existing.find(
 							(row) =>
 								!["uploaded", "analyzing", "ready"].includes(row.status) &&
-								getSessionUsability(row).usable,
+								getSessionUsability({ ...row, projectId: codebaseId }).usable,
 						);
 						if (active) {
 							return { conflictSessionId: active.id, inserted: null };
@@ -236,7 +229,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						.insert(codebaseSyncSessions)
 						.values({
 							id: crypto.randomUUID(),
-							projectId,
+							codebaseId,
 							userId: user.id,
 							credentialHash: hashSyncToken(rawCredential),
 							status: "waiting_for_cli",
@@ -268,23 +261,23 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					);
 
 				const payload: SyncPromptPayload = {
-					projectId,
+					projectId: codebaseId,
 					apiBaseUrl: new URL(request.url).origin,
 					syncToken: rawCredential,
 					cliMinVersion: inserted.cliMinVersion,
-					syncCommand: buildSyncCommand(projectId),
+					syncCommand: buildSyncCommand(codebaseId),
 					expiresAt: inserted.expiresAt.toISOString(),
 				};
 				return Response.json(payload);
 			},
 
-			// Browser revoke: expires usable credentials for this project.
+			// Browser revoke: expires usable credentials for this codebase.
 			DELETE: async ({
 				request,
 				params,
 			}: {
 				request: Request;
-				params: { projectId: string };
+				params: { codebaseId: string };
 			}) => {
 				let user: { id: string };
 				try {
@@ -292,7 +285,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 				} catch {
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
-				const { projectId } = params;
+				const { codebaseId } = params;
 
 				const plan = await resolvePlan(user.id);
 				const rateCheck = await checkRateLimit(
@@ -306,19 +299,11 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 						{ status: 429 },
 					);
 
-				const project = await getGuardedProject(user.id, projectId);
-				if (!project)
+				const codebase = await getGuardedCodebase(user.id, codebaseId);
+				if (!codebase)
 					return Response.json(
-						{ error: "Project tidak ditemukan" },
+						{ error: "Codebase tidak ditemukan" },
 						{ status: 404 },
-					);
-				if (!isSyncCapableProject(project))
-					return Response.json(
-						{
-							error: "Project ini bukan project existing-codebase",
-							code: "PROJECT_MODE_MISMATCH",
-						},
-						{ status: 400 },
 					);
 
 				// Single set-based revocation: one statement expires every
@@ -332,7 +317,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/session")({
 					.set({ status: "expired", consumedAt: now, updatedAt: now })
 					.where(
 						and(
-							eq(codebaseSyncSessions.projectId, projectId),
+							eq(codebaseSyncSessions.codebaseId, codebaseId),
 							eq(codebaseSyncSessions.userId, user.id),
 							isNull(codebaseSyncSessions.consumedAt),
 							gt(codebaseSyncSessions.expiresAt, now),

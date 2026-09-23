@@ -572,14 +572,16 @@ export const codebases = pgTable(
 	(t) => [index("codebases_user_id_idx").on(t.userId)],
 );
 
-// Sync session: one short-lived project-scoped credential per attempt.
+// Sync session: one short-lived codebase-scoped credential per attempt.
 export const codebaseSyncSessions = pgTable(
 	"codebase_sync_sessions",
 	{
 		id: text("id").primaryKey(),
-		projectId: text("project_id")
-			.notNull()
-			.references(() => projects.id, { onDelete: "cascade" }),
+		// Legacy project linkage for historical rows. New codebase-scoped
+		// sessions leave this unset; ownership flows via codebaseId.
+		projectId: text("project_id").references(() => projects.id, {
+			onDelete: "cascade",
+		}),
 		userId: text("user_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
@@ -613,9 +615,11 @@ export const codebaseSnapshots = pgTable(
 	"codebase_snapshots",
 	{
 		id: text("id").primaryKey(),
-		projectId: text("project_id")
-			.notNull()
-			.references(() => projects.id, { onDelete: "cascade" }),
+		// Legacy project linkage for historical rows. New codebase-scoped
+		// snapshots leave this unset; ownership flows via codebaseId.
+		projectId: text("project_id").references(() => projects.id, {
+			onDelete: "cascade",
+		}),
 		syncSessionId: text("sync_session_id")
 			.notNull()
 			.references(() => codebaseSyncSessions.id, { onDelete: "cascade" }),

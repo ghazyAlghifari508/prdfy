@@ -515,6 +515,7 @@ describe("one-active-session and retry semantics (Task 4)", () => {
 	it("exposes session metadata without any credential material", () => {
 		const metadata = toSessionMetadata({
 			...active,
+			projectId: "proj_1",
 			credentialHash: "hash-value",
 		});
 		expect(metadata.sessionId).toBe(active.id);
