@@ -18,6 +18,8 @@ import { deriveProjectNameSync } from "@/lib/services/prd-service";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
+export { resolveAnalysisFeaturePrompt } from "@/lib/codebase-analysis";
+
 export function buildFeatureProjectValues(input: {
 	id: string;
 	userId: string;
@@ -35,17 +37,6 @@ export function buildFeatureProjectValues(input: {
 		codebaseId: input.codebaseId,
 		language: input.language,
 	};
-}
-
-export function resolveAnalysisFeaturePrompt(input: {
-	handoffPrompt: string | null | undefined;
-	projectName: string;
-	projectId: string;
-}): string {
-	const prompt = input.handoffPrompt?.trim();
-	if (prompt) return prompt;
-	const name = input.projectName.trim();
-	return name || input.projectId;
 }
 
 function resolvePlan(rawPlan: string | undefined): Plan {
@@ -130,7 +121,8 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/features")({
 					typeof body === "object" && body !== null && "message" in body
 						? body.message
 						: undefined;
-				if (typeof message !== "string" || message.length < 3) {
+				const prompt = typeof message === "string" ? message.trim() : "";
+				if (prompt.length < 3) {
 					return Response.json(
 						{ error: "Prompt harus diisi minimal 3 karakter" },
 						{ status: 400 },
@@ -140,10 +132,10 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/features")({
 					typeof body === "object" && body !== null && "language" in body
 						? normalizeLanguage(body.language)
 						: normalizeLanguage(undefined);
-				const name = deriveProjectNameSync(message);
+				const name = deriveProjectNameSync(prompt);
 				const id = crypto.randomUUID();
-				const [project] = await db.transaction((tx) =>
-					tx
+				const project = await db.transaction(async (tx) => {
+					const [createdProject] = await tx
 						.insert(projects)
 						.values(
 							buildFeatureProjectValues({
@@ -154,8 +146,24 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/features")({
 								language,
 							}),
 						)
-						.returning({ id: projects.id, name: projects.name }),
-				);
+						.returning({ id: projects.id, name: projects.name });
+					if (!createdProject) return null;
+					await saveAskHandoff(
+						user.id,
+						{
+							projectId: createdProject.id,
+							answers: [],
+							snapshotId: snapshot.id,
+							state: {
+								prompt,
+								session: 1,
+								questions: [],
+							},
+						},
+						tx,
+					);
+					return createdProject;
+				});
 				if (!project) {
 					return Response.json(
 						{ error: "Gagal membuat project" },
@@ -163,16 +171,6 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/features")({
 					);
 				}
 
-				await saveAskHandoff(user.id, {
-					projectId: project.id,
-					answers: [],
-					snapshotId: snapshot.id,
-					state: {
-						prompt: message,
-						session: 1,
-						questions: [],
-					},
-				});
 				return Response.json({ projectId: project.id, name: project.name });
 			},
 		},

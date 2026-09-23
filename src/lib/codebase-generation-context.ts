@@ -624,11 +624,12 @@ export async function linkGenerationContext(
 export async function saveAskHandoff(
 	userId: string,
 	input: AskHandoff,
+	executor?: Pick<typeof import("@/db").db, "insert">,
 ): Promise<void> {
 	const clean = sanitizeAskHandoff(input);
-	const { db } = await import("@/db");
+	const database = executor ?? (await import("@/db")).db;
 	const { codebaseAskHandoffs } = await import("@/db/schema");
-	await db
+	await database
 		.insert(codebaseAskHandoffs)
 		.values({
 			projectId: clean.projectId,

@@ -46,6 +46,17 @@ export const codebaseAnalysisSchema = z.object({
 
 export type CodebaseAnalysis = z.infer<typeof codebaseAnalysisSchema>;
 
+export function resolveAnalysisFeaturePrompt(input: {
+	handoffPrompt: string | null | undefined;
+	projectName: string;
+	projectId: string;
+}): string {
+	const prompt = input.handoffPrompt?.trim();
+	if (prompt) return prompt;
+	const name = input.projectName.trim();
+	return name || input.projectId;
+}
+
 export function parseCodebaseAnalysis(input: unknown): CodebaseAnalysis {
 	return codebaseAnalysisSchema.parse(input);
 }
@@ -338,10 +349,7 @@ export function inferTechAnswersFromCodebase(
 			out.frontend = "Flutter";
 		} else if (framework.includes("expo") || hasDep("expo")) {
 			out.frontend = "Expo";
-		} else if (
-			framework.includes("react native") ||
-			hasDep("react-native")
-		) {
+		} else if (framework.includes("react native") || hasDep("react-native")) {
 			out.frontend = "React Native";
 		} else if (framework.includes("ionic") || hasDep("@ionic")) {
 			out.frontend = "Ionic";

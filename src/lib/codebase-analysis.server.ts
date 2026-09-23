@@ -30,13 +30,13 @@ import {
 	codebaseSyncSessions,
 	projects,
 } from "@/db/schema";
-import { resolveAnalysisFeaturePrompt } from "@/routes/api/codebases/$codebaseId/features";
 import {
 	type AnalysisSourceFile,
 	buildAnalysisUserPrompt,
 	CODEBASE_ANALYSIS_SYSTEM_PROMPT,
 	type CodebaseAnalysis,
 	parseAnalysisOutput,
+	resolveAnalysisFeaturePrompt,
 	toSafeAnalysisErrorMessage,
 } from "./codebase-analysis";
 import {
