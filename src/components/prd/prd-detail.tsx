@@ -1,6 +1,6 @@
 "use client";
 
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, X } from "lucide-react";
 import {
 	useCallback,
@@ -49,7 +49,7 @@ interface PrdDetailProps {
 
 export function PrdDetail({
 	projectId,
-	projectName,
+	projectName: _projectName,
 	step,
 	latestVersion,
 	allVersions = [],
@@ -73,12 +73,16 @@ export function PrdDetail({
 	// appears immediately after revision without requiring a full page refresh.
 	const [versions, setVersions] = useState(allVersions);
 	const isChatOpen = useUIStore((s) => s.isChatPanelOpen);
+	const isPaywallOpen = useUIStore((s) => s.isPaywallOpen);
+	const paywallStage = useUIStore((s) => s.paywallStage);
+	const openPaywallModal = useUIStore((s) => s.openPaywallModal);
+	const closePaywallModal = useUIStore((s) => s.closePaywallModal);
 	const [isStepLoading, setIsStepLoading] = useState(false);
-	const [paywallOpen, setPaywallOpen] = useState(false);
 
 	// ── Hooks ──
 	const { rightWidth, onStartDragRight, isDraggingRight } = usePanelResize();
 	const navigate = useNavigate();
+	const search = useLocation({ select: (l) => l.search });
 	const [, startTransition] = useTransition();
 	const {
 		isGeneratingPRD,
@@ -86,7 +90,8 @@ export function PrdDetail({
 		setGeneratingPRD,
 		setStreamingPRDContent,
 		setMessages,
-		creditsExhausted: _creditsExhausted,
+		creditsExhausted,
+		setCreditsExhausted,
 	} = useChatStore();
 	const showToast = useUIStore((s) => s.showToast);
 
@@ -183,6 +188,20 @@ export function PrdDetail({
 		}
 	}, [projectId, latestVersion, setGeneratingPRD, setStreamingPRDContent]);
 
+	// Open paywall modal if redirected from downstream route with ?paywall=ac
+	useEffect(() => {
+		const paywall =
+			typeof search === "object" &&
+			search !== null &&
+			"paywall" in search &&
+			typeof search.paywall === "string"
+				? search.paywall
+				: undefined;
+		if (paywall === "ac") {
+			openPaywallModal("ac");
+		}
+	}, [search, openPaywallModal]);
+
 	// ── Handlers ──
 
 	// ponytail: re-fetch versions list client-side so version history updates
@@ -230,7 +249,7 @@ export function PrdDetail({
 				navigate({ to: "/prd/$id", params: { id: newProjectId } });
 			});
 		},
-		[navigate, startTransition],
+		[navigate],
 	);
 
 	const toggleChat = useUIStore((s) => s.toggleChatPanel);
@@ -277,6 +296,7 @@ export function PrdDetail({
 			{/* ═══════════ Mobile Tab Toggle (<md) ═══════════ */}
 			<div className="flex shrink-0 border-b border-graphite bg-charcoal md:hidden">
 				<button
+					type="button"
 					onClick={() => setActiveTab("doc")}
 					className={cn(
 						"flex-1 py-2.5 text-center text-sm font-[510] transition-colors border-b-2",
@@ -288,6 +308,7 @@ export function PrdDetail({
 					Dokumen
 				</button>
 				<button
+					type="button"
 					onClick={() => setActiveTab("chat")}
 					className={cn(
 						"flex-1 py-2.5 text-center text-sm font-[510] transition-colors border-b-2",
@@ -339,7 +360,7 @@ export function PrdDetail({
 									</p>
 									<button
 										type="button"
-										onClick={() => setPaywallOpen(true)}
+										onClick={() => openPaywallModal("ac")}
 										className="btn-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-[510] transition-all hover:brightness-105 active:scale-[0.98]"
 									>
 										<span className="whitespace-nowrap">Upgrade ke Pro</span>
@@ -366,6 +387,7 @@ export function PrdDetail({
 				>
 					{isChatOpen && (
 						<div
+							aria-hidden="true"
 							className="absolute bottom-0 left-[-4px] top-0 z-10 w-2 cursor-col-resize transition-colors hover:bg-indigo/20"
 							onMouseDown={onStartDragRight}
 						/>
@@ -422,6 +444,7 @@ export function PrdDetail({
 							<div className="flex items-center justify-between border-b border-graphite px-4 py-2">
 								<span className="text-sm font-[510]">Chat</span>
 								<button
+									type="button"
 									onClick={toggleChat}
 									aria-label="Tutup chat"
 									className="text-fog hover:text-snow"
@@ -450,12 +473,31 @@ export function PrdDetail({
 			</div>
 
 			<CreditExhaustedModal
-				isOpen={paywallOpen}
-				onClose={() => setPaywallOpen(false)}
-				errorMessage="Upgrade ke Pro untuk generate Acceptance Criteria dan lanjut ke tahap berikutnya."
-				title="Lanjut ke AC butuh Pro"
+				isOpen={creditsExhausted?.stage === "prd" || isPaywallOpen}
+				onClose={() => {
+					if (creditsExhausted?.stage === "prd") {
+						setCreditsExhausted(null);
+					}
+					closePaywallModal();
+				}}
+				errorMessage={
+					isPaywallOpen && creditsExhausted?.stage !== "prd"
+						? "Upgrade ke Pro untuk generate Acceptance Criteria dan lanjut ke tahap berikutnya."
+						: creditsExhausted?.message || ""
+				}
+				title={
+					isPaywallOpen && creditsExhausted?.stage !== "prd"
+						? "Lanjut ke AC butuh Pro"
+						: undefined
+				}
 				projectId={projectId || ""}
-				stage="ac"
+				stage={
+					creditsExhausted?.stage === "prd"
+						? "prd"
+						: paywallStage === "prd" || paywallStage === "task"
+							? paywallStage
+							: "ac"
+				}
 				currentPlan={plan}
 			/>
 		</div>

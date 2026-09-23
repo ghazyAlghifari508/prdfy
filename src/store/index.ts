@@ -102,12 +102,16 @@ interface UIState {
 	toastType: "success" | "error" | "info" | null;
 	isProjectDrawerOpen: boolean;
 	activeReviewModal: "prd" | "ac" | null;
+	isPaywallOpen: boolean;
+	paywallStage: string | null;
 	toggleChatPanel: () => void;
 	setPRDLoading: (loading: boolean) => void;
 	showToast: (message: string, type: "success" | "error" | "info") => void;
 	hideToast: () => void;
 	setProjectDrawerOpen: (open: boolean) => void;
 	setActiveReviewModal: (modal: "prd" | "ac" | null) => void;
+	openPaywallModal: (stage?: string) => void;
+	closePaywallModal: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -117,6 +121,8 @@ export const useUIStore = create<UIState>((set) => ({
 	toastType: null,
 	isProjectDrawerOpen: false,
 	activeReviewModal: null,
+	isPaywallOpen: false,
+	paywallStage: null,
 	toggleChatPanel: () =>
 		set((state) => ({ isChatPanelOpen: !state.isChatPanelOpen })),
 	setPRDLoading: (loading) => set({ isPRDLoading: loading }),
@@ -124,4 +130,7 @@ export const useUIStore = create<UIState>((set) => ({
 	hideToast: () => set({ toastMessage: null, toastType: null }),
 	setProjectDrawerOpen: (isProjectDrawerOpen) => set({ isProjectDrawerOpen }),
 	setActiveReviewModal: (activeReviewModal) => set({ activeReviewModal }),
+	openPaywallModal: (stage = "ac") =>
+		set({ isPaywallOpen: true, paywallStage: stage }),
+	closePaywallModal: () => set({ isPaywallOpen: false, paywallStage: null }),
 }));
