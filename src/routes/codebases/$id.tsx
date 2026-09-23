@@ -153,6 +153,48 @@ function CodebaseDetailPage() {
 	const [isStarting, setIsStarting] = useState(false);
 	const [isWorking, setIsWorking] = useState(false);
 	const inFlight = useRef(false);
+	const analysisAttemptedFor = useRef<string | null>(null);
+
+	const triggerAnalysis = useCallback(
+		async (snapshotId: string) => {
+			if (!feature?.id) return;
+			setIsWorking(true);
+			setError(null);
+			try {
+				const response = await fetch(
+					`/api/v1/projects/${encodeURIComponent(feature.id)}/codebase/analysis`,
+					{
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ snapshotId }),
+					},
+				);
+				const body: unknown = await response.json().catch(() => null);
+				if (
+					!response.ok ||
+					typeof body !== "object" ||
+					body === null ||
+					!("id" in body) ||
+					typeof body.id !== "string"
+				) {
+					setError("Analisis codebase gagal. Coba analisis ulang.");
+					return;
+				}
+				const parsed = safeParseAnalysisResponse(body);
+				if (!parsed) {
+					setError("Hasil analisis tidak valid.");
+					return;
+				}
+				setAnalysis(parsed);
+				if (parsed.output) setScreen(3);
+			} catch {
+				setError("Server tidak dapat dihubungi.");
+			} finally {
+				setIsWorking(false);
+			}
+		},
+		[feature?.id],
+	);
 
 	const readStatus = useCallback(async () => {
 		if (inFlight.current) return;
@@ -176,6 +218,23 @@ function CodebaseDetailPage() {
 				return;
 			}
 			setStatus(parsed.data);
+			setAnalysis((current) =>
+				current &&
+				parsed.data.snapshotId &&
+				current.snapshotId !== parsed.data.snapshotId
+					? null
+					: current,
+			);
+			if (
+				feature?.id &&
+				parsed.data.snapshotId &&
+				SNAPSHOT_CONTEXT_STATUSES.includes(parsed.data.status) &&
+				!parsed.data.analysisId &&
+				analysisAttemptedFor.current !== parsed.data.snapshotId
+			) {
+				analysisAttemptedFor.current = parsed.data.snapshotId;
+				void triggerAnalysis(parsed.data.snapshotId);
+			}
 			setScreen((current) =>
 				parsed.data.snapshotId &&
 				SNAPSHOT_CONTEXT_STATUSES.includes(parsed.data.status)
@@ -189,7 +248,7 @@ function CodebaseDetailPage() {
 		} finally {
 			inFlight.current = false;
 		}
-	}, [codebase.id, status?.sessionId]);
+	}, [codebase.id, feature?.id, status?.sessionId, triggerAnalysis]);
 
 	useEffect(() => {
 		try {
@@ -244,44 +303,6 @@ function CodebaseDetailPage() {
 			setError("Server tidak dapat dihubungi.");
 		} finally {
 			setIsStarting(false);
-		}
-	};
-
-	const triggerAnalysis = async () => {
-		if (!feature?.id || !status?.snapshotId) return;
-		setIsWorking(true);
-		setError(null);
-		try {
-			const response = await fetch(
-				`/api/v1/projects/${encodeURIComponent(feature.id)}/codebase/analysis`,
-				{
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ snapshotId: status.snapshotId }),
-				},
-			);
-			const body: unknown = await response.json().catch(() => null);
-			if (
-				!response.ok ||
-				typeof body !== "object" ||
-				body === null ||
-				!("id" in body) ||
-				typeof body.id !== "string"
-			) {
-				setError("Analisis codebase gagal. Coba analisis ulang.");
-				return;
-			}
-			const parsed = safeParseAnalysisResponse(body);
-			if (!parsed) {
-				setError("Hasil analisis tidak valid.");
-				return;
-			}
-			setAnalysis(parsed);
-			if (parsed.output) setScreen(3);
-		} catch {
-			setError("Server tidak dapat dihubungi.");
-		} finally {
-			setIsWorking(false);
 		}
 	};
 
@@ -345,7 +366,20 @@ function CodebaseDetailPage() {
 					<span>{error}</span>
 					<button
 						type="button"
-						onClick={() => void startSession()}
+						onClick={() => {
+							if (status?.analysisStatus === "failed" && status.snapshotId) {
+								void triggerAnalysis(status.snapshotId);
+							} else if (
+								status?.status === "failed" ||
+								status?.status === "expired"
+							) {
+								void startSession();
+							} else if (status) {
+								void readStatus();
+							} else {
+								void startSession();
+							}
+						}}
 						className="min-h-11 rounded-md border border-crimson/50 px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
 					>
 						Coba lagi
@@ -396,25 +430,42 @@ function CodebaseDetailPage() {
 					statusPath={`/api/codebases/${encodeURIComponent(codebase.id)}/status`}
 					onStatus={setStatus}
 					onRetrySync={() => void startSession()}
-					onRetryAnalysis={feature ? () => void triggerAnalysis() : undefined}
+					onRetryAnalysis={
+						feature && status?.snapshotId
+							? () => {
+									const snapshotId = status.snapshotId;
+									if (snapshotId) void triggerAnalysis(snapshotId);
+								}
+							: undefined
+					}
 					onViewReview={analysis?.output ? () => setScreen(3) : undefined}
 				/>
 			)}
-			{screen === 3 && analysis?.output && status?.snapshotId && (
-				<CodebaseReview
-					analysis={analysis.output}
-					snapshotId={status.snapshotId}
-					snapshotCreatedAt={status.snapshotCreatedAt}
-					fileCount={status.fileCount}
-					excludedCount={status.excludedCount}
-					isWorking={isWorking}
-					errorMessage={error}
-					onRetrySync={() => void startSession()}
-					onRetryAnalysis={feature ? () => void triggerAnalysis() : undefined}
-					onBackToSync={() => setScreen(2)}
-					onContinue={() => setScreen(2)}
-				/>
-			)}
+			{screen === 3 &&
+				analysis?.output &&
+				status?.snapshotId &&
+				analysis.snapshotId === status.snapshotId && (
+					<CodebaseReview
+						analysis={analysis.output}
+						snapshotId={status.snapshotId}
+						snapshotCreatedAt={status.snapshotCreatedAt}
+						fileCount={status.fileCount}
+						excludedCount={status.excludedCount}
+						isWorking={isWorking}
+						errorMessage={error}
+						onRetrySync={() => void startSession()}
+						onRetryAnalysis={
+							feature && status?.snapshotId
+								? () => {
+										const snapshotId = status.snapshotId;
+										if (snapshotId) void triggerAnalysis(snapshotId);
+									}
+								: undefined
+						}
+						onBackToSync={() => setScreen(2)}
+						onContinue={() => setScreen(2)}
+					/>
+				)}
 			<section className="rounded-xl border border-graphite bg-charcoal p-5 sm:p-6">
 				<div className="flex flex-col gap-2">
 					<h2 className="text-lg font-semibold text-snow">

@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import {
 	getPendingSyncPayloadKey,
+	SNAPSHOT_CONTEXT_STATUSES,
 	syncPromptPayloadSchema,
 } from "@/lib/codebase-sync";
 import { requireUserServer } from "@/lib/session";
@@ -25,7 +26,7 @@ const loadCodebases = createServerFn({ method: "GET" }).handler(async () => {
 async function dbSelectCodebases(userId: string) {
 	const { db } = await import("@/db");
 	const { codebaseSnapshots, codebases } = await import("@/db/schema");
-	const { desc, eq, inArray } = await import("drizzle-orm");
+	const { and, desc, eq, inArray } = await import("drizzle-orm");
 	const rows = await db
 		.select({
 			id: codebases.id,
@@ -46,7 +47,12 @@ async function dbSelectCodebases(userId: string) {
 					fileCount: codebaseSnapshots.fileCount,
 				})
 				.from(codebaseSnapshots)
-				.where(inArray(codebaseSnapshots.codebaseId, ids))
+				.where(
+					and(
+						inArray(codebaseSnapshots.codebaseId, ids),
+						inArray(codebaseSnapshots.status, [...SNAPSHOT_CONTEXT_STATUSES]),
+					),
+				)
 				.orderBy(desc(codebaseSnapshots.createdAt))
 		: [];
 	const latest = new Map<string, (typeof snapshots)[number]>();
