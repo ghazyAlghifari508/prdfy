@@ -230,7 +230,7 @@ function CodebasesPage() {
 			<header className="flex flex-col gap-4 border-b border-graphite pb-6 sm:flex-row sm:items-end sm:justify-between">
 				<div>
 					<p className="font-mono text-xs uppercase tracking-widest text-fog">
-						Workspace / Source context
+						Workspace / Konteks repository
 					</p>
 					<h1 className="mt-2 text-3xl font-semibold tracking-tight text-snow sm:text-4xl">
 						Codebase
