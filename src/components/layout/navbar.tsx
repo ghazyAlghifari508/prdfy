@@ -437,7 +437,8 @@ export function Navbar() {
 									<button
 										type="button"
 										onClick={() => setIsTopUpOpen(true)}
-										className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20"
+										aria-label="Isi ulang kredit"
+										className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
 									>
 										<CreditCard size={13} aria-hidden />
 										<span>Top Up</span>
@@ -546,7 +547,8 @@ export function Navbar() {
 								<button
 									type="button"
 									onClick={() => setIsTopUpOpen(true)}
-									className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20"
+									aria-label="Isi ulang kredit"
+									className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
 								>
 									<CreditCard size={13} aria-hidden />
 									<span>Top Up</span>

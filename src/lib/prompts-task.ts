@@ -122,7 +122,7 @@ ATURAN:
 6. Nama feature WAJIB sama dengan nama section AC yang memuat requirement tersebut, agar hasilnya bisa digabung tanpa duplikasi.
 7. Satu task = satu deliverable implementasi yang coherent dan bisa di-review sendiri. Pecah bila memuat responsibility berbeda (data model, service logic, API boundary, UI, validasi, authorization, async lifecycle, integrasi, error/recovery, state).
 8. Setiap subtask WAJIB punya "details" (minimal 1 item) yang spesifik: behavior dan state, data/state terlibat, aturan validasi, batas modul/endpoint, authorization, edge case, ekspektasi verifikasi.
-9. JANGAN mengarang path file, library, atau endpoint yang tidak ada di PRD/AC/konteks codebase.
+9. Rekomendasikan path file dan batas modul yang terstruktur tanpa mengarang library atau endpoint yang melenceng dari PRD/AC/konteks codebase.
 
 Output HANYA JSON.`;
 }
