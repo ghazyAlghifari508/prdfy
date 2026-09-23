@@ -63,6 +63,7 @@ import { Route as PrdShareTokenRouteImport } from './routes/prd/share/$token'
 import { Route as ApiCodebaseProjectIdSessionRouteImport } from './routes/api/codebase/$projectId/session'
 import { Route as ApiCodebaseProjectIdStatusRouteImport } from './routes/api/codebase/$projectId/status'
 import { Route as ApiProjectsIdLastRouteRouteImport } from './routes/api/projects/$id/last-route'
+import { Route as ApiProjectsIdResetProgressRouteImport } from './routes/api/projects/$id/reset-progress'
 import { Route as ApiProjectsIdStepRouteImport } from './routes/api/projects/$id/step'
 import { Route as ApiProjectsIdVersionsRouteImport } from './routes/api/projects/$id/versions'
 import { Route as ApiSettingsApiKeysIndexRouteImport } from './routes/api/settings/api-keys/index'
@@ -353,6 +354,12 @@ const ApiProjectsIdLastRouteRoute = ApiProjectsIdLastRouteRouteImport.update({
   path: '/last-route',
   getParentRoute: () => ApiProjectsIdRoute,
 } as any)
+const ApiProjectsIdResetProgressRoute =
+  ApiProjectsIdResetProgressRouteImport.update({
+    id: '/reset-progress',
+    path: '/reset-progress',
+    getParentRoute: () => ApiProjectsIdRoute,
+  } as any)
 const ApiProjectsIdStepRoute = ApiProjectsIdStepRouteImport.update({
   id: '/step',
   path: '/step',
@@ -499,6 +506,7 @@ export interface FileRoutesByFullPath {
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
+  '/api/projects/$id/reset-progress': typeof ApiProjectsIdResetProgressRoute
   '/api/projects/$id/step': typeof ApiProjectsIdStepRoute
   '/api/projects/$id/versions': typeof ApiProjectsIdVersionsRoute
   '/api/settings/api-keys/$id': typeof ApiSettingsApiKeysIdRoute
@@ -570,6 +578,7 @@ export interface FileRoutesByTo {
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
+  '/api/projects/$id/reset-progress': typeof ApiProjectsIdResetProgressRoute
   '/api/projects/$id/step': typeof ApiProjectsIdStepRoute
   '/api/projects/$id/versions': typeof ApiProjectsIdVersionsRoute
   '/api/settings/api-keys/$id': typeof ApiSettingsApiKeysIdRoute
@@ -644,6 +653,7 @@ export interface FileRoutesById {
   '/api/codebase/$projectId/session': typeof ApiCodebaseProjectIdSessionRoute
   '/api/codebase/$projectId/status': typeof ApiCodebaseProjectIdStatusRoute
   '/api/projects/$id/last-route': typeof ApiProjectsIdLastRouteRoute
+  '/api/projects/$id/reset-progress': typeof ApiProjectsIdResetProgressRoute
   '/api/projects/$id/step': typeof ApiProjectsIdStepRoute
   '/api/projects/$id/versions': typeof ApiProjectsIdVersionsRoute
   '/api/settings/api-keys/$id': typeof ApiSettingsApiKeysIdRoute
@@ -719,6 +729,7 @@ export interface FileRouteTypes {
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
     | '/api/projects/$id/last-route'
+    | '/api/projects/$id/reset-progress'
     | '/api/projects/$id/step'
     | '/api/projects/$id/versions'
     | '/api/settings/api-keys/$id'
@@ -790,6 +801,7 @@ export interface FileRouteTypes {
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
     | '/api/projects/$id/last-route'
+    | '/api/projects/$id/reset-progress'
     | '/api/projects/$id/step'
     | '/api/projects/$id/versions'
     | '/api/settings/api-keys/$id'
@@ -863,6 +875,7 @@ export interface FileRouteTypes {
     | '/api/codebase/$projectId/session'
     | '/api/codebase/$projectId/status'
     | '/api/projects/$id/last-route'
+    | '/api/projects/$id/reset-progress'
     | '/api/projects/$id/step'
     | '/api/projects/$id/versions'
     | '/api/settings/api-keys/$id'
@@ -1312,6 +1325,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProjectsIdLastRouteRouteImport
       parentRoute: typeof ApiProjectsIdRoute
     }
+    '/api/projects/$id/reset-progress': {
+      id: '/api/projects/$id/reset-progress'
+      path: '/reset-progress'
+      fullPath: '/api/projects/$id/reset-progress'
+      preLoaderRoute: typeof ApiProjectsIdResetProgressRouteImport
+      parentRoute: typeof ApiProjectsIdRoute
+    }
     '/api/projects/$id/step': {
       id: '/api/projects/$id/step'
       path: '/step'
@@ -1478,12 +1498,14 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 
 interface ApiProjectsIdRouteChildren {
   ApiProjectsIdLastRouteRoute: typeof ApiProjectsIdLastRouteRoute
+  ApiProjectsIdResetProgressRoute: typeof ApiProjectsIdResetProgressRoute
   ApiProjectsIdStepRoute: typeof ApiProjectsIdStepRoute
   ApiProjectsIdVersionsRoute: typeof ApiProjectsIdVersionsRoute
 }
 
 const ApiProjectsIdRouteChildren: ApiProjectsIdRouteChildren = {
   ApiProjectsIdLastRouteRoute: ApiProjectsIdLastRouteRoute,
+  ApiProjectsIdResetProgressRoute: ApiProjectsIdResetProgressRoute,
   ApiProjectsIdStepRoute: ApiProjectsIdStepRoute,
   ApiProjectsIdVersionsRoute: ApiProjectsIdVersionsRoute,
 }
