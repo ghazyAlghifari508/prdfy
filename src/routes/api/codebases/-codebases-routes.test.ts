@@ -2,12 +2,52 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { decideCodebaseDeletion } from "./$codebaseId";
 import { CODEBASE_SESSION_ROUTE_PATH } from "./$codebaseId/session";
+import { validateCodebaseNameInput } from "./index";
 
 describe("codebase routes", () => {
 	it("exposes the codebase-scoped session path", () => {
 		expect(CODEBASE_SESSION_ROUTE_PATH).toBe(
 			"/api/codebases/$codebaseId/session",
 		);
+	});
+});
+
+describe("validateCodebaseNameInput", () => {
+	it("rejects direct name shorter than 3 characters", () => {
+		expect(validateCodebaseNameInput({ name: "ab" })).toEqual({
+			ok: false,
+			error: "Nama codebase harus diisi minimal 3 karakter",
+		});
+		expect(validateCodebaseNameInput({ name: "  a  " })).toEqual({
+			ok: false,
+			error: "Nama codebase harus diisi minimal 3 karakter",
+		});
+	});
+
+	it("accepts valid direct name of 3 or more characters", () => {
+		expect(validateCodebaseNameInput({ name: "my-repo" })).toEqual({
+			ok: true,
+			name: "my-repo",
+		});
+	});
+
+	it("derives name from message if name is omitted", () => {
+		expect(
+			validateCodebaseNameInput({ message: "Buat fitur billing checkout" }),
+		).toMatchObject({
+			ok: true,
+		});
+	});
+
+	it("rejects when both name and message are missing or too short", () => {
+		expect(validateCodebaseNameInput(null)).toEqual({
+			ok: false,
+			error: "Nama codebase harus diisi minimal 3 karakter",
+		});
+		expect(validateCodebaseNameInput({ message: "hi" })).toEqual({
+			ok: false,
+			error: "Nama codebase harus diisi minimal 3 karakter",
+		});
 	});
 });
 

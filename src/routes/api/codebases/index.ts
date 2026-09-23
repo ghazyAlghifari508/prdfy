@@ -18,6 +18,37 @@ import {
 import { deriveProjectNameSync } from "@/lib/services/prd-service";
 import { requireUser } from "@/lib/session";
 
+export function validateCodebaseNameInput(
+	body:
+		| {
+				name?: unknown;
+				message?: unknown;
+		  }
+		| null
+		| undefined,
+): { ok: true; name: string } | { ok: false; error: string } {
+	const rawName = typeof body?.name === "string" ? body.name.trim() : "";
+	const rawMessage = typeof body?.message === "string" ? body.message : "";
+
+	let codebaseName = rawName;
+	if (!codebaseName) {
+		if (!rawMessage || rawMessage.length < 3) {
+			return {
+				ok: false,
+				error: "Nama codebase harus diisi minimal 3 karakter",
+			};
+		}
+		codebaseName = deriveProjectNameSync(rawMessage);
+	}
+	if (!codebaseName || codebaseName.length < 3) {
+		return {
+			ok: false,
+			error: "Nama codebase harus diisi minimal 3 karakter",
+		};
+	}
+	return { ok: true, name: codebaseName };
+}
+
 export const Route = createFileRoute("/api/codebases/")({
 	server: {
 		handlers: {
@@ -113,26 +144,11 @@ export const Route = createFileRoute("/api/codebases/")({
 					name?: unknown;
 					message?: unknown;
 				} | null;
-				const rawName = typeof body?.name === "string" ? body.name.trim() : "";
-				const rawMessage =
-					typeof body?.message === "string" ? body.message : "";
-
-				let codebaseName = rawName;
-				if (!codebaseName) {
-					if (!rawMessage || rawMessage.length < 3) {
-						return Response.json(
-							{ error: "Nama codebase harus diisi minimal 3 karakter" },
-							{ status: 400 },
-						);
-					}
-					codebaseName = deriveProjectNameSync(rawMessage);
+				const nameCheck = validateCodebaseNameInput(body);
+				if (!nameCheck.ok) {
+					return Response.json({ error: nameCheck.error }, { status: 400 });
 				}
-				if (!codebaseName) {
-					return Response.json(
-						{ error: "Nama codebase harus diisi minimal 3 karakter" },
-						{ status: 400 },
-					);
-				}
+				const codebaseName = nameCheck.name;
 
 				const id = crypto.randomUUID();
 				const rawCredential = generateSyncToken();

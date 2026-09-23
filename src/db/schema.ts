@@ -313,7 +313,7 @@ export const projects = pgTable(
 		// Existing-codebase projects belong to a codebase; greenfield stays null.
 		// Nullable so greenfield rows and pre-migration rows remain valid.
 		codebaseId: text("codebase_id").references(() => codebases.id, {
-			onDelete: "cascade",
+			onDelete: "set null",
 		}),
 		language: text("language").default("id"),
 		step: text("step").default("prd"), // prd, ac, task
@@ -334,6 +334,7 @@ export const projects = pgTable(
 		index("projects_user_id_idx").on(t.userId),
 		// Active-project listing (History, admin, lookups) filters on both.
 		index("projects_user_id_deleted_at_idx").on(t.userId, t.deletedAt),
+		index("projects_codebase_id_idx").on(t.codebaseId),
 		uniqueIndex("projects_user_id_id_unique").on(t.userId, t.id),
 	],
 );
