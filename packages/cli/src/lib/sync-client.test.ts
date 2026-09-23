@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./api-client.js";
 import {
+	buildCodebaseSyncUrl,
 	CODEBASE_MAX_CHUNK_BYTES,
 	createSyncClient,
 	makeIdempotencyKey,
@@ -65,7 +66,7 @@ describe("session handshake", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 		const { url, init } = callUrlAndInit(fetchMock, 0);
 		expect(url).toBe(
-			"http://localhost:3000/api/v1/projects/proj-1/codebase/sync",
+			"http://localhost:3000/api/v1/codebases/proj-1/codebase/sync",
 		);
 		expect((init.headers as Record<string, string>).Authorization).toBe(
 			"Bearer test-sync-token",
@@ -324,7 +325,7 @@ describe("file chunk upload and completion", () => {
 		expect(res.status).toBe("uploading");
 		const { url, init } = callUrlAndInit(fetchMock, 0);
 		expect(url).toBe(
-			"http://localhost:3000/api/v1/projects/proj-1/codebase/files",
+			"http://localhost:3000/api/v1/codebases/proj-1/codebase/files",
 		);
 		expect(requestBody(init)).not.toContain("test-sync-token");
 	});
@@ -391,5 +392,19 @@ describe("withSyncRetry", () => {
 		).catch((e) => e);
 		expect(err).toBeInstanceOf(ApiError);
 		expect(calls).toBe(2);
+	});
+});
+
+describe("buildCodebaseSyncUrl", () => {
+	it("targets the codebase-scoped upload boundary", () => {
+		expect(
+			buildCodebaseSyncUrl("https://prdfy.example", "cb_1", "manifest"),
+		).toBe("https://prdfy.example/api/v1/codebases/cb_1/codebase/manifest");
+	});
+
+	it("encodes the codebase id", () => {
+		expect(buildCodebaseSyncUrl("https://prdfy.example", "a/b", "files")).toBe(
+			"https://prdfy.example/api/v1/codebases/a%2Fb/codebase/files",
+		);
 	});
 });

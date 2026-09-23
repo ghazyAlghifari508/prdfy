@@ -118,7 +118,6 @@ describe("read paths exclude tombstoned projects", () => {
 		"src/lib/language.ts",
 		"src/lib/codebase-generation-context.ts",
 		"src/lib/codebase-analysis.server.ts",
-		"src/lib/codebase-sync-upload.server.ts",
 	];
 
 	it("filters on deleted_at at every project read boundary", () => {

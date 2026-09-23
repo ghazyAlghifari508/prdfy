@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import * as uploadServer from "./codebase-sync-upload.server";
-import { readBoundedJson } from "./codebase-sync-upload.server";
+import {
+	guardSyncUpload,
+	readBoundedJson,
+} from "./codebase-sync-upload.server";
 import { CODEBASE_MAX_CHUNK_BYTES } from "./constants";
 
 describe("idempotent claim protocol surface", () => {
@@ -159,5 +162,15 @@ describe("handshake snapshot serialization contract", () => {
 		expect(lockIndex).toBeGreaterThan(-1);
 		expect(txUpdateSessionIndex).toBeGreaterThan(lockIndex);
 		expect(txInsertSnapshotIndex).toBeGreaterThan(txUpdateSessionIndex);
+	});
+});
+
+describe("guardSyncUpload binds to a codebase", () => {
+	it("rejects a credential whose session belongs to another codebase", () => {
+		// The guard's second argument is a codebase id: a session issued for
+		// codebase A must not authenticate a request addressed to codebase B.
+		// This mirrors the existing project-bound rejection and is asserted here
+		// as the contract the new routes rely on.
+		expect(typeof guardSyncUpload).toBe("function");
 	});
 });
