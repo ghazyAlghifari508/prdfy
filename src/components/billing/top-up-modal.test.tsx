@@ -34,8 +34,8 @@ describe("TopUpModal", () => {
 	it("renders dialog when open is true with package and price details", () => {
 		render(<TopUpModal open={true} onOpenChange={vi.fn()} />);
 		expect(screen.getByText("Isi Ulang Kredit")).toBeDefined();
-		expect(screen.getByText(/15 Kredit/)).toBeDefined();
-		expect(screen.getByText(/20\.000/)).toBeDefined();
+		expect(screen.getAllByText(/15 Kredit/).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/20\.000/).length).toBeGreaterThan(0);
 		expect(
 			screen.getByRole("button", { name: /Beli 15 Kredit/i }),
 		).toBeDefined();
@@ -60,6 +60,33 @@ describe("TopUpModal", () => {
 				expect.objectContaining({
 					method: "POST",
 					body: JSON.stringify({ planId: "topup-15" }),
+				}),
+			);
+		});
+	});
+
+	it("allows selecting a larger top-up package", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => ({
+				redirect_url: "https://app.sandbox.midtrans.com/snap/v2/vtweb/mock",
+			}),
+		});
+		global.fetch = fetchMock;
+
+		render(<TopUpModal open={true} onOpenChange={vi.fn()} />);
+		const package40 = screen.getByText(/Paket 40 Kredit/);
+		fireEvent.click(package40);
+
+		const buyBtn = screen.getByRole("button", { name: /Beli 40 Kredit/i });
+		fireEvent.click(buyBtn);
+
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledWith(
+				"/api/payments/create",
+				expect.objectContaining({
+					method: "POST",
+					body: JSON.stringify({ planId: "topup-40" }),
 				}),
 			);
 		});

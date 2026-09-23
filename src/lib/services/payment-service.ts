@@ -13,13 +13,18 @@
  * Rows whose current_period_end stays NULL are legacy one-time purchases
  * honored until their credits run out.
  */
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import {
 	canPurchaseTopUp,
 	computePurchaseGrant,
 	resolveSubscriptionState,
 } from "@/lib/billing";
-import { ADAPTIVE_CREDIT_PRICING, TOPUP_SKU } from "@/lib/constants";
+import {
+	ADAPTIVE_CREDIT_PRICING,
+	findTopUpPackage,
+	TOPUP_PACKAGES,
+	TOPUP_SKU,
+} from "@/lib/constants";
 import { prdFyPlans } from "@/lib/pricing-data";
 import type { Plan } from "@/types/database";
 
@@ -221,7 +226,7 @@ export function creditsForPlan(plan: Plan): number {
 
 /** Routing discriminator (spec §3): key off the stored SKU, not order prefixes. */
 export function isTopUpOrder(planValue: string | null | undefined): boolean {
-	return planValue === TOPUP_SKU.id;
+	return Boolean(findTopUpPackage(planValue));
 }
 
 /**
@@ -246,19 +251,27 @@ export async function getTopUpCreditsUsedThisPeriod(
 		.limit(1);
 	if (!sub?.start || !sub?.end) return 0;
 
-	const [row] = await db
-		.select({ n: sql<number>`count(*)::int` })
+	const rows = await db
+		.select({ plan: payments.plan })
 		.from(payments)
 		.where(
 			and(
 				eq(payments.userId, userId),
 				eq(payments.status, "success"),
-				eq(payments.plan, TOPUP_SKU.id),
+				inArray(
+					payments.plan,
+					TOPUP_PACKAGES.map((p) => p.id),
+				),
 				gte(payments.createdAt, sub.start),
 				lte(payments.createdAt, sub.end),
 			),
 		);
-	return (row?.n ?? 0) * TOPUP_SKU.credits;
+	let total = 0;
+	for (const r of rows) {
+		const pkg = findTopUpPackage(r.plan);
+		if (pkg) total += pkg.credits;
+	}
+	return total;
 }
 
 /**
@@ -413,8 +426,8 @@ export async function applyTopUpSuccess(orderId: string) {
 		}
 
 		// Defensive: only genuine top-up orders may take this path.
-		if (payment.plan !== TOPUP_SKU.id || payment.amount !== TOPUP_SKU.priceIdr)
-			return null;
+		const pkg = findTopUpPackage(payment.plan);
+		if (!pkg || payment.amount !== pkg.priceIdr) return null;
 
 		const now = new Date();
 		const [sub] = await tx
@@ -459,7 +472,7 @@ export async function applyTopUpSuccess(orderId: string) {
 		await tx
 			.update(subscriptions)
 			.set({
-				credits: sql`${subscriptions.credits} + ${TOPUP_SKU.credits}`,
+				credits: sql`${subscriptions.credits} + ${pkg.credits}`,
 				updatedAt: now,
 			})
 			.where(eq(subscriptions.id, sub.id));
@@ -468,7 +481,7 @@ export async function applyTopUpSuccess(orderId: string) {
 			id: crypto.randomUUID(),
 			userId: payment.userId,
 			operationId: null,
-			amount: TOPUP_SKU.credits,
+			amount: pkg.credits,
 			entryType: "grant",
 			sourceCategory: "system_grant",
 			pricingVersion: ADAPTIVE_CREDIT_PRICING.version,

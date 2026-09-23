@@ -97,10 +97,10 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
 								type="button"
 								onClick={toggleStreamerMode}
 								className={cn(
-									"flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
+									"flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-[510] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fog/40",
 									isStreamerMode
-										? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
-										: "border-graphite bg-obsidian text-fog hover:border-mist/30 hover:text-snow",
+										? "border-fog/50 bg-white/10 text-snow"
+										: "border-graphite bg-transparent text-fog hover:border-fog/40 hover:text-snow",
 								)}
 								title={
 									isStreamerMode
@@ -114,9 +114,9 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
 								</span>
 								<span
 									className={cn(
-										"rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+										"rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
 										isStreamerMode
-											? "bg-emerald-500/20 text-emerald-300"
+											? "bg-white/20 text-snow"
 											: "bg-white/5 text-fog",
 									)}
 								>

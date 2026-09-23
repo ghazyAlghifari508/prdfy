@@ -188,7 +188,7 @@ export function SyncStatus({
 	return (
 		<div className="w-full animate-enter flex flex-col gap-6">
 			{/* Page Head matching existing-codebase-flow.html screen 03 */}
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div className="flex flex-col gap-3">
 				<div>
 					<div className="text-[11px] font-mono tracking-widest uppercase text-fog mb-2">
 						PROJECT / {projectName.toUpperCase()}
@@ -202,28 +202,6 @@ export function SyncStatus({
 						server yang sebenarnya.
 					</p>
 				</div>
-				<span className="inline-flex items-center gap-2 rounded-full border border-iron bg-charcoal/80 px-3 py-1.5 text-xs text-fog backdrop-blur-md self-start sm:self-auto">
-					<span
-						className={`h-1.5 w-1.5 rounded-full ${
-							isReady
-								? "bg-emerald-400"
-								: isConnected
-									? "bg-blue-400"
-									: isFailed || isExpired
-										? "bg-crimson"
-										: "bg-amber-400"
-						}`}
-					/>
-					{isReady
-						? "Sync selesai"
-						: isConnected
-							? "Agent terhubung"
-							: isExpired
-								? "Sesi kedaluwarsa"
-								: isFailed
-									? "Sync gagal"
-									: "Menunggu koneksi"}
-				</span>
 			</div>
 
 			{/* Main Status Panel */}
@@ -243,15 +221,19 @@ export function SyncStatus({
 						</p>
 					</div>
 					<span className="font-mono text-xs text-fog">
-						{isReady
-							? "Siap"
-							: isAnalyzing
-								? "Menganalisis"
-								: isUploading
-									? "Mengupload"
-									: isConnected
-										? "Terhubung"
-										: "Menunggu"}
+						{isFailed
+							? "Sync gagal"
+							: isExpired
+								? "Sesi kedaluwarsa"
+								: isReady
+									? "Siap"
+									: isAnalyzing
+										? "Menganalisis"
+										: isUploading
+											? "Mengupload"
+											: isConnected
+												? "Terhubung"
+												: "Menunggu"}
 					</span>
 				</div>
 

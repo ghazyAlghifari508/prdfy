@@ -242,16 +242,6 @@ export function Navbar() {
 							>
 								History
 							</Link>
-							<Link
-								to="/codebases"
-								className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-									pathname.startsWith("/codebases")
-										? "bg-white/10 text-snow"
-										: "text-fog hover:bg-white/5 hover:text-snow"
-								}`}
-							>
-								Codebase
-							</Link>
 						</div>
 					)}
 				</div>
@@ -438,7 +428,7 @@ export function Navbar() {
 										type="button"
 										onClick={() => setIsTopUpOpen(true)}
 										aria-label="Isi ulang kredit"
-										className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
+										className="flex h-8 items-center gap-1.5 rounded-md border border-graphite bg-transparent px-2.5 font-inter text-xs font-[510] text-fog transition-colors hover:border-fog/50 hover:bg-white/5 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fog/40"
 									>
 										<CreditCard size={13} aria-hidden />
 										<span>Top Up</span>
@@ -548,7 +538,7 @@ export function Navbar() {
 									type="button"
 									onClick={() => setIsTopUpOpen(true)}
 									aria-label="Isi ulang kredit"
-									className="flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
+									className="flex h-8 items-center gap-1.5 rounded-md border border-graphite bg-transparent px-2.5 font-inter text-xs font-[510] text-fog transition-colors hover:border-fog/50 hover:bg-white/5 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-fog/40"
 								>
 									<CreditCard size={13} aria-hidden />
 									<span>Top Up</span>
@@ -577,13 +567,6 @@ export function Navbar() {
 						onClick={() => setIsMobileMenuOpen(false)}
 					>
 						History
-					</Link>
-					<Link
-						to="/codebases"
-						className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-[510] text-snow hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
-						onClick={() => setIsMobileMenuOpen(false)}
-					>
-						Codebase
 					</Link>
 					<Link
 						to="/faq"

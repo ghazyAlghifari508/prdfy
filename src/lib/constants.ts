@@ -1,21 +1,15 @@
 import { COMBO_MODEL_ID } from "@/lib/model-config";
 
 function resolveRouterBaseUrl(): string {
-	const raw = (
-		process.env.NINE_ROUTER_URL || "http://localhost:20128"
-	).trim();
+	const raw = (process.env.NINE_ROUTER_URL || "http://localhost:20128").trim();
 	let parsed: URL;
 	try {
 		parsed = new URL(raw);
 	} catch {
-		throw new Error(
-			`NINE_ROUTER_URL is not a valid absolute URL: "${raw}"`,
-		);
+		throw new Error(`NINE_ROUTER_URL is not a valid absolute URL: "${raw}"`);
 	}
 	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-		throw new Error(
-			`NINE_ROUTER_URL must use http(s): "${parsed.protocol}"`,
-		);
+		throw new Error(`NINE_ROUTER_URL must use http(s): "${parsed.protocol}"`);
 	}
 	// Normalize the trailing slash so every environment builds the same
 	// provider path (a trailing slash would otherwise produce `//v1`).
@@ -181,17 +175,53 @@ export const REMINDER_SCHEDULE_DAYS = [1, 7, 14] as const;
 export const APP_TIME_ZONE = "Asia/Jakarta";
 
 // === Credit top-up (mid-period purchase) ===
-// Single universal SKU: bought by ACTIVE Pro/Hengker subscribers only
+// Multi-tier SKUs: bought by ACTIVE Pro/Hengker subscribers only
 // (state active_paid). Credits join the SAME pool as the monthly allocation
 // (shared credits/creditsUsed) and are forfeited together at period end.
 // Buying NEVER extends the current period. Anti-undercut cap per period =
 // PLAN_CREDITS[plan]; tracked from successful topup payments within
 // [current_period_start, current_period_end] (spec topup-design §4).
-export const TOPUP_SKU = {
-	id: "topup-15",
-	credits: 15,
-	priceIdr: 20000,
-} as const;
+export interface TopUpPackage {
+	id: string;
+	name: string;
+	credits: number;
+	priceIdr: number;
+	description: string;
+	recommended?: boolean;
+}
+
+export const TOPUP_PACKAGES: readonly TopUpPackage[] = [
+	{
+		id: "topup-15",
+		name: "Paket 15 Kredit",
+		credits: 15,
+		priceIdr: 20000,
+		description: "Tambahan 15 kredit instan untuk sprint kecil",
+	},
+	{
+		id: "topup-40",
+		name: "Paket 40 Kredit",
+		credits: 40,
+		priceIdr: 50000,
+		description: "Pilihan terbaik untuk eksplorasi banyak fitur",
+		recommended: true,
+	},
+	{
+		id: "topup-90",
+		name: "Paket 90 Kredit",
+		credits: 90,
+		priceIdr: 100000,
+		description: "Kapasitas penuh untuk proyek besar & enterprise",
+	},
+] as const;
+
+export const TOPUP_SKU = TOPUP_PACKAGES[0];
+
+export function findTopUpPackage(
+	planId: string | null | undefined,
+): TopUpPackage | undefined {
+	return TOPUP_PACKAGES.find((p) => p.id === planId);
+}
 
 // Versioned product-level pricing inputs for adaptive credit quotes.
 export const ADAPTIVE_CREDIT_PRICING = {
