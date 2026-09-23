@@ -162,6 +162,34 @@
       "when": 1790095000000,
       "tag": "0022_payments_subscriptions_timestamptz",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790131136997,
+      "tag": "0023_greedy_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790131482112,
+      "tag": "0024_backfill_codebases",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790132948552,
+      "tag": "0025_lying_wraith",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790154140731,
+      "tag": "0026_jazzy_klaw",
+      "breakpoints": true
     }
   ]
 }

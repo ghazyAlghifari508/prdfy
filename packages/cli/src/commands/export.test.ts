@@ -65,6 +65,7 @@ describe("exportRulesCommand", () => {
 		expect(md).toContain("User bisa login via Google OAuth");
 		expect(md).toContain("ONLY implement features explicitly listed");
 		expect(md).toContain("DO NOT add features");
+		expect(md).toContain("external credentials/services");
 	});
 
 	it("falls back to first 50 lines of PRD when no stack/arch section found", async () => {

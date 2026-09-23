@@ -7,7 +7,7 @@
 // === Credential/scope separation (carry-over Task 4 → 5) ===
 // These endpoints intentionally do NOT call `apiKeyAuth`/`hasScope` with
 // `CODEBASE_SYNC_SCOPE`. The Bearer sync credential is authenticated ONLY
-// against `codebase_sync_sessions.credential_hash` (SHA-256, project-bound):
+// against `codebase_sync_sessions.credential_hash` (SHA-256, codebase-bound):
 // an ordinary API key (`api_keys.key` hash) never matches a credential hash
 // and vice versa, so the two credential stores are structurally disjoint.
 // The sync credential embodies the single `codebase:sync` capability by
@@ -17,13 +17,13 @@
 // project binding + session binding + usability checks below ARE the
 // capability enforcement for this boundary.
 
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	codebaseSnapshots,
 	codebaseSyncIdempotencyKeys,
 	codebaseSyncSessions,
-	projects,
+	codebases,
 	subscriptions,
 } from "@/db/schema";
 import type { Plan } from "@/types/database";
@@ -31,7 +31,6 @@ import {
 	assertAttemptBinding,
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
 	getSessionUsability,
-	isSyncCapableProject,
 	requireSupportedCliVersion,
 	SyncBindingError,
 } from "./codebase-sync";
@@ -138,13 +137,13 @@ export async function readBoundedJson(
 	}
 }
 
-// Full per-request guard: Bearer sync credential + project/session binding +
-// usability + ownership + sync-capable mode + rate limit + fail-closed CLI
+// Full per-request guard: Bearer sync credential + codebase/session binding +
+// usability + ownership + rate limit + fail-closed CLI
 // version check + bound snapshot lookup. Every upload endpoint runs this
 // before touching snapshot data, so no check can be forgotten per-route.
 export async function guardSyncUpload(
 	request: Request,
-	projectId: string,
+	codebaseId: string,
 	body: { sessionId: string; attemptId: string },
 	options: { rateLimit?: boolean } = {},
 ): Promise<GuardResult> {
@@ -152,7 +151,7 @@ export async function guardSyncUpload(
 	if (!rawToken)
 		return fail(401, "Invalid sync credential", "INVALID_SYNC_CREDENTIAL");
 
-	// Credential lookup is project-bound: a token issued for one project
+	// Credential lookup is codebase-bound: a token issued for one codebase
 	// never authenticates another (uniform 401, no oracle). The raw token is
 	// hashed immediately and never logged or stored.
 	const [session] = await db
@@ -161,7 +160,7 @@ export async function guardSyncUpload(
 		.where(
 			and(
 				eq(codebaseSyncSessions.credentialHash, hashSyncToken(rawToken)),
-				eq(codebaseSyncSessions.projectId, projectId),
+				eq(codebaseSyncSessions.codebaseId, codebaseId),
 			),
 		)
 		.limit(1);
@@ -200,25 +199,15 @@ export async function guardSyncUpload(
 		return fail(401, "Invalid sync credential", "INVALID_SYNC_CREDENTIAL");
 	}
 
-	// Ownership flows through the credential owner; the project must still
-	// exist, belong to that owner, and be an existing-codebase project.
-	const [project] = await db
-		.select({
-			id: projects.id,
-			userId: projects.userId,
-			projectMode: projects.projectMode,
-		})
-		.from(projects)
-		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
+	// Ownership flows through the credential owner; the codebase must still
+	// exist and belong to that owner.
+	const [codebase] = await db
+		.select({ id: codebases.id, userId: codebases.userId })
+		.from(codebases)
+		.where(eq(codebases.id, codebaseId))
 		.limit(1);
-	if (!project || project.userId !== session.userId)
+	if (!codebase || codebase.userId !== session.userId)
 		return fail(401, "Invalid sync credential", "INVALID_SYNC_CREDENTIAL");
-	if (!isSyncCapableProject(project))
-		return fail(
-			400,
-			"Project is not an existing-codebase project",
-			"PROJECT_MODE_MISMATCH",
-		);
 
 	const [sub] = await db
 		.select({ plan: subscriptions.plan })

@@ -55,10 +55,6 @@ describe("project deletion contract", () => {
 			"codebaseAskHandoffs",
 			"codebaseGenerationContexts",
 			"codebaseAnalyses",
-			"codebaseSnapshotFiles",
-			"codebaseSyncIdempotencyKeys",
-			"codebaseSnapshots",
-			"codebaseSyncSessions",
 		]) {
 			expect(source).toContain(`delete(${table})`);
 		}
@@ -91,7 +87,7 @@ describe("read paths exclude tombstoned projects", () => {
 		"src/routes/task/$id.tsx",
 		"src/routes/kanban/$id.tsx",
 		"src/routes/ask/$id.tsx",
-		"src/routes/codebase/$id.tsx",
+		"src/routes/codebases/$id.tsx",
 		"src/routes/prd/share/$token.tsx",
 		"src/lib/api-key-auth.ts",
 		"src/routes/api/chat.ts",
@@ -107,8 +103,8 @@ describe("read paths exclude tombstoned projects", () => {
 		"src/routes/api/ask/options.ts",
 		"src/routes/api/export/prd.ts",
 		"src/routes/api/export/zip.ts",
-		"src/routes/api/codebase/$projectId/status.ts",
-		"src/routes/api/codebase/$projectId/session.ts",
+		"src/routes/api/codebases/$codebaseId/status.ts",
+		"src/routes/api/codebases/$codebaseId.ts",
 		"src/routes/api/v1/projects/$id/codebase/analysis.ts",
 		"src/routes/api/v1/projects/$id/codebase/sync.ts",
 		"src/lib/services/chat-service.ts",
@@ -118,7 +114,6 @@ describe("read paths exclude tombstoned projects", () => {
 		"src/lib/language.ts",
 		"src/lib/codebase-generation-context.ts",
 		"src/lib/codebase-analysis.server.ts",
-		"src/lib/codebase-sync-upload.server.ts",
 	];
 
 	it("filters on deleted_at at every project read boundary", () => {

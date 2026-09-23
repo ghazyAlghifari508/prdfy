@@ -11,6 +11,7 @@ import { CODEBASE_SYNC_POLL_INTERVAL_MS } from "@/lib/constants";
 
 interface SyncStatusProps {
 	projectId: string;
+	statusPath?: string;
 	sessionId?: string;
 	projectName?: string;
 	status?: SyncStatusResponse | null;
@@ -24,6 +25,7 @@ interface SyncStatusProps {
 
 export function SyncStatus({
 	projectId,
+	statusPath,
 	sessionId,
 	projectName = "Project",
 	status: propStatus,
@@ -61,15 +63,18 @@ export function SyncStatus({
 				const query = sessionId
 					? `?sessionId=${encodeURIComponent(sessionId)}`
 					: "";
-				const res = await fetch(
-					`/api/codebase/${encodeURIComponent(projectId)}/status${query}`,
-				);
+				const path =
+					statusPath ?? `/api/codebase/${encodeURIComponent(projectId)}/status`;
+				const res = await fetch(`${path}${query}`);
 				const json = (await res.json().catch(() => null)) as unknown;
 				if (cancelled) return;
 				if (!res.ok) {
 					const message =
-						json && typeof json === "object" && "error" in json
-							? String((json as { error: unknown }).error)
+						typeof json === "object" &&
+						json !== null &&
+						"error" in json &&
+						typeof json.error === "string"
+							? json.error
 							: "Gagal membaca status sync.";
 					setError(message);
 					onStatusRef.current?.(null);
@@ -109,7 +114,7 @@ export function SyncStatus({
 				timeoutRef.current = null;
 			}
 		};
-	}, [projectId, sessionId, pollIntervalMs, pollInternally]);
+	}, [projectId, statusPath, sessionId, pollIntervalMs, pollInternally]);
 
 	const s = status?.status ?? "waiting_for_cli";
 	const isFailed = s === "failed";
@@ -122,10 +127,7 @@ export function SyncStatus({
 		!isExpired &&
 		(s === "ready" ||
 			(status?.analysisStatus === "ready" && s !== "waiting_for_cli"));
-	const isAnalyzing =
-		s === "analyzing" ||
-		status?.analysisStatus === "pending" ||
-		(s === "uploaded" && !isReady && !status?.analysisStatus);
+	const isAnalyzing = s === "analyzing" || status?.analysisStatus === "pending";
 	const isUploading = s === "uploading";
 	const isConnected = s !== "waiting_for_cli" && !isFailed && !isExpired;
 
@@ -142,7 +144,7 @@ export function SyncStatus({
 	const analysisDone = isReady;
 	const analysisFailed = status?.analysisStatus === "failed";
 
-	const showRetry = isFailed || isExpired;
+	const showRetry = isReady || isFailed || isExpired;
 	const showAnalysisRetry = analysisFailed;
 
 	type StageState = "done" | "active" | "failed" | "pending";
@@ -179,7 +181,7 @@ export function SyncStatus({
 		? "failed"
 		: analysisDone
 			? "done"
-			: isConnected
+			: isAnalyzing
 				? "active"
 				: "pending";
 
@@ -204,12 +206,12 @@ export function SyncStatus({
 					<span
 						className={`h-1.5 w-1.5 rounded-full ${
 							isReady
-								? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+								? "bg-emerald-400"
 								: isConnected
-									? "bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)]"
+									? "bg-blue-400"
 									: isFailed || isExpired
-										? "bg-crimson shadow-[0_0_8px_rgba(235,87,87,0.8)]"
-										: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]"
+										? "bg-crimson"
+										: "bg-amber-400"
 						}`}
 					/>
 					{isReady
@@ -225,7 +227,7 @@ export function SyncStatus({
 			</div>
 
 			{/* Main Status Panel */}
-			<div className="rounded-xl border border-graphite bg-charcoal/90 shadow-2xl backdrop-blur-md overflow-hidden">
+			<div className="rounded-xl border border-graphite bg-charcoal/90 overflow-hidden">
 				{/* Panel Head */}
 				<div className="flex items-center justify-between border-b border-graphite p-5 sm:p-6">
 					<div>
@@ -298,7 +300,9 @@ export function SyncStatus({
 									? "Analisis codebase gagal"
 									: analysisDone
 										? "Analisis codebase selesai"
-										: "Menyusun analisis codebase"}
+										: isAnalyzing
+											? "Menyusun analisis codebase"
+											: "Menunggu analisis codebase"}
 							</span>
 						</div>
 					</div>

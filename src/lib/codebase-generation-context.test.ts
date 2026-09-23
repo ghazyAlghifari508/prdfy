@@ -13,6 +13,7 @@ import {
 	parseStoredHandoffAnswers,
 	sanitizeAskHandoff,
 	sanitizeAskHandoffState,
+	selectNewestReadyAnalysis,
 	selectReadyAnalysis,
 	truncateText,
 } from "./codebase-generation-context";
@@ -459,5 +460,43 @@ describe("formatGenerationContext", () => {
 		expect(formatted).toContain("Relevant modules/files: -");
 		expect(formatted).toContain("Known constraints: -");
 		expect(formatted).toContain("Codebase analysis: -");
+	});
+});
+
+describe("selectNewestReadyAnalysis", () => {
+	it("returns the newest ready analysis", () => {
+		expect(
+			selectNewestReadyAnalysis([
+				{ id: "a1", status: "ready", createdAt: "2026-01-01T00:00:00.000Z" },
+				{ id: "a2", status: "ready", createdAt: "2026-02-01T00:00:00.000Z" },
+			])?.id,
+		).toBe("a2");
+	});
+
+	it("skips failed and pending rows even when they are newer", () => {
+		expect(
+			selectNewestReadyAnalysis([
+				{ id: "ready", status: "ready", createdAt: "2026-01-01T00:00:00.000Z" },
+				{
+					id: "failed",
+					status: "failed",
+					createdAt: "2026-03-01T00:00:00.000Z",
+				},
+				{
+					id: "pending",
+					status: "pending",
+					createdAt: "2026-04-01T00:00:00.000Z",
+				},
+			])?.id,
+		).toBe("ready");
+	});
+
+	it("returns null when no analysis is ready", () => {
+		expect(selectNewestReadyAnalysis([])).toBeNull();
+		expect(
+			selectNewestReadyAnalysis([
+				{ id: "f", status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+			]),
+		).toBeNull();
 	});
 });

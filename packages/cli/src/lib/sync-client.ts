@@ -1,7 +1,7 @@
 /**
  * Codebase sync transport for `prdfy codebase sync`.
  *
- * Talks to the CLI-facing sync boundary (`/api/v1/projects/:id/codebase/*`,
+ * Talks to the CLI-facing sync boundary (`/api/v1/codebases/:id/codebase/*`,
  * implemented server-side in Tasks 4-5; tests use mocked responses):
  *
  * - `POST .../sync` — session handshake, returns the bound session/attempt.
@@ -30,6 +30,16 @@ export const CODEBASE_CLI_VERSION = CLI_VERSION;
 export const SYNC_MAX_ATTEMPTS = 3;
 /** Reserved bytes for the request envelope (ids/keys) on top of payloads. */
 export const SYNC_ENVELOPE_RESERVE_BYTES = 1024;
+
+/** Codebase-scoped upload boundary; the CLI flag remains `--project-id`. */
+export function buildCodebaseSyncUrl(
+	apiBaseUrl: string,
+	codebaseId: string,
+	suffix: string,
+): string {
+	const base = apiBaseUrl.replace(/\/+$/, "");
+	return `${base}/api/v1/codebases/${encodeURIComponent(codebaseId)}/codebase/${suffix}`;
+}
 
 export interface SyncClientOptions {
 	apiUrl: string;
@@ -253,11 +263,12 @@ export function createSyncClient(options: SyncClientOptions): SyncClient {
 		suffix: "sync" | "manifest" | "files" | "complete",
 		body: unknown,
 	): Promise<T> {
-		return apiRequest<T>(`/api/v1/projects/${projectId}/codebase/${suffix}`, {
+		const endpoint = new URL(buildCodebaseSyncUrl(apiUrl, projectId, suffix));
+		return apiRequest<T>(`${endpoint.pathname}${endpoint.search}`, {
 			method: "POST",
 			body,
 			authToken: syncToken,
-			baseUrl: apiUrl,
+			baseUrl: endpoint.origin,
 			timeoutMs,
 			maxBodyBytes: CODEBASE_MAX_CHUNK_BYTES,
 		});

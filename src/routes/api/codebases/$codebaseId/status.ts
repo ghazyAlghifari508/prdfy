@@ -2,21 +2,20 @@ import { createFileRoute } from "@tanstack/react-router";
 import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 // Server-import exception: top-level `@/db` and schema imports are correct
 // here — server handlers only, no client component (neighboring
-// `/api/codebase` pattern). Never import this module from client code.
+// `/api/codebases` pattern). Never import this module from client code.
 import { db } from "@/db";
 import {
 	codebaseAnalyses,
 	codebaseSnapshots,
 	codebaseSyncSessions,
+	codebases,
 	projects,
 	subscriptions,
 } from "@/db/schema";
 import {
 	CODEBASE_SYNC_RATE_LIMIT_ACTION,
 	type CodebaseSyncStatus,
-	canAccessSyncSession,
 	getSessionUsability,
-	isSyncCapableProject,
 	type SyncStatusResponse,
 	sanitizeSyncErrorCode,
 	sanitizeSyncErrorMessage,
@@ -26,7 +25,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/session";
 import type { Plan } from "@/types/database";
 
-export const Route = createFileRoute("/api/codebase/$projectId/status")({
+export const Route = createFileRoute("/api/codebases/$codebaseId/status")({
 	server: {
 		handlers: {
 			// Browser polling (2000ms, no SSE in MVP): persisted status plus
@@ -37,7 +36,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 				params,
 			}: {
 				request: Request;
-				params: { projectId: string };
+				params: { codebaseId: string };
 			}) => {
 				let user: { id: string };
 				try {
@@ -46,11 +45,11 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					return Response.json({ error: "Unauthorized" }, { status: 401 });
 				}
 				// The whole operational path runs guarded: subscription,
-				// project, session, snapshot, and analysis reads (plus lazy
+				// codebase, session, snapshot, and analysis reads (plus lazy
 				// expiry writes) must surface the documented JSON error
 				// contract, never an uncontrolled framework error.
 				try {
-					const { projectId } = params;
+					const { codebaseId } = params;
 
 					const [sub] = await db
 						.select({ plan: subscriptions.plan })
@@ -73,51 +72,69 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 							{ error: "Terlalu banyak permintaan", retryAfter: 60 },
 							{ status: 429 },
 						);
-					const [project] = await db
-						.select({ id: projects.id, projectMode: projects.projectMode })
-						.from(projects)
+					const [codebase] = await db
+						.select({ id: codebases.id })
+						.from(codebases)
 						.where(
-							and(
-								eq(projects.id, projectId),
-								eq(projects.userId, user.id),
-								isNull(projects.deletedAt),
-							),
+							and(eq(codebases.id, codebaseId), eq(codebases.userId, user.id)),
 						)
 						.limit(1);
-					if (!project)
+					if (!codebase)
 						return Response.json(
-							{ error: "Project tidak ditemukan" },
+							{ error: "Codebase tidak ditemukan" },
 							{ status: 404 },
-						);
-					if (!isSyncCapableProject(project))
-						return Response.json(
-							{
-								error: "Project ini bukan project existing-codebase",
-								code: "PROJECT_MODE_MISMATCH",
-							},
-							{ status: 400 },
 						);
 
 					const url = new URL(request.url);
 					const requestedSessionId = url.searchParams.get("sessionId");
+					const requestedProjectId = url.searchParams.get("projectId");
+					let analysisProjectId: string | null = null;
+					if (requestedProjectId) {
+						const [project] = await db
+							.select({ id: projects.id })
+							.from(projects)
+							.where(
+								and(
+									eq(projects.id, requestedProjectId),
+									eq(projects.codebaseId, codebaseId),
+									eq(projects.userId, user.id),
+									isNull(projects.deletedAt),
+								),
+							)
+							.limit(1);
+						if (!project)
+							return Response.json(
+								{ error: "Project tidak ditemukan" },
+								{ status: 404 },
+							);
+						analysisProjectId = project.id;
+					}
 
 					let session = null;
 					if (requestedSessionId) {
 						const [row] = await db
-							.select()
+							.select({ session: codebaseSyncSessions })
 							.from(codebaseSyncSessions)
-							.where(eq(codebaseSyncSessions.id, requestedSessionId))
+							.innerJoin(
+								codebases,
+								eq(codebaseSyncSessions.codebaseId, codebases.id),
+							)
+							.where(
+								and(
+									eq(codebaseSyncSessions.id, requestedSessionId),
+									eq(codebases.id, codebaseId),
+									eq(codebases.userId, user.id),
+								),
+							)
 							.limit(1);
-						if (row && canAccessSyncSession(row, user.id, projectId)) {
-							session = row;
-						}
+						if (row) session = row.session;
 					} else {
 						const [row] = await db
 							.select()
 							.from(codebaseSyncSessions)
 							.where(
 								and(
-									eq(codebaseSyncSessions.projectId, projectId),
+									eq(codebaseSyncSessions.codebaseId, codebaseId),
 									eq(codebaseSyncSessions.userId, user.id),
 								),
 							)
@@ -137,7 +154,10 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					// after our read, and this write must not clobber that.
 					let status = session.status as CodebaseSyncStatus;
 					let sessionUpdatedAt = session.updatedAt;
-					const usability = getSessionUsability(session);
+					const usability = getSessionUsability({
+						...session,
+						projectId: codebaseId,
+					});
 					if (!usability.usable && usability.code === "SYNC_SESSION_EXPIRED") {
 						const [expired] = await db
 							.update(codebaseSyncSessions)
@@ -183,7 +203,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					let analysisStatus: "pending" | "ready" | "failed" | undefined;
 					let errorCode: string | null = null;
 					let errorMessage: string | null = null;
-					if (snapshot) {
+					if (snapshot && analysisProjectId) {
 						const [analysis] = await db
 							.select({
 								id: codebaseAnalyses.id,
@@ -192,7 +212,12 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 								errorMessage: codebaseAnalyses.errorMessage,
 							})
 							.from(codebaseAnalyses)
-							.where(eq(codebaseAnalyses.snapshotId, snapshot.id))
+							.where(
+								and(
+									eq(codebaseAnalyses.snapshotId, snapshot.id),
+									eq(codebaseAnalyses.projectId, analysisProjectId),
+								),
+							)
 							.orderBy(desc(codebaseAnalyses.createdAt))
 							.limit(1);
 						if (analysis) {
@@ -222,7 +247,7 @@ export const Route = createFileRoute("/api/codebase/$projectId/status")({
 					const toIso = (value: Date | null | undefined): string | undefined =>
 						value ? value.toISOString() : undefined;
 					const response: SyncStatusResponse = {
-						projectId,
+						projectId: codebaseId,
 						sessionId: session.id,
 						status,
 						snapshotId: snapshot?.id ?? null,

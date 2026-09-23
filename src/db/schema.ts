@@ -310,6 +310,11 @@ export const projects = pgTable(
 		// Unrelated to `mode` (Ask generation mode "ai_auto" | "manual").
 		// Existing projects default to "greenfield" (greenfield flow unchanged).
 		projectMode: text("project_mode").notNull().default("greenfield"),
+		// Existing-codebase projects belong to a codebase; greenfield stays null.
+		// Nullable so greenfield rows and pre-migration rows remain valid.
+		codebaseId: text("codebase_id").references(() => codebases.id, {
+			onDelete: "set null",
+		}),
 		language: text("language").default("id"),
 		step: text("step").default("prd"), // prd, ac, task
 		acStatus: text("ac_status").default("pending"),
@@ -329,6 +334,7 @@ export const projects = pgTable(
 		index("projects_user_id_idx").on(t.userId),
 		// Active-project listing (History, admin, lookups) filters on both.
 		index("projects_user_id_deleted_at_idx").on(t.userId, t.deletedAt),
+		index("projects_codebase_id_idx").on(t.codebaseId),
 		uniqueIndex("projects_user_id_id_unique").on(t.userId, t.id),
 	],
 );
@@ -550,17 +556,41 @@ export const notificationPreferences = pgTable("notification_preferences", {
 // carries project + owner linkage with cascade delete so project deletion
 // removes sync data transactionally. Sync credentials persist as hashes only.
 
-// Sync session: one short-lived project-scoped credential per attempt.
+// Codebase: one user-owned repository. Sync sessions and snapshots belong to
+// the codebase, not to a project, so a repository is synced once and reused by
+// every feature planned against it. Each feature stays a normal project.
+export const codebases = pgTable(
+	"codebases",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		createdAt: timestamp("created_at").defaultNow(),
+		updatedAt: timestamp("updated_at").defaultNow(),
+	},
+	(t) => [index("codebases_user_id_idx").on(t.userId)],
+);
+
+// Sync session: one short-lived codebase-scoped credential per attempt.
 export const codebaseSyncSessions = pgTable(
 	"codebase_sync_sessions",
 	{
 		id: text("id").primaryKey(),
-		projectId: text("project_id")
-			.notNull()
-			.references(() => projects.id, { onDelete: "cascade" }),
+		// Legacy project linkage for historical rows. New codebase-scoped
+		// sessions leave this unset; ownership flows via codebaseId.
+		projectId: text("project_id").references(() => projects.id, {
+			onDelete: "cascade",
+		}),
 		userId: text("user_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
+		// Owner of the sync attempt. Nullable until the migration backfill runs;
+		// `projectId` remains for historical rows and is no longer the owner key.
+		codebaseId: text("codebase_id").references(() => codebases.id, {
+			onDelete: "cascade",
+		}),
 		// SHA-256 hex of the raw sync credential. Raw value is never stored.
 		credentialHash: text("credential_hash").notNull(),
 		// Sync status: waiting_for_cli | connected | scanning | filtering |
@@ -577,6 +607,7 @@ export const codebaseSyncSessions = pgTable(
 	(t) => [
 		index("codebase_sync_sessions_project_id_idx").on(t.projectId),
 		index("codebase_sync_sessions_user_id_idx").on(t.userId),
+		index("codebase_sync_sessions_codebase_id_idx").on(t.codebaseId),
 	],
 );
 
@@ -585,12 +616,19 @@ export const codebaseSnapshots = pgTable(
 	"codebase_snapshots",
 	{
 		id: text("id").primaryKey(),
-		projectId: text("project_id")
-			.notNull()
-			.references(() => projects.id, { onDelete: "cascade" }),
+		// Legacy project linkage for historical rows. New codebase-scoped
+		// snapshots leave this unset; ownership flows via codebaseId.
+		projectId: text("project_id").references(() => projects.id, {
+			onDelete: "cascade",
+		}),
 		syncSessionId: text("sync_session_id")
 			.notNull()
 			.references(() => codebaseSyncSessions.id, { onDelete: "cascade" }),
+		// Owner of the snapshot. Nullable until the migration backfill runs;
+		// `projectId` remains for historical rows and is no longer the owner key.
+		codebaseId: text("codebase_id").references(() => codebases.id, {
+			onDelete: "cascade",
+		}),
 		branch: text("branch"),
 		commitSha: text("commit_sha"),
 		manifest: jsonb("manifest"),
@@ -605,6 +643,7 @@ export const codebaseSnapshots = pgTable(
 	(t) => [
 		index("codebase_snapshots_project_id_idx").on(t.projectId),
 		index("codebase_snapshots_sync_session_id_idx").on(t.syncSessionId),
+		index("codebase_snapshots_codebase_id_idx").on(t.codebaseId),
 	],
 );
 
@@ -717,9 +756,10 @@ export const codebaseGenerationContexts = pgTable(
 );
 
 // Ask handoff: authoritative server-side copy of the Ask answers/compiled
-// prompt for existing-codebase projects (one row per project, upserted on
-// submit). sessionStorage keeps UI continuity; this row survives refresh and
-// multi-device access. Greenfield projects never write here.
+// prompt for projects (one row per project, upserted on submit). Both
+// project modes (greenfield and existing_codebase) write here.
+// sessionStorage keeps UI continuity; this row survives refresh and
+// multi-device access.
 export const codebaseAskHandoffs = pgTable("codebase_ask_handoffs", {
 	projectId: text("project_id")
 		.primaryKey()

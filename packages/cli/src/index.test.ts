@@ -89,7 +89,7 @@ describe("prdfy codebase sync argv wiring", () => {
 		);
 		expect(handshakeCall).toBeDefined();
 		const [url, init] = handshakeCall as [string, RequestInit];
-		expect(url).toContain("/api/v1/projects/proj-wiring/codebase/sync");
+		expect(url).toContain("/api/v1/codebases/proj-wiring/codebase/sync");
 		expect((init.headers as Record<string, string>).Authorization).toBe(
 			"Bearer wiring-test-token",
 		);

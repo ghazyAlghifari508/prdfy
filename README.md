@@ -356,15 +356,15 @@ automatically. It is also excluded from the upload itself.
 
 - **Payload limits**: Maximum snapshot size is 50 MiB; individual files cannot exceed 1 MiB; chunks are transmitted in 256 KiB envelopes.
 - **Source retention**: Filtered text source context is stored securely and associated with the project snapshot for analysis and generation context.
-- **Project deletion**: Deleting a project permanently and transactionally removes all associated codebase sync sessions, snapshots, file chunks, and analyses.
+- **Project deletion**: Deleting a project permanently removes feature-owned artifacts (conversations, PRD/AC/task versions, handoffs, analyses). Codebase sync history belongs to the repository and is removed when the codebase itself is deleted.
 
 ### 5. Failure Recovery
 
 | Issue | Cause | Resolution |
 |---|---|---|
 | `CLI_UPDATE_REQUIRED` | CLI version is older than 2.0.0 | Run `npm install -g @ghazynabiel/prdfy` to update |
-| `INVALID_SYNC_CREDENTIAL` | Token expired (30 min) or wrong project | Click "Mulai sync baru" on the web page to issue a fresh session |
-| `SYNC_SESSION_ACTIVE` (409) | A sync session is already active in another tab | Click "Cabut sesi lama & buat baru" to revoke the previous session and issue a new one |
+| `INVALID_SYNC_CREDENTIAL` | Token expired (30 min) or wrong codebase | Click "Sync ulang" on the codebase page or open "Codebase" in the navbar to find a codebase |
+| `SYNC_SESSION_ACTIVE` (409) | A sync session is already active in another tab | Wait for the active sync session to finish, or click "Sync ulang" on the codebase page to issue a fresh session |
 | `SNAPSHOT_BLOCKED` | A file matching high-risk secret patterns was found | Add the file to `.prdfyignore` or redact sensitive tokens before syncing |
 | `SNAPSHOT_TOO_LARGE` | Repository exceeds 50 MiB or file exceeds 1 MiB | Add large assets or directories to `.prdfyignore` |
 | `Network / 5xx error` | Temporary connection or server timeout | The CLI automatically retries up to 3 times with identical idempotency keys |

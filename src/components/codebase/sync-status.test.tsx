@@ -119,6 +119,32 @@ describe("SyncStatus", () => {
 		expect(fetchMock.mock.calls.length).toBe(callsAfterReady);
 	});
 
+	it("offers and invokes sync retry from the ready state", () => {
+		const onRetrySync = vi.fn();
+		const c = renderStatus({
+			status: statusResponse({ status: "ready" }),
+			onRetrySync,
+		});
+		const retryButton = [...c.querySelectorAll("button")].find((b) =>
+			/Sync ulang/i.test(b.textContent ?? ""),
+		);
+
+		expect(retryButton).toBeDefined();
+		act(() => {
+			retryButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+		expect(onRetrySync).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps analysis pending until the server reports a real analysis signal", async () => {
+		mockFetchSequence([statusResponse({ status: "uploaded" })]);
+		const c = renderStatus();
+		await settle();
+
+		expect(c.textContent).toContain("Menunggu analisis codebase");
+		expect(c.textContent).not.toContain("Menyusun analisis codebase");
+	});
+
 	it("shows the safe server error with a retry action on failure", async () => {
 		const onRetrySync = vi.fn();
 		mockFetchSequence([
@@ -245,7 +271,7 @@ describe("SyncStatus", () => {
 	it("renders exactly three stages, each backed by an observable signal", async () => {
 		mockFetchSequence([
 			statusResponse({
-				status: "uploading",
+				status: "analyzing",
 				fileCount: 12,
 				excludedCount: 3,
 			}),
@@ -254,7 +280,7 @@ describe("SyncStatus", () => {
 		await settle();
 		// Stage labels that map to real signals.
 		expect(c.textContent).toContain("CLI terhubung");
-		expect(c.textContent).toContain("Mengirim snapshot source context");
+		expect(c.textContent).toContain("Snapshot terkirim dan terverifikasi");
 		expect(c.textContent).toContain("Menyusun analisis codebase");
 	});
 
@@ -266,9 +292,7 @@ describe("SyncStatus", () => {
 		await settle();
 		expect(c.textContent).not.toMatch(/memindai/i);
 		expect(c.textContent).not.toMatch(/filtering/i);
-		expect(c.textContent).not.toMatch(
-			/package manifest dan framework dibaca/i,
-		);
+		expect(c.textContent).not.toMatch(/package manifest dan framework dibaca/i);
 	});
 
 	it("shows the exclusion count only when the server reports it", async () => {

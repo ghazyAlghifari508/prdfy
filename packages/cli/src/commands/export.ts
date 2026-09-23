@@ -130,6 +130,7 @@ export async function exportRulesCommand(
 			`- DO NOT simplify a requirement to finish faster. A task is not complete just because the happy-path UI renders.`,
 			`- DO NOT reduce the product to a minimal prototype: finish every in-scope surface, state, and validation before reporting done.`,
 			`- Follow the Tech Stack and folder structure exactly as specified`,
+			`- For external credentials/services (API keys, OAuth, Webhooks) that only users can obtain: use clear placeholders in environment files (.env.example/.env.local), complete all integration code and unit tests with mocks, and DO NOT block or fail tasks due to missing real keys. Upon completion, report a structured "External Configuration & Credentials Action Items" guide to the user with official dashboard URLs and exact step-by-step instructions on how to obtain and configure them.`,
 			`- All tasks must be tracked via prdfy CLI commands`,
 			``,
 		].join("\n");

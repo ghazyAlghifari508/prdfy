@@ -31,21 +31,17 @@ describe("parseProjectModeInput", () => {
 });
 
 describe("PROJECT_SYNC_CHILD_TABLES", () => {
-	it("enumerates every project-owned sync table exactly once", () => {
+	it("enumerates only feature-owned tables", () => {
 		expect([...PROJECT_SYNC_CHILD_TABLES].sort()).toEqual(
 			[
 				"codebase_analyses",
 				"codebase_ask_handoffs",
 				"codebase_generation_contexts",
-				"codebase_snapshot_files",
-				"codebase_snapshots",
-				"codebase_sync_idempotency_keys",
-				"codebase_sync_sessions",
 			].sort(),
 		);
 	});
 
-	it("orders deletes FK-safe: handoffs first, contexts before analyses/snapshots, files before snapshots, sessions last", () => {
+	it("orders deletes FK-safe: handoffs first, contexts before analyses", () => {
 		const order: string[] = [...PROJECT_SYNC_CHILD_TABLES];
 		const indexOf = (name: string) => order.indexOf(name);
 		// Ask handoffs carry no FK deps and go first.
@@ -55,26 +51,6 @@ describe("PROJECT_SYNC_CHILD_TABLES", () => {
 		// Generation contexts reference snapshots + analyses.
 		expect(indexOf("codebase_generation_contexts")).toBeLessThan(
 			indexOf("codebase_analyses"),
-		);
-		expect(indexOf("codebase_generation_contexts")).toBeLessThan(
-			indexOf("codebase_snapshots"),
-		);
-		// Analyses and idempotency keys reference snapshots/sessions.
-		expect(indexOf("codebase_analyses")).toBeLessThan(
-			indexOf("codebase_snapshots"),
-		);
-		expect(indexOf("codebase_sync_idempotency_keys")).toBeLessThan(
-			indexOf("codebase_snapshots"),
-		);
-		expect(indexOf("codebase_sync_idempotency_keys")).toBeLessThan(
-			indexOf("codebase_sync_sessions"),
-		);
-		// Snapshot files reference snapshots; snapshots reference sessions.
-		expect(indexOf("codebase_snapshot_files")).toBeLessThan(
-			indexOf("codebase_snapshots"),
-		);
-		expect(indexOf("codebase_snapshots")).toBeLessThan(
-			indexOf("codebase_sync_sessions"),
 		);
 	});
 });

@@ -21,7 +21,7 @@ import { useUserPlan } from "@/hooks/use-user-plan";
 import { authClient } from "@/lib/auth-client";
 import {
 	getPendingSyncPayloadKey,
-	type SyncPromptPayload,
+	syncPromptPayloadSchema,
 } from "@/lib/codebase-sync";
 import {
 	HOME_DRAFT_DEBOUNCE_MS,
@@ -43,7 +43,7 @@ import { PLAN_CREDITS } from "@/types/database";
 
 // Home project-mode selector (unit-tested in ./-home-mode.test.ts).
 // Greenfield keeps the existing Home → /ask/$id flow byte-identical;
-// existing_codebase sends the mode with the prompt and routes to /codebase/$id.
+// existing_codebase creates a codebase and routes to its sync page.
 export const HOME_PROJECT_MODE_OPTIONS = [
 	{ id: "greenfield", label: "Produk baru" },
 	{ id: "existing_codebase", label: "Codebase existing" },
@@ -51,14 +51,18 @@ export const HOME_PROJECT_MODE_OPTIONS = [
 
 export type HomeProjectMode = (typeof HOME_PROJECT_MODE_OPTIONS)[number]["id"];
 
-// Post-creation routing: existing-codebase enters the sync flow, everything
+type HomePostCreationTarget =
+	| { to: "/ask/$id"; params: { id: string } }
+	| { to: "/codebases" };
+
+// Post-creation routing: existing-codebase enters the codebase flow, everything
 // else (including legacy responses without a mode) keeps the /ask/$id route.
 export function decideHomePostCreationTarget(project: {
 	id: string;
 	projectMode?: string | null;
-}): { to: "/ask/$id" | "/codebase/$id"; params: { id: string } } {
+}): HomePostCreationTarget {
 	if (project.projectMode === "existing_codebase") {
-		return { to: "/codebase/$id", params: { id: project.id } };
+		return { to: "/codebases" };
 	}
 	return { to: "/ask/$id", params: { id: project.id } };
 }
@@ -121,8 +125,8 @@ export function ChatInput({
 	const navigate = useNavigate();
 
 	useEffect(() => {
-		if (initialValue !== undefined) {
-			setMessage(initialValue);
+		if (initialValue !== undefined || prefillKey !== undefined) {
+			setMessage(initialValue ?? "");
 			if (initialMobile !== undefined) setIsMobileMode(initialMobile);
 		}
 	}, [initialValue, initialMobile, prefillKey]);
@@ -200,52 +204,73 @@ export function ChatInput({
 				// If plan check fails, allow flow — server will block with 403 anyway
 			}
 
-			const res = await fetch("/api/projects", {
+			const endpoint =
+				projectMode === "existing_codebase"
+					? "/api/codebases"
+					: "/api/projects";
+			const requestBody =
+				projectMode === "existing_codebase"
+					? { message: enrichedPrompt }
+					: {
+							message: enrichedPrompt,
+							language,
+							projectMode,
+							platform: isMobileMode ? "mobile" : "web",
+						};
+			const res = await fetch(endpoint, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					message: enrichedPrompt,
-					language,
-					projectMode,
-					platform: isMobileMode ? "mobile" : "web",
-				}),
+				body: JSON.stringify(requestBody),
 			});
-			const project = (await res.json().catch(() => ({}))) as {
-				id?: string;
-				error?: string;
-				projectMode?: string | null;
-				sync?: SyncPromptPayload;
-			};
-			if (!res.ok || !project.id) {
+			const body: unknown = await res.json().catch(() => null);
+			if (!res.ok || typeof body !== "object" || body === null) {
+				const message =
+					typeof body === "object" &&
+					body !== null &&
+					"error" in body &&
+					typeof body.error === "string"
+						? body.error
+						: "Gagal membuat proyek";
 				if (res.status === 403) {
-					setCreditsExhaustedMsg(
-						project.error ||
-							"Kredit kamu sudah habis. Beli kredit untuk membuat proyek baru.",
-					);
+					setCreditsExhaustedMsg(message);
 					return;
 				}
-				throw new Error(project.error || "Gagal membuat proyek");
+				throw new Error(message);
 			}
+			if (!("id" in body) || typeof body.id !== "string")
+				throw new Error("Respons pembuatan proyek tidak valid");
+			const responseProjectMode =
+				"projectMode" in body && typeof body.projectMode === "string"
+					? body.projectMode
+					: null;
+			const syncPayload =
+				"sync" in body ? syncPromptPayloadSchema.safeParse(body.sync) : null;
 			clearHomeDraft();
 			// Existing-codebase enters the sync flow: stash the one-time sync
-			// payload for /codebase/$id (consumed once to open the agent
+			// payload for /codebases/$id (consumed once to open the agent
 			// modal). Greenfield keeps the exact /ask/$id navigation.
 			const target = decideHomePostCreationTarget({
-				id: project.id,
-				projectMode: project.projectMode ?? projectMode,
+				id: body.id,
+				projectMode: responseProjectMode ?? projectMode,
 			});
-			if (target.to === "/codebase/$id" && project.sync) {
+			if (target.to === "/codebases") {
+				if (!syncPayload?.success)
+					throw new Error("Respons sync codebase tidak valid");
 				try {
 					sessionStorage.setItem(
-						getPendingSyncPayloadKey(project.id),
-						JSON.stringify(project.sync),
+						getPendingSyncPayloadKey(body.id),
+						JSON.stringify(syncPayload.data),
 					);
 				} catch {
 					// Storage blocked/full — the codebase page falls back to
 					// manual "Mulai sync", so creation still succeeds.
 				}
 			}
-			navigate({ to: target.to, params: target.params });
+			if (target.to === "/codebases") {
+				navigate({ to: target.to });
+			} else {
+				if (target.params) navigate({ to: target.to, params: target.params });
+			}
 		} catch (err) {
 			console.error("Create project error:", err);
 			setPromptError("Gagal membuat proyek. Coba lagi.");
@@ -367,7 +392,10 @@ export function ChatInput({
 									<span className="font-[510] text-mist">
 										Tambahkan fitur di codebase kamu:
 									</span>{" "}
-									Tuliskan fitur baru atau perubahan yang ingin dibuat. PrdFy akan memandu AI agent kamu menjalankan CLI untuk membaca struktur aplikasi, lalu menyusun PRD, AC, dan Task yang presisi sesuai arsitektur yang sudah ada.
+									Tuliskan fitur baru atau perubahan yang ingin dibuat. PrdFy
+									akan memandu AI agent kamu menjalankan CLI untuk membaca
+									struktur aplikasi, lalu menyusun PRD, AC, dan Task yang
+									presisi sesuai arsitektur yang sudah ada.
 								</p>
 							</div>
 						)}

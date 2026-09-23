@@ -9,21 +9,23 @@
 // 1. Snapshot must be `uploaded` and its session must be `uploaded` —
 //    analysis is requested ONLY from uploaded state (Task 5 known limitation:
 //    completion-replay-after-terminal is never assumed).
-// 2. Session moves uploaded → analyzing; a `pending` analysis row is stored.
+// 2. Legacy project sessions move uploaded → analyzing; codebase-scoped
+//    sessions stay uploaded while a per-feature `pending` row is stored.
 // 3. The model chain (same selectModels/tryStreamWithFallback boundary as
 //    /api/chat and /api/ask/options) generates strict JSON over the bounded
 //    snapshot context. Output is validated with the Task 1 Zod schema before
 //    persistence; uncertainty stays labeled, paths are never invented.
-// 4. Success: analysis → ready, snapshot → ready, session → ready. Only
-//    `ready` snapshots become generation context (failed snapshots are never
-//    exposed as ready context).
-// 5. Failure: analysis → failed with a fixed safe message, session rolls back
-//    analyzing → uploaded so a fresh record can be requested. No credit is
-//    consumed either way.
+// 4. Success: analysis → ready. Legacy project sessions also move to ready;
+//    codebase-scoped sessions stay uploaded because the snapshot is shared by
+//    every feature.
+// 5. Failure: analysis → failed with a fixed safe message. Legacy project
+//    sessions roll back analyzing → uploaded; codebase sessions are unchanged.
+//    No credit is consumed either way.
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import {
 	codebaseAnalyses,
+	codebaseAskHandoffs,
 	codebaseSnapshotFiles,
 	codebaseSnapshots,
 	codebaseSyncSessions,
@@ -35,6 +37,7 @@ import {
 	CODEBASE_ANALYSIS_SYSTEM_PROMPT,
 	type CodebaseAnalysis,
 	parseAnalysisOutput,
+	resolveAnalysisFeaturePrompt,
 	toSafeAnalysisErrorMessage,
 } from "./codebase-analysis";
 import {
@@ -94,10 +97,15 @@ export interface RequestAnalysisDeps {
 	generate?: AnalysisGenerator;
 }
 
+export interface RequestAnalysisScope {
+	codebaseId?: string;
+}
+
 export async function requestCodebaseAnalysis(
 	projectId: string,
 	snapshotId: string,
 	deps: RequestAnalysisDeps = {},
+	scope: RequestAnalysisScope = {},
 ): Promise<CodebaseAnalysis & { id: string }> {
 	const generate = deps.generate ?? defaultGenerate;
 	const { db } = await import("@/db");
@@ -108,7 +116,9 @@ export async function requestCodebaseAnalysis(
 		.where(
 			and(
 				eq(codebaseSnapshots.id, snapshotId),
-				eq(codebaseSnapshots.projectId, projectId),
+				scope.codebaseId
+					? eq(codebaseSnapshots.codebaseId, scope.codebaseId)
+					: eq(codebaseSnapshots.projectId, projectId),
 			),
 		)
 		.limit(1);
@@ -125,7 +135,9 @@ export async function requestCodebaseAnalysis(
 		.where(
 			and(
 				eq(codebaseSyncSessions.id, snapshot.syncSessionId),
-				eq(codebaseSyncSessions.projectId, projectId),
+				scope.codebaseId
+					? eq(codebaseSyncSessions.codebaseId, scope.codebaseId)
+					: eq(codebaseSyncSessions.projectId, projectId),
 			),
 		)
 		.limit(1);
@@ -137,21 +149,61 @@ export async function requestCodebaseAnalysis(
 	}
 
 	const [project] = await db
-		.select({ name: projects.name, description: projects.description })
+		.select({ name: projects.name })
 		.from(projects)
 		.where(and(eq(projects.id, projectId), isNull(projects.deletedAt)))
 		.limit(1);
-	const featurePrompt =
-		project?.description?.trim() || project?.name?.trim() || projectId;
+	const [handoff] = await db
+		.select({ state: codebaseAskHandoffs.state })
+		.from(codebaseAskHandoffs)
+		.where(eq(codebaseAskHandoffs.projectId, projectId))
+		.limit(1);
+	const handoffPrompt =
+		handoff?.state &&
+		typeof handoff.state === "object" &&
+		"prompt" in handoff.state &&
+		typeof handoff.state.prompt === "string"
+			? handoff.state.prompt
+			: null;
+	const featurePrompt = resolveAnalysisFeaturePrompt({
+		handoffPrompt,
+		projectName: project?.name?.trim() || "",
+		projectId,
+	});
 
 	// Fresh record per attempt: terminal rows are never mutated.
 	const analysisId = crypto.randomUUID();
-	assertSyncTransition("uploaded", "analyzing");
+	const isCodebaseScoped = Boolean(scope.codebaseId);
+	if (!isCodebaseScoped) assertSyncTransition("uploaded", "analyzing");
 
-	// Atomic claim: exactly one concurrent trigger flips uploaded -> analyzing
-	// and creates the pending record. A racing duplicate fails closed instead
-	// of starting redundant generation and creating orphan pending records.
+	// Atomic claim: legacy rows claim the sync session; codebase rows claim the
+	// feature/snapshot pair so multiple features can analyze one shared upload.
 	const claimed = await db.transaction(async (tx) => {
+		if (scope.codebaseId) {
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${`${scope.codebaseId}:${projectId}:${snapshotId}`}))`,
+			);
+			const [pending] = await tx
+				.select({ id: codebaseAnalyses.id })
+				.from(codebaseAnalyses)
+				.where(
+					and(
+						eq(codebaseAnalyses.projectId, projectId),
+						eq(codebaseAnalyses.snapshotId, snapshotId),
+						eq(codebaseAnalyses.status, "pending"),
+					),
+				)
+				.limit(1);
+			if (pending) return false;
+			await tx.insert(codebaseAnalyses).values({
+				id: analysisId,
+				projectId,
+				snapshotId,
+				status: "pending",
+			});
+			return true;
+		}
+
 		const [updated] = await tx
 			.update(codebaseSyncSessions)
 			.set({ status: "analyzing", updatedAt: new Date() })
@@ -242,20 +294,21 @@ export async function requestCodebaseAnalysis(
 		const raw = await generate(messages);
 		const analysis = parseAnalysisOutput(raw, { projectId, snapshotId });
 
-		assertSyncTransition("analyzing", "ready");
 		await db.transaction(async (tx) => {
 			await tx
 				.update(codebaseAnalyses)
 				.set({ status: "ready", output: analysis, updatedAt: new Date() })
 				.where(eq(codebaseAnalyses.id, analysisId));
-			await tx
-				.update(codebaseSnapshots)
-				.set({ status: "ready" })
-				.where(eq(codebaseSnapshots.id, snapshot.id));
-			await tx
-				.update(codebaseSyncSessions)
-				.set({ status: "ready", updatedAt: new Date() })
-				.where(eq(codebaseSyncSessions.id, session.id));
+			if (!isCodebaseScoped) {
+				// The snapshot stays `uploaded`: it is a repository artifact
+				// shared by every feature, so its state must not depend on one
+				// feature's analysis. `ready` remains valid for historical rows.
+				assertSyncTransition("analyzing", "ready");
+				await tx
+					.update(codebaseSyncSessions)
+					.set({ status: "ready", updatedAt: new Date() })
+					.where(eq(codebaseSyncSessions.id, session.id));
+			}
 		});
 		return { ...analysis, id: analysisId };
 	} catch (error) {
@@ -282,19 +335,21 @@ export async function requestCodebaseAnalysis(
 		// the sibling attempt may already have advanced it (e.g. to ready),
 		// in which case there is nothing to roll back and the transition
 		// assert must not throw out of the failure path.
-		const [current] = await db
-			.select({ status: codebaseSyncSessions.status })
-			.from(codebaseSyncSessions)
-			.where(eq(codebaseSyncSessions.id, session.id))
-			.limit(1);
-		if (
-			current?.status === "analyzing" &&
-			canTransitionSyncStatus("analyzing", "uploaded")
-		) {
-			await db
-				.update(codebaseSyncSessions)
-				.set({ status: "uploaded", updatedAt: new Date() })
-				.where(eq(codebaseSyncSessions.id, session.id));
+		if (!isCodebaseScoped) {
+			const [current] = await db
+				.select({ status: codebaseSyncSessions.status })
+				.from(codebaseSyncSessions)
+				.where(eq(codebaseSyncSessions.id, session.id))
+				.limit(1);
+			if (
+				current?.status === "analyzing" &&
+				canTransitionSyncStatus("analyzing", "uploaded")
+			) {
+				await db
+					.update(codebaseSyncSessions)
+					.set({ status: "uploaded", updatedAt: new Date() })
+					.where(eq(codebaseSyncSessions.id, session.id));
+			}
 		}
 		if (error instanceof AnalysisServiceError) throw error;
 		throw new AnalysisServiceError("ANALYSIS_FAILED", safe, analysisId);

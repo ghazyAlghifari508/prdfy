@@ -127,10 +127,7 @@ export function Navbar() {
 			!projectNavData?.hasAc &&
 			projectNavData?.acStatus !== "completed"
 		) {
-			showToast(
-				"AC belum selesai digenerate. Tunggu hingga selesai.",
-				"error",
-			);
+			showToast("AC belum selesai digenerate. Tunggu hingga selesai.", "error");
 			return;
 		}
 		setIsStepLoading(true);
@@ -240,6 +237,16 @@ export function Navbar() {
 								}`}
 							>
 								History
+							</Link>
+							<Link
+								to="/codebases"
+								className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+									pathname.startsWith("/codebases")
+										? "bg-white/10 text-snow"
+										: "text-fog hover:bg-white/5 hover:text-snow"
+								}`}
+							>
+								Codebase
 							</Link>
 						</div>
 					)}
@@ -534,6 +541,13 @@ export function Navbar() {
 						onClick={() => setIsMobileMenuOpen(false)}
 					>
 						History
+					</Link>
+					<Link
+						to="/codebases"
+						className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-[510] text-snow hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo"
+						onClick={() => setIsMobileMenuOpen(false)}
+					>
+						Codebase
 					</Link>
 					<Link
 						to="/faq"

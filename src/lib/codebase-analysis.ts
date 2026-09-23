@@ -46,6 +46,52 @@ export const codebaseAnalysisSchema = z.object({
 
 export type CodebaseAnalysis = z.infer<typeof codebaseAnalysisSchema>;
 
+export function resolveAnalysisFeaturePrompt(input: {
+	handoffPrompt: string | null | undefined;
+	projectName: string;
+	projectId: string;
+}): string {
+	const prompt = input.handoffPrompt?.trim();
+	if (prompt) return prompt;
+	const name = input.projectName.trim();
+	return name || input.projectId;
+}
+
+export interface AnalysisScopeInput {
+	projectId: string;
+	projectMode: string | null | undefined;
+	projectCodebaseId: string | null | undefined;
+	projectUserId: string;
+	authenticatedUserId: string;
+	codebaseOwnerId?: string | null;
+}
+
+export type AnalysisScope =
+	| { kind: "project"; projectId: string }
+	| { kind: "codebase"; projectId: string; codebaseId: string };
+
+export function resolveAnalysisScope(
+	input: AnalysisScopeInput,
+): AnalysisScope | { kind: "not_found" } {
+	if (input.projectUserId !== input.authenticatedUserId) {
+		return { kind: "not_found" };
+	}
+	if (input.projectMode !== "existing_codebase") {
+		return { kind: "not_found" };
+	}
+	if (!input.projectCodebaseId) {
+		return { kind: "project", projectId: input.projectId };
+	}
+	if (input.codebaseOwnerId !== input.authenticatedUserId) {
+		return { kind: "not_found" };
+	}
+	return {
+		kind: "codebase",
+		projectId: input.projectId,
+		codebaseId: input.projectCodebaseId,
+	};
+}
+
 export function parseCodebaseAnalysis(input: unknown): CodebaseAnalysis {
 	return codebaseAnalysisSchema.parse(input);
 }
@@ -338,10 +384,7 @@ export function inferTechAnswersFromCodebase(
 			out.frontend = "Flutter";
 		} else if (framework.includes("expo") || hasDep("expo")) {
 			out.frontend = "Expo";
-		} else if (
-			framework.includes("react native") ||
-			hasDep("react-native")
-		) {
+		} else if (framework.includes("react native") || hasDep("react-native")) {
 			out.frontend = "React Native";
 		} else if (framework.includes("ionic") || hasDep("@ionic")) {
 			out.frontend = "Ionic";

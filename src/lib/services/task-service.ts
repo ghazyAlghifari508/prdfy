@@ -34,6 +34,9 @@ export interface TaskTree {
 		tasks: Array<{
 			name: string;
 			description: string;
+			// Present on trees loaded from the database via getTaskTree;
+			// absent on trees freshly parsed from AI JSON (read as pending).
+			status?: string;
 			/** Product-impact classification decided by Task generation. */
 			priority: TaskPriority;
 			/** Requirement ids this task delivers, e.g. ["AC-1.1", "AC-1.2"]. */
@@ -326,6 +329,7 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 			.select({
 				title: tasks.title,
 				description: tasks.description,
+				status: tasks.status,
 				featureName: tasks.featureName,
 				priority: tasks.priority,
 				covers: tasks.covers,
@@ -387,6 +391,7 @@ export async function getTaskTree(projectId: string): Promise<TaskTree | null> {
 			feature.tasks.push({
 				name: row.title,
 				description: row.description || "",
+				status: row.status ?? "pending",
 				// Legacy rows predate the priority contract: they read as the
 				// documented default rather than surfacing an unknown level.
 				priority: storedTaskPriority(row.priority),

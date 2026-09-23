@@ -388,6 +388,12 @@ export function TaskDetail({
 	const hasContent = Boolean(
 		visibleTaskTree && visibleTaskTree.features.length > 0,
 	);
+	// Missing status means freshly generated (AI JSON carries no status): read as pending.
+	const hasUnfinishedProgress = Boolean(
+		taskTree?.features.some((feature) =>
+			feature.tasks.some((task) => (task.status ?? "pending") !== "pending"),
+		),
+	);
 
 	// Title: the model's real streamed reasoning while generating (tail of the
 	// latest line), neutral static label before any thinking arrives, project
@@ -429,6 +435,7 @@ export function TaskDetail({
 							projectId={projectId}
 							projectName={projectName}
 							hasContent={hasContent}
+							hasUnfinishedProgress={hasUnfinishedProgress}
 						/>
 					</div>
 				</div>

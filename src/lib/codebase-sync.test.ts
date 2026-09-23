@@ -315,15 +315,15 @@ describe("selectActiveSnapshot", () => {
 		},
 	];
 
-	it("defaults to the first successful snapshot", () => {
-		expect(selectActiveSnapshot(snapshots)?.id).toBe("snap_1");
+	it("defaults to the newest usable snapshot", () => {
+		expect(selectActiveSnapshot(snapshots)?.id).toBe("snap_2");
 	});
 
 	it("uses the latest user-selected ready snapshot when chosen", () => {
-		expect(selectActiveSnapshot(snapshots, "snap_2")?.id).toBe("snap_2");
+		expect(selectActiveSnapshot(snapshots, "snap_1")?.id).toBe("snap_1");
 	});
 
-	it("ignores a selected snapshot that is not ready", () => {
+	it("ignores a selected snapshot that is not usable", () => {
 		const withPending = [
 			...snapshots,
 			{
@@ -332,10 +332,10 @@ describe("selectActiveSnapshot", () => {
 				createdAt: "2026-03-01T00:00:00.000Z",
 			},
 		];
-		expect(selectActiveSnapshot(withPending, "snap_3")?.id).toBe("snap_1");
+		expect(selectActiveSnapshot(withPending, "snap_3")?.id).toBe("snap_2");
 	});
 
-	it("returns null when no snapshot is ready", () => {
+	it("returns null when no snapshot is usable", () => {
 		expect(selectActiveSnapshot([])).toBeNull();
 	});
 });
@@ -515,6 +515,7 @@ describe("one-active-session and retry semantics (Task 4)", () => {
 	it("exposes session metadata without any credential material", () => {
 		const metadata = toSessionMetadata({
 			...active,
+			projectId: "proj_1",
 			credentialHash: "hash-value",
 		});
 		expect(metadata.sessionId).toBe(active.id);
@@ -1351,5 +1352,53 @@ describe("decodeBase64ByteLength canonical form (Task 5)", () => {
 		expect(decodeBase64ByteLength("Zh==")).toBeNull();
 		expect(decodeBase64ByteLength("")).toBeNull();
 		expect(decodeBase64ByteLength("a")).toBeNull();
+	});
+});
+
+describe("selectActiveSnapshot (newest wins)", () => {
+	const snapshots = [
+		{
+			id: "snap_old",
+			status: "uploaded",
+			createdAt: "2026-01-01T00:00:00.000Z",
+		},
+		{
+			id: "snap_new",
+			status: "uploaded",
+			createdAt: "2026-02-01T00:00:00.000Z",
+		},
+	];
+
+	it("returns the newest snapshot", () => {
+		expect(selectActiveSnapshot(snapshots)?.id).toBe("snap_new");
+	});
+
+	it("still honours an explicit selection", () => {
+		expect(selectActiveSnapshot(snapshots, "snap_old")?.id).toBe("snap_old");
+	});
+
+	it("ignores an explicit selection that is not a member", () => {
+		expect(selectActiveSnapshot(snapshots, "nope")?.id).toBe("snap_new");
+	});
+
+	it("accepts a legacy ready snapshot", () => {
+		expect(
+			selectActiveSnapshot([
+				{
+					id: "legacy",
+					status: "ready",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				},
+			])?.id,
+		).toBe("legacy");
+	});
+
+	it("returns null when nothing is usable", () => {
+		expect(
+			selectActiveSnapshot([
+				{ id: "x", status: "uploading", createdAt: "2026-01-01T00:00:00.000Z" },
+			]),
+		).toBeNull();
+		expect(selectActiveSnapshot([])).toBeNull();
 	});
 });

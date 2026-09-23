@@ -5,16 +5,19 @@ import {
 	codebaseAnalyses,
 	codebaseSnapshots,
 	codebaseSyncSessions,
+	codebases,
 	projects,
 	subscriptions,
 } from "@/db/schema";
 import { resolveSubscriptionState } from "@/lib/billing";
 import {
 	type AnalysisResponse,
+	type AnalysisScope,
 	analysisRequestSchema,
 	analysisResponseSchema,
 	codebaseAnalysisSchema,
 	decideAnalysisRequest,
+	resolveAnalysisScope,
 } from "@/lib/codebase-analysis";
 import {
 	AnalysisServiceError,
@@ -55,6 +58,48 @@ import type { Plan } from "@/types/database";
 // Codebase analysis uses adaptive credits (new attempts are billed; ready analysis reuse is free).
 
 type AnalysisRow = typeof codebaseAnalyses.$inferSelect;
+
+type AnalysisProject = {
+	id: string;
+	projectMode: string | null;
+	codebaseId: string | null;
+	userId: string;
+};
+
+async function resolveProjectAnalysisScope(
+	project: AnalysisProject,
+	authenticatedUserId: string,
+) {
+	let codebaseOwnerId: string | null | undefined;
+	if (project.codebaseId) {
+		const [codebase] = await db
+			.select({ userId: codebases.userId })
+			.from(codebases)
+			.where(eq(codebases.id, project.codebaseId))
+			.limit(1);
+		codebaseOwnerId = codebase?.userId;
+	}
+	return resolveAnalysisScope({
+		projectId: project.id,
+		projectMode: project.projectMode,
+		projectCodebaseId: project.codebaseId,
+		projectUserId: project.userId,
+		authenticatedUserId,
+		codebaseOwnerId,
+	});
+}
+
+function sessionOwnershipCondition(scope: AnalysisScope, userId: string) {
+	return scope.kind === "codebase"
+		? and(
+				eq(codebaseSyncSessions.codebaseId, scope.codebaseId),
+				eq(codebaseSyncSessions.userId, userId),
+			)
+		: and(
+				eq(codebaseSyncSessions.projectId, scope.projectId),
+				eq(codebaseSyncSessions.userId, userId),
+			);
+}
 
 function toIso(value: Date | null | undefined): string | undefined {
 	return value ? value.toISOString() : undefined;
@@ -127,7 +172,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					);
 
 				const [project] = await db
-					.select({ id: projects.id, projectMode: projects.projectMode })
+					.select({
+						id: projects.id,
+						projectMode: projects.projectMode,
+						codebaseId: projects.codebaseId,
+						userId: projects.userId,
+					})
 					.from(projects)
 					.where(
 						and(
@@ -150,6 +200,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						},
 						{ status: 400 },
 					);
+				const scope = await resolveProjectAnalysisScope(project, user.id);
+				if (scope.kind === "not_found")
+					return Response.json(
+						{ error: "Project tidak ditemukan" },
+						{ status: 404 },
+					);
 
 				const url = new URL(request.url);
 				const pinnedSnapshotId = url.searchParams.get("snapshotId");
@@ -157,12 +213,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 				const sessions = await db
 					.select({ id: codebaseSyncSessions.id })
 					.from(codebaseSyncSessions)
-					.where(
-						and(
-							eq(codebaseSyncSessions.projectId, projectId),
-							eq(codebaseSyncSessions.userId, user.id),
-						),
-					);
+					.where(sessionOwnershipCondition(scope, user.id));
 				if (sessions.length === 0)
 					return Response.json(
 						{ error: "Belum ada analisis codebase" },
@@ -214,9 +265,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					.select()
 					.from(codebaseAnalyses)
 					.where(
-						inArray(
-							codebaseAnalyses.snapshotId,
-							snapshotRows.map((snapshot) => snapshot.id),
+						and(
+							eq(codebaseAnalyses.projectId, projectId),
+							inArray(
+								codebaseAnalyses.snapshotId,
+								snapshotRows.map((snapshot) => snapshot.id),
+							),
 						),
 					)
 					.orderBy(desc(codebaseAnalyses.createdAt))
@@ -273,7 +327,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					);
 
 				const [project] = await db
-					.select({ id: projects.id, projectMode: projects.projectMode })
+					.select({
+						id: projects.id,
+						projectMode: projects.projectMode,
+						codebaseId: projects.codebaseId,
+						userId: projects.userId,
+					})
 					.from(projects)
 					.where(
 						and(
@@ -296,6 +355,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 						},
 						{ status: 400 },
 					);
+				const scope = await resolveProjectAnalysisScope(project, user.id);
+				if (scope.kind === "not_found")
+					return Response.json(
+						{ error: "Project tidak ditemukan" },
+						{ status: 404 },
+					);
 
 				const raw = (await request.json().catch(() => ({}))) as unknown;
 				const body = analysisRequestSchema.safeParse(raw);
@@ -308,12 +373,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 				const sessions = await db
 					.select({ id: codebaseSyncSessions.id })
 					.from(codebaseSyncSessions)
-					.where(
-						and(
-							eq(codebaseSyncSessions.projectId, projectId),
-							eq(codebaseSyncSessions.userId, user.id),
-						),
-					)
+					.where(sessionOwnershipCondition(scope, user.id))
 					.orderBy(desc(codebaseSyncSessions.createdAt));
 				if (sessions.length === 0)
 					return Response.json(
@@ -359,12 +419,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 							contentSize: codebaseSnapshots.contentSize,
 						})
 						.from(codebaseSnapshots)
-						.where(
-							and(
-								inArray(codebaseSnapshots.syncSessionId, sessionIds),
-								eq(codebaseSnapshots.status, "uploaded"),
-							),
-						)
+						.where(inArray(codebaseSnapshots.syncSessionId, sessionIds))
 						.orderBy(desc(codebaseSnapshots.createdAt))
 						.limit(1);
 					snapshot = latest ?? null;
@@ -381,7 +436,12 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 				const existing = await db
 					.select({ id: codebaseAnalyses.id, status: codebaseAnalyses.status })
 					.from(codebaseAnalyses)
-					.where(eq(codebaseAnalyses.snapshotId, snapshot.id))
+					.where(
+						and(
+							eq(codebaseAnalyses.projectId, projectId),
+							eq(codebaseAnalyses.snapshotId, snapshot.id),
+						),
+					)
 					.orderBy(desc(codebaseAnalyses.createdAt));
 				const decision = decideAnalysisRequest(
 					{ id: snapshot.id, status: snapshot.status },
@@ -528,6 +588,10 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 					const analysis = await requestCodebaseAnalysis(
 						projectId,
 						snapshot.id,
+						{},
+						scope.kind === "codebase"
+							? { codebaseId: scope.codebaseId }
+							: undefined,
 					);
 					const [row] = await db
 						.select()
@@ -582,6 +646,7 @@ export const Route = createFileRoute("/api/v1/projects/$id/codebase/analysis")({
 							.from(codebaseAnalyses)
 							.where(
 								and(
+									eq(codebaseAnalyses.projectId, projectId),
 									eq(codebaseAnalyses.snapshotId, snapshot.id),
 									eq(codebaseAnalyses.status, "failed"),
 								),

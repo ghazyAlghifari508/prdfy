@@ -20,6 +20,7 @@ import {
 	inferTechAnswersFromCodebase,
 	parseAnalysisOutput,
 	parseCodebaseAnalysis,
+	resolveAnalysisScope,
 	selectSourceExcerpts,
 	toSafeAnalysisErrorMessage,
 } from "./codebase-analysis";
@@ -310,6 +311,63 @@ describe("analysis trigger/read DTOs", () => {
 				status: "analyzing",
 			}).success,
 		).toBe(false);
+	});
+});
+
+describe("analysis ownership scope", () => {
+	it("binds a feature project to its codebase-owned sync session", () => {
+		expect(
+			resolveAnalysisScope({
+				projectId: "feature-1",
+				projectMode: "existing_codebase",
+				projectCodebaseId: "codebase-1",
+				projectUserId: "user-1",
+				authenticatedUserId: "user-1",
+				codebaseOwnerId: "user-1",
+			}),
+		).toEqual({
+			kind: "codebase",
+			projectId: "feature-1",
+			codebaseId: "codebase-1",
+		});
+	});
+
+	it("returns not found when the feature project is owned by another user", () => {
+		expect(
+			resolveAnalysisScope({
+				projectId: "feature-1",
+				projectMode: "existing_codebase",
+				projectCodebaseId: "codebase-1",
+				projectUserId: "user-2",
+				authenticatedUserId: "user-1",
+				codebaseOwnerId: "user-2",
+			}),
+		).toEqual({ kind: "not_found" });
+	});
+
+	it("returns not found when the bound codebase is owned by another user", () => {
+		expect(
+			resolveAnalysisScope({
+				projectId: "feature-1",
+				projectMode: "existing_codebase",
+				projectCodebaseId: "codebase-1",
+				projectUserId: "user-1",
+				authenticatedUserId: "user-1",
+				codebaseOwnerId: "user-2",
+			}),
+		).toEqual({ kind: "not_found" });
+	});
+
+	it("keeps legacy project-scoped existing-codebase sessions project-bound", () => {
+		expect(
+			resolveAnalysisScope({
+				projectId: "project-1",
+				projectMode: "existing_codebase",
+				projectCodebaseId: null,
+				projectUserId: "user-1",
+				authenticatedUserId: "user-1",
+			}),
+		).toEqual({ kind: "project", projectId: "project-1" });
 	});
 });
 
@@ -610,15 +668,66 @@ describe("requestCodebaseAnalysis atomic claim contract", () => {
 			"utf8",
 		);
 		const claimIndex = source.indexOf("db.transaction(async (tx) => {");
+		const legacyClaimIndex = source.indexOf(
+			"const [updated] = await tx\n\t\t\t.update(codebaseSyncSessions)",
+		);
 		const conditionalUpdateIndex = source.indexOf(
 			'eq(codebaseSyncSessions.status, "uploaded")',
+			legacyClaimIndex,
 		);
-		const insertAnalysisIndex = source.indexOf("tx.insert(codebaseAnalyses)");
+		const insertAnalysisIndex = source.indexOf(
+			"tx.insert(codebaseAnalyses)",
+			legacyClaimIndex,
+		);
 		const generateIndex = source.indexOf("await generate(messages)");
 
 		expect(claimIndex).toBeGreaterThan(-1);
+		expect(legacyClaimIndex).toBeGreaterThan(claimIndex);
 		expect(conditionalUpdateIndex).toBeGreaterThan(claimIndex);
 		expect(insertAnalysisIndex).toBeGreaterThan(conditionalUpdateIndex);
 		expect(generateIndex).toBeGreaterThan(insertAnalysisIndex);
+	});
+
+	it("keeps shared codebase sessions uploaded while feature analysis completes", async () => {
+		const source = await readFile(
+			new URL("./codebase-analysis.server.ts", import.meta.url),
+			"utf8",
+		);
+		const scopedClaimIndex = source.indexOf("if (scope.codebaseId) {");
+		const scopedReadyIndex = source.indexOf(
+			"if (!isCodebaseScoped) {\n\t\t\t\t// The snapshot stays `uploaded`",
+		);
+
+		expect(scopedClaimIndex).toBeGreaterThan(-1);
+		expect(scopedReadyIndex).toBeGreaterThan(scopedClaimIndex);
+		expect(source.slice(scopedClaimIndex, scopedReadyIndex)).toContain(
+			"tx.insert(codebaseAnalyses)",
+		);
+	});
+});
+
+describe("decideAnalysisRequest with an already-analyzed uploaded snapshot", () => {
+	it("reuses a ready analysis on an uploaded snapshot", () => {
+		expect(
+			decideAnalysisRequest({ id: "s1", status: "uploaded" }, [
+				{ id: "a1", status: "ready" },
+			]),
+		).toEqual({ action: "reuse", analysisId: "a1" });
+	});
+
+	it("creates a new record when only failed attempts exist", () => {
+		expect(
+			decideAnalysisRequest({ id: "s1", status: "uploaded" }, [
+				{ id: "a1", status: "failed" },
+			]),
+		).toEqual({ action: "create" });
+	});
+
+	it("rejects a snapshot that is not uploaded", () => {
+		const decision = decideAnalysisRequest(
+			{ id: "s1", status: "uploading" },
+			[],
+		);
+		expect(decision.action).toBe("reject");
 	});
 });

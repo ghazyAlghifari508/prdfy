@@ -25,9 +25,17 @@ interface ImplementationOptionsProps {
 	projectId: string;
 	projectName: string;
 	hasContent: boolean; // true if PRD or tasks exist
+	/** True when at least one task is not in `pending`. */
+	hasUnfinishedProgress?: boolean;
 }
 
-const AI_AGENT_PROMPT_TEMPLATE = `Kamu adalah PrdFy Coding Agent.
+// The handoff flow offers a progress reset, but only as a confirmation: copying
+// a fresh API key must never silently discard work the user already finished.
+export function shouldConfirmReset(hasUnfinishedProgress: boolean): boolean {
+	return hasUnfinishedProgress;
+}
+
+export const AI_AGENT_PROMPT_TEMPLATE = `Kamu adalah PrdFy Coding Agent.
 
 Tugasmu: implementasikan aplikasi berdasarkan dokumen perencanaan berikut.
 Dokumen ini adalah KONTRAK — semua yang ada di PRD, AC, dan Tasks WAJIB diimplementasikan.
@@ -150,6 +158,20 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
 - DILARANG menyederhanakan product requirement menjadi prototype minimal. Aplikasi harus selesai untuk seluruh surface yang in-scope, bukan versi cepat yang hanya bisa didemokan.
 - Detail subtask adalah instruksi teknis. IKUTI persis, termasuk endpoint, aturan validasi, dan penanganan error yang tertulis.
 
+### 9. PENANGANAN DEPENDENSI & KREDENSIAL EKSTERNAL (API Keys, OAuth, Webhooks)
+- Jika implementasi membutuhkan akun, token, atau kredensial pihak ketiga (seperti API key OpenRouter/OpenAI, Supabase URL/key, Midtrans Client/Server key, OAuth client ID/secret, Stripe, Resend, dll) yang hanya bisa diperoleh secara eksternal oleh user:
+  1. JANGAN PERNAH berhenti di tengah jalan atau menebak-nebak kredensial rahasia.
+  2. Isi konfigurasi environment lokal (\`.env.example\` dan \`.env.local\`) dengan placeholder yang jelas dan standar (misal: \`MIDTRANS_SERVER_KEY=your_sandbox_server_key_here\`).
+  3. Tulis seluruh kode integrasi, wrapper/adapter, schema validasi, dan penanganan error secara lengkap sesuai kontrak dokumentasi resmi provider.
+  4. Pada unit test, gunakan mock/fixture dan JANGAN memanggil API eksternal live yang membutuhkan kredensial sungguhan.
+  5. Task koding TETAP DITANDAI \`completed\` jika implementasi kode dan pengetesan unit lokalnya sudah tuntas. Ketiadaan kredensial live BUKAN alasan menandai task \`failed\`.
+  6. Setelah semua task selesai (atau di checkpoint antar fase), kamu WAJIB menyajikan laporan terstruktur: "📋 DAFTAR KEBUTUHAN KREDENSIAL EKSTERNAL (AKSI PENGGUNA)" yang memuat:
+     - Nama layanan dan variabel environment terkait
+     - URL dashboard resmi tempat membuat/mengambil kredensial
+     - Tutorial langkah demi langkah cara mengambil key tersebut di dashboard (menu yang harus diklik, tab pengaturan, dsb)
+     - Lokasi persis file konfigurasi lokal tempat pengguna harus menempelkan nilai tersebut
+     - Instruksi/data uji coba (seperti sandbox credentials atau nomor testing) jika ada
+
 ## Instruksi Implementasi
 
 ### Alur per FASE (setiap feature group = 1 fase):
@@ -176,6 +198,7 @@ prdfy subtask update <taskId> --index <subtaskIndex> --status in_progress
 - WAJIB baca ulang PRD + AC di awal SETIAP fase — jangan andalkan memori dari fase sebelumnya
 - JANGAN skip task. Jika error, perbaiki dan retry.
 - Jika dependency eksternal benar-benar tidak tersedia: tandai failed DAN jelaskan alasannya
+- Kredensial eksternal (API keys/OAuth): gunakan placeholder lokal lebih dulu, selesaikan kode, dan laporkan panduan tutorial ke user di akhir
 - Setelah semua task selesai: \`prdfy task list {projectId}\` untuk verifikasi SEMUA completed DAN verifikasi seluruh surface di Pages & Screens sudah terimplementasi`;
 
 /**
@@ -187,6 +210,7 @@ export function ImplementationOptions({
 	projectId,
 	projectName,
 	hasContent,
+	hasUnfinishedProgress,
 }: ImplementationOptionsProps) {
 	const showToast = useUIStore((s) => s.showToast);
 
@@ -194,6 +218,8 @@ export function ImplementationOptions({
 	const [isLoading, setIsLoading] = useState(false);
 	const [showPromptModal, setShowPromptModal] = useState(false);
 	const [promptText, setPromptText] = useState("");
+	const [resetDialogOpen, setResetDialogOpen] = useState(false);
+	const [isResetting, setIsResetting] = useState(false);
 
 	// Restore choice from sessionStorage on mount (per-project)
 	useEffect(() => {
@@ -282,7 +308,7 @@ export function ImplementationOptions({
 		}
 	}, [projectId, showToast, setAndPersistChoice]);
 
-	const handlePromptAi = useCallback(async () => {
+	const buildPromptAndOpen = useCallback(async () => {
 		setIsLoading(true);
 		try {
 			const [data, autoKeyData] = await Promise.all([
@@ -310,6 +336,49 @@ export function ImplementationOptions({
 			setIsLoading(false);
 		}
 	}, [fetchContent, projectName, showToast, projectId]);
+
+	const handlePromptAi = useCallback(async () => {
+		if (shouldConfirmReset(hasUnfinishedProgress ?? false)) {
+			setResetDialogOpen(true);
+			return;
+		}
+		await buildPromptAndOpen();
+	}, [hasUnfinishedProgress, buildPromptAndOpen]);
+
+	const handleConfirmReset = useCallback(async () => {
+		setIsResetting(true);
+		try {
+			const res = await fetch(
+				`/api/projects/${encodeURIComponent(projectId)}/reset-progress`,
+				{ method: "POST" },
+			);
+			const json = (await res.json().catch(() => null)) as unknown;
+			if (!res.ok) {
+				const message =
+					json && typeof json === "object" && "error" in json
+						? String((json as { error: unknown }).error)
+						: "Gagal mereset progress.";
+				showToast(message, "error");
+				return;
+			}
+			const tasksReset =
+				json && typeof json === "object" && "tasksReset" in json
+					? Number((json as { tasksReset: unknown }).tasksReset)
+					: 0;
+			showToast(
+				tasksReset > 0
+					? `${tasksReset} task dikembalikan ke pending.`
+					: "Tidak ada progress yang perlu direset.",
+				"success",
+			);
+			setResetDialogOpen(false);
+			await buildPromptAndOpen();
+		} catch {
+			showToast("Gagal menghubungi server.", "error");
+		} finally {
+			setIsResetting(false);
+		}
+	}, [projectId, showToast, buildPromptAndOpen]);
 
 	const handleCopyPrompt = useCallback(async () => {
 		try {
@@ -410,6 +479,38 @@ export function ImplementationOptions({
 						>
 							<Copy size={14} />
 							Copy & Tutup
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>Reset progress sebelum handoff?</DialogTitle>
+						<DialogDescription>
+							Beberapa task sudah dikerjakan. Reset status ke{" "}
+							<strong>pending</strong> supaya agent mengerjakan semuanya dari
+							awal. Task, PRD, dan AC tidak diubah, dan tidak ada kredit yang
+							terpakai.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="ghost"
+							onClick={() => {
+								setResetDialogOpen(false);
+								void buildPromptAndOpen();
+							}}
+							disabled={isResetting}
+						>
+							Tanpa reset
+						</Button>
+						<Button
+							onClick={() => void handleConfirmReset()}
+							disabled={isResetting}
+						>
+							{isResetting ? "Mereset..." : "Reset lalu lanjut"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

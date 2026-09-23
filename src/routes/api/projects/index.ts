@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { codebaseSyncSessions, projects } from "@/db/schema";
+import { codebaseSyncSessions, codebases, projects } from "@/db/schema";
 import { saveAskHandoff } from "@/lib/codebase-generation-context";
 import {
 	buildSyncCommand,
@@ -71,6 +72,8 @@ export const Route = createFileRoute("/api/projects/")({
 						message.includes("[Platform: Mobile App]"))
 						? "mobile"
 						: "web";
+				const codebaseId =
+					typeof body?.codebaseId === "string" ? body.codebaseId : null;
 
 				const initHandoff = async (projId: string) => {
 					try {
@@ -88,6 +91,52 @@ export const Route = createFileRoute("/api/projects/")({
 						console.error("Failed to initialize ask handoff:", e);
 					}
 				};
+
+				if (codebaseId) {
+					if (projectMode !== "existing_codebase") {
+						return Response.json(
+							{ error: "Mode proyek tidak valid" },
+							{ status: 400 },
+						);
+					}
+					const [codebase] = await db
+						.select({ id: codebases.id })
+						.from(codebases)
+						.where(
+							and(eq(codebases.id, codebaseId), eq(codebases.userId, user.id)),
+						)
+						.limit(1);
+					if (!codebase) {
+						return Response.json(
+							{ error: "Codebase tidak ditemukan" },
+							{ status: 404 },
+						);
+					}
+					const [project] = await db
+						.insert(projects)
+						.values({
+							id,
+							userId: user.id,
+							name: projectName,
+							status: "draft",
+							mode: "ai_auto",
+							projectMode,
+							codebaseId: codebase.id,
+							language,
+						})
+						.returning({ id: projects.id, name: projects.name });
+					if (!project)
+						return Response.json(
+							{ error: "Gagal membuat project" },
+							{ status: 500 },
+						);
+					await initHandoff(project.id);
+					return Response.json({
+						id: project.id,
+						name: project.name,
+						projectMode,
+					});
+				}
 
 				if (projectMode === "greenfield") {
 					const [project] = await db
