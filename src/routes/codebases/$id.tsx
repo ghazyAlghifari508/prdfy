@@ -129,6 +129,7 @@ export const Route = createFileRoute("/codebases/$id")({
 		meta: [{ title: loaderData?.codebase.name ?? "Codebase" }],
 	}),
 	component: CodebaseDetailPage,
+	pendingComponent: CodebaseDetailPending,
 	errorComponent: ({ error, reset }) => (
 		<main className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
 			<div
@@ -152,6 +153,24 @@ export const Route = createFileRoute("/codebases/$id")({
 		</main>
 	),
 });
+
+function CodebaseDetailPending() {
+	return (
+		<main
+			className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-10 sm:px-6 sm:py-14"
+			aria-busy="true"
+		>
+			<header className="border-b border-graphite pb-6">
+				<div className="h-3 w-44 animate-pulse rounded bg-graphite" />
+				<div className="mt-3 h-10 w-64 animate-pulse rounded bg-graphite" />
+				<div className="mt-3 h-4 max-w-2xl animate-pulse rounded bg-graphite" />
+			</header>
+			<div className="h-12 animate-pulse rounded-xl border border-graphite bg-charcoal" />
+			<div className="h-64 animate-pulse rounded-xl border border-graphite bg-charcoal" />
+			<p className="text-sm text-fog">Memuat detail codebase...</p>
+		</main>
+	);
+}
 
 function CodebaseDetailPage() {
 	const {
@@ -216,9 +235,10 @@ function CodebaseDetailPage() {
 		if (inFlight.current) return;
 		inFlight.current = true;
 		try {
-			const query = status?.sessionId
-				? `?sessionId=${encodeURIComponent(status.sessionId)}`
-				: "";
+			const queryParams = new URLSearchParams();
+			if (status?.sessionId) queryParams.set("sessionId", status.sessionId);
+			if (feature?.id) queryParams.set("projectId", feature.id);
+			const query = queryParams.toString() ? `?${queryParams}` : "";
 			const response = await fetch(
 				`/api/codebases/${encodeURIComponent(codebase.id)}/status${query}`,
 			);

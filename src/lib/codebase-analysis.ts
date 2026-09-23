@@ -57,6 +57,41 @@ export function resolveAnalysisFeaturePrompt(input: {
 	return name || input.projectId;
 }
 
+export interface AnalysisScopeInput {
+	projectId: string;
+	projectMode: string | null | undefined;
+	projectCodebaseId: string | null | undefined;
+	projectUserId: string;
+	authenticatedUserId: string;
+	codebaseOwnerId?: string | null;
+}
+
+export type AnalysisScope =
+	| { kind: "project"; projectId: string }
+	| { kind: "codebase"; projectId: string; codebaseId: string };
+
+export function resolveAnalysisScope(
+	input: AnalysisScopeInput,
+): AnalysisScope | { kind: "not_found" } {
+	if (input.projectUserId !== input.authenticatedUserId) {
+		return { kind: "not_found" };
+	}
+	if (input.projectMode !== "existing_codebase") {
+		return { kind: "not_found" };
+	}
+	if (!input.projectCodebaseId) {
+		return { kind: "project", projectId: input.projectId };
+	}
+	if (input.codebaseOwnerId !== input.authenticatedUserId) {
+		return { kind: "not_found" };
+	}
+	return {
+		kind: "codebase",
+		projectId: input.projectId,
+		codebaseId: input.projectCodebaseId,
+	};
+}
+
 export function parseCodebaseAnalysis(input: unknown): CodebaseAnalysis {
 	return codebaseAnalysisSchema.parse(input);
 }

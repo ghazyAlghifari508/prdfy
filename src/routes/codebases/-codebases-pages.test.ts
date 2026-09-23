@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CodebaseAnalysis } from "@/lib/codebase-analysis";
 import { isValidHistoryUrl } from "@/lib/flow-progress";
+import { selectLatestCodebaseSnapshots } from "../codebases";
 import {
 	canRenderCodebaseReview,
 	decideCodebaseDetailEntry,
@@ -80,5 +81,33 @@ describe("codebase review snapshot pairing", () => {
 				snapshotId: "snapshot-1",
 			}),
 		).toBe(true);
+	});
+});
+
+describe("codebase list snapshot selection", () => {
+	it("keeps the newest failed snapshot visible instead of using an older usable one", () => {
+		const latest = selectLatestCodebaseSnapshots([
+			{
+				id: "snapshot-old",
+				codebaseId: "codebase-1",
+				createdAt: new Date("2026-09-22T10:00:00.000Z"),
+				commitSha: "old",
+				fileCount: 4,
+				status: "uploaded",
+			},
+			{
+				id: "snapshot-new",
+				codebaseId: "codebase-1",
+				createdAt: new Date("2026-09-23T10:00:00.000Z"),
+				commitSha: "new",
+				fileCount: 5,
+				status: "failed",
+			},
+		]);
+
+		expect(latest.get("codebase-1")).toMatchObject({
+			id: "snapshot-new",
+			status: "failed",
+		});
 	});
 });

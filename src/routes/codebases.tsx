@@ -8,13 +8,48 @@ import { createServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import {
 	getPendingSyncPayloadKey,
-	SNAPSHOT_CONTEXT_STATUSES,
 	syncPromptPayloadSchema,
 } from "@/lib/codebase-sync";
 import { requireUserServer } from "@/lib/session";
 
 export function decideCodebaseListEntry(): "allow" {
 	return "allow";
+}
+
+type CodebaseListSnapshot = {
+	id: string;
+	codebaseId: string | null;
+	createdAt: Date | null;
+};
+
+export function selectLatestCodebaseSnapshots<
+	TSnapshot extends CodebaseListSnapshot,
+>(snapshots: readonly TSnapshot[]): Map<string, TSnapshot> {
+	const latest = new Map<string, TSnapshot>();
+	for (const snapshot of snapshots) {
+		if (!snapshot.codebaseId) continue;
+		const current = latest.get(snapshot.codebaseId);
+		if (
+			!current ||
+			(snapshot.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY) >
+				(current.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY)
+		) {
+			latest.set(snapshot.codebaseId, snapshot);
+		}
+	}
+	return latest;
+}
+
+function formatSnapshotStatus(status: string): string {
+	const labels: Record<string, string> = {
+		uploading: "Mengupload",
+		uploaded: "Terkirim",
+		analyzing: "Menganalisis",
+		ready: "Siap",
+		failed: "Gagal",
+		expired: "Kedaluwarsa",
+	};
+	return labels[status] ?? "Status tidak dikenal";
 }
 
 const loadCodebases = createServerFn({ method: "GET" }).handler(async () => {
@@ -26,7 +61,7 @@ const loadCodebases = createServerFn({ method: "GET" }).handler(async () => {
 async function dbSelectCodebases(userId: string) {
 	const { db } = await import("@/db");
 	const { codebaseSnapshots, codebases } = await import("@/db/schema");
-	const { and, desc, eq, inArray } = await import("drizzle-orm");
+	const { desc, eq, inArray } = await import("drizzle-orm");
 	const rows = await db
 		.select({
 			id: codebases.id,
@@ -45,21 +80,13 @@ async function dbSelectCodebases(userId: string) {
 					createdAt: codebaseSnapshots.createdAt,
 					commitSha: codebaseSnapshots.commitSha,
 					fileCount: codebaseSnapshots.fileCount,
+					status: codebaseSnapshots.status,
 				})
 				.from(codebaseSnapshots)
-				.where(
-					and(
-						inArray(codebaseSnapshots.codebaseId, ids),
-						inArray(codebaseSnapshots.status, [...SNAPSHOT_CONTEXT_STATUSES]),
-					),
-				)
+				.where(inArray(codebaseSnapshots.codebaseId, ids))
 				.orderBy(desc(codebaseSnapshots.createdAt))
 		: [];
-	const latest = new Map<string, (typeof snapshots)[number]>();
-	for (const snapshot of snapshots) {
-		if (snapshot.codebaseId && !latest.has(snapshot.codebaseId))
-			latest.set(snapshot.codebaseId, snapshot);
-	}
+	const latest = selectLatestCodebaseSnapshots(snapshots);
 	return rows.map((row) => ({
 		id: row.id,
 		name: row.name,
@@ -73,6 +100,7 @@ async function dbSelectCodebases(userId: string) {
 								createdAt: snapshot.createdAt?.toISOString() ?? null,
 								commitSha: snapshot.commitSha ?? null,
 								fileCount: snapshot.fileCount ?? 0,
+								status: snapshot.status,
 							}
 						: null;
 				})()
@@ -270,12 +298,16 @@ function CodebasesPage() {
 			) : (
 				<div className="overflow-x-auto rounded-xl border border-graphite bg-charcoal">
 					<table className="w-full min-w-[640px] text-left text-sm">
+						<caption className="caption-bottom px-5 py-3 text-left text-xs normal-case tracking-normal text-fog">
+							Snapshot terbaru per codebase, termasuk status sync terakhir.
+						</caption>
 						<thead className="border-b border-graphite text-xs uppercase tracking-wide text-fog">
 							<tr>
 								<th className="px-5 py-4">Nama</th>
 								<th className="px-5 py-4">Sync terakhir</th>
 								<th className="px-5 py-4">Commit</th>
 								<th className="px-5 py-4">File</th>
+								<th className="px-5 py-4">Status</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-graphite/70">
@@ -302,6 +334,11 @@ function CodebasesPage() {
 									</td>
 									<td className="px-5 py-4 font-mono text-xs text-fog">
 										{item.latestSnapshot?.fileCount ?? "-"}
+									</td>
+									<td className="px-5 py-4 text-fog">
+										{item.latestSnapshot
+											? formatSnapshotStatus(item.latestSnapshot.status)
+											: "-"}
 									</td>
 								</tr>
 							))}

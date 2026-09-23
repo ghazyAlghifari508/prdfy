@@ -47,3 +47,27 @@
 
 - The default parallel Vitest invocation remains intermittently unstable in `src/components/codebase/sync-status.test.tsx`; no unrelated test or production file was changed. The serialized full suite is green.
 - The reviewer-requested `{ name | message }` API shape was verified in `src/routes/api/codebases/index.ts` and was not changed.
+
+## Fix Round 2
+
+### Changed Files
+
+- `src/components/codebase/sync-status.tsx`: `Sync ulang` is now available on `isReady` in addition to failed/expired states; `isAnalyzing` only activates on `analyzing` status or `analysisStatus === "pending"`, and inactive analysis renders an honest neutral "Menunggu analisis codebase".
+- `src/components/codebase/sync-status.test.tsx`: added regression tests for retry button presence/invocation on ready state and neutral pending state for uploaded snapshots without analysis.
+- `src/lib/codebase-analysis.server.ts` & `src/lib/codebase-analysis.ts`: added `RequestAnalysisScope` and `resolveAnalysisScope` supporting codebase-scoped sessions; for codebase-scoped features, claims the feature/snapshot pair with advisory locking while leaving the shared codebase session `uploaded`.
+- `src/lib/codebase-analysis.test.ts`: added unit tests for `resolveAnalysisScope` and regression assertions for codebase-scoped session handling.
+- `src/routes/api/v1/projects/$id/codebase/analysis.ts`: validates project ownership and resolves codebase scope for feature projects, allowing analysis trigger and query against codebase-owned sync sessions.
+- `src/routes/api/codebases/$codebaseId/status.ts`: accepts optional `projectId` query param to filter `codebaseAnalyses` by the specific feature project and snapshot.
+- `src/routes/codebases.tsx`: `selectLatestCodebaseSnapshots` picks the newest snapshot without filtering out non-usable statuses first, and adds an explicit table `<caption>` and Indonesian status formatting.
+- `src/routes/codebases/$id.tsx`: passes `feature.id` as `projectId` to the codebase status query, and adds `CodebaseDetailPending` loading skeleton with perceivable copy.
+- `src/routes/codebases/-codebases-pages.test.ts`: added test verifying newest failed snapshot is not hidden behind older usable snapshot.
+
+### Verification
+
+- Focused tests: `pnpm exec vitest run src/components/codebase/sync-status.test.tsx src/lib/codebase-analysis.test.ts src/routes/codebases/-codebases-pages.test.ts` (3 files, 75 tests passed).
+- TypeScript: `pnpm exec tsc --noEmit` passed.
+- Biome check: `pnpm exec biome check` on all 10 touched files passed with 0 errors.
+- Route generation: `pnpm generate-routes` passed.
+- Bypass scan: no `as never`, `as any`, `@ts-ignore`, or `as unknown as` introduced in diff.
+- Full serialized test suite: `pnpm exec vitest run --maxWorkers=1` passed (117 files, 1065 tests).
+

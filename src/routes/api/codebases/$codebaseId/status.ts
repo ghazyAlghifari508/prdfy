@@ -9,6 +9,7 @@ import {
 	codebaseSnapshots,
 	codebaseSyncSessions,
 	codebases,
+	projects,
 	subscriptions,
 } from "@/db/schema";
 import {
@@ -86,6 +87,28 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/status")({
 
 					const url = new URL(request.url);
 					const requestedSessionId = url.searchParams.get("sessionId");
+					const requestedProjectId = url.searchParams.get("projectId");
+					let analysisProjectId: string | null = null;
+					if (requestedProjectId) {
+						const [project] = await db
+							.select({ id: projects.id })
+							.from(projects)
+							.where(
+								and(
+									eq(projects.id, requestedProjectId),
+									eq(projects.codebaseId, codebaseId),
+									eq(projects.userId, user.id),
+									isNull(projects.deletedAt),
+								),
+							)
+							.limit(1);
+						if (!project)
+							return Response.json(
+								{ error: "Project tidak ditemukan" },
+								{ status: 404 },
+							);
+						analysisProjectId = project.id;
+					}
 
 					let session = null;
 					if (requestedSessionId) {
@@ -180,7 +203,7 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/status")({
 					let analysisStatus: "pending" | "ready" | "failed" | undefined;
 					let errorCode: string | null = null;
 					let errorMessage: string | null = null;
-					if (snapshot) {
+					if (snapshot && analysisProjectId) {
 						const [analysis] = await db
 							.select({
 								id: codebaseAnalyses.id,
@@ -189,7 +212,12 @@ export const Route = createFileRoute("/api/codebases/$codebaseId/status")({
 								errorMessage: codebaseAnalyses.errorMessage,
 							})
 							.from(codebaseAnalyses)
-							.where(eq(codebaseAnalyses.snapshotId, snapshot.id))
+							.where(
+								and(
+									eq(codebaseAnalyses.snapshotId, snapshot.id),
+									eq(codebaseAnalyses.projectId, analysisProjectId),
+								),
+							)
 							.orderBy(desc(codebaseAnalyses.createdAt))
 							.limit(1);
 						if (analysis) {

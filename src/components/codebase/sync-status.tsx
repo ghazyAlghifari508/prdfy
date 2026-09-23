@@ -127,10 +127,7 @@ export function SyncStatus({
 		!isExpired &&
 		(s === "ready" ||
 			(status?.analysisStatus === "ready" && s !== "waiting_for_cli"));
-	const isAnalyzing =
-		s === "analyzing" ||
-		status?.analysisStatus === "pending" ||
-		(s === "uploaded" && !isReady && !status?.analysisStatus);
+	const isAnalyzing = s === "analyzing" || status?.analysisStatus === "pending";
 	const isUploading = s === "uploading";
 	const isConnected = s !== "waiting_for_cli" && !isFailed && !isExpired;
 
@@ -147,7 +144,7 @@ export function SyncStatus({
 	const analysisDone = isReady;
 	const analysisFailed = status?.analysisStatus === "failed";
 
-	const showRetry = isFailed || isExpired;
+	const showRetry = isReady || isFailed || isExpired;
 	const showAnalysisRetry = analysisFailed;
 
 	type StageState = "done" | "active" | "failed" | "pending";
@@ -184,7 +181,7 @@ export function SyncStatus({
 		? "failed"
 		: analysisDone
 			? "done"
-			: isConnected
+			: isAnalyzing
 				? "active"
 				: "pending";
 
@@ -303,7 +300,9 @@ export function SyncStatus({
 									? "Analisis codebase gagal"
 									: analysisDone
 										? "Analisis codebase selesai"
-										: "Menyusun analisis codebase"}
+										: isAnalyzing
+											? "Menyusun analisis codebase"
+											: "Menunggu analisis codebase"}
 							</span>
 						</div>
 					</div>
